@@ -1,10 +1,11 @@
 # CloudInfraAutomation — Architecture
 
-**Status:** Draft v2.13 for review. No code is written until this design is approved.
+**Status:** Draft v2.14 for review. No code is written until this design is approved.
 **Date:** 2026-10-03
 **Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9). Every solution is **DR-capable**: it can run in one region, as DR (primary active, secondary standby) or as an HA pair (both active), with **any region pair chosen in the UI** (default us-east-1 / us-east-2) (§10).
 
 **Changes in v2:** added the org registry and tagging strategy (§4); permissions based on tags (§4.5–4.8); multi-account, five-environment model (§5); promotion pipeline (§8). Payload, provisioning, security and scaling sections are updated to match.
+**Changes in v2.14:** all sharing is granted through a sharing approval workflow (§4.11.6). Covers share offers, access requests, agreements, renewal and revocation, with risk-based routing, optional auto-approval within an approved tag offer, recertification and audit.
 **Changes in v2.13:** sharing by tags (§4.11.1). Providers set `org:share-scope` (product / portfolio / organization) and `org:share-access` on a resource, and any consumer in any account whose tags match (same environment, inside the organization) can connect self-service. Agreements remain for everything tags cannot express.
 **Changes in v2.12:** cross-account access (§4.11). Infrastructure can use assets in other AWS accounts (S3, SQS, SNS, KMS, DynamoDB, secrets, events, private APIs) through approved sharing agreements. Both sides are generated with tag conditions, inside the organization by default, with expiry, revocation and audit.
 **Changes in v2.11:** any region pair is allowed. Users pick the primary and secondary regions in the UI (pre-filled with us-east-1 / us-east-2). Admins manage enabled regions in the UI. Adds per-pair availability and replication checks, us-east-1 placement for CloudFront certificates/WAF, and region changes after creation (§10.9).
@@ -256,7 +257,8 @@ sequenceDiagram
 | `POST /v1/projects/{id}/environments/{env}:promote` | Start promotion when the environment is in `on-request` mode. |
 | `POST /v1/overrides` / `POST /v1/overrides/{id}:decide` | Request / decide a high-risk change override. |
 | `GET /v1/shareable-resources` | Catalog of resources other projects have marked shareable (§4.11). |
-| `POST /v1/sharing-agreements` / `:approve` / `:revoke` | Request, approve (provider, security) and revoke cross-account sharing agreements. |
+| `POST /v1/sharing-requests` | Create a sharing request: share offer, access request, agreement, renewal or revocation (§4.11.6). |
+| `GET /v1/sharing-requests?mine=true` / `POST /v1/sharing-requests/{id}:approve` / `:reject` | Sharing approval inbox and decisions. |
 | `POST /v1/github/webhooks` | GitHub App webhooks. |
 
 ---
@@ -425,6 +427,7 @@ The key prefix `org:` is a placeholder; choose your company prefix (D3). All val
 | `org:managed-by` | `cloudinfra` | Platform | Yes | Marks resources only the platform pipeline may change |
 | `org:share-scope` | `none` / `product` / `portfolio` / `organization` | Provider (UI, via infra PR) | No (default `none`) | **Sharing by tags**: who outside the project may use the resource, across accounts (§4.11.1) |
 | `org:share-access` | `read` / `readwrite` / `invoke` / `publish` / `consume` | Provider (UI, via infra PR) | No (default `read`) | What shared consumers may do (§4.11.1) |
+| `org:share-approval` | `required` (default) / `auto` | Provider (UI, approved offer) | No | Whether each consumer access request needs the provider's approval or is auto-approved within the tag rule (§4.11.6) |
 | `org:resilience` | `dr` | Platform (project setting) | Yes | Reporting, cost, DR drill scheduling (§10) |
 | `org:region-role` | `primary` / `secondary` | Platform (per region) | Yes | Operations and failover tooling (§10) |
 | `org:expires-on` | `2026-11-01` | Platform (sandbox only) | Sandbox only | Automatic cleanup in sandbox |
@@ -640,8 +643,8 @@ Infrastructure created by the platform often needs assets owned by **other proje
 
 | Way | How it is decided | Approval per consumer | Use for |
 |---|---|---|---|
-| **1. Sharing by tags** (default) | The provider puts **share tags** on its resource. Any consumer whose own tags match the share rule gets access, in any account of the organization. | **No.** The provider decided once, through the tag; consumers connect self-service | Common, predictable sharing: within a product, within a portfolio, organization-wide reference data |
-| **2. Sharing by agreement** | An explicit record naming one provider resource and one consumer | **Yes** (provider owner, plus security where required) | Anything the tag rules cannot express: one specific consumer, write access across products, outside the organization, exceptions |
+| **1. Sharing by tags** (default) | The provider puts **share tags** on its resource. They define which consumers *can* be granted access (matching tags, any account of the organization). | **Yes, through the sharing approval workflow (§4.11.6).** The offer (share tags) is approved once; each consumer's access request is approved by the provider, or auto-approved if the provider chose `org:share-approval=auto` | Common, predictable sharing: within a product, within a portfolio, organization-wide reference data |
+| **2. Sharing by agreement** | An explicit record naming one provider resource and one consumer | **Yes, through the same workflow** (provider owner, plus security / platform admin where required) | Anything the tag rules cannot express: one specific consumer, write access across products, outside the organization, exceptions |
 
 In both cases the platform **generates** the permissions on both sides. Nobody hand-edits a policy.
 
@@ -668,7 +671,7 @@ The rule needs no consumer ARNs or account IDs. It works **across accounts**, be
 | **Provider resource policy** (S3, SQS, SNS, KMS, Secrets Manager, DynamoDB, EventBridge, Lambda, ECR, Kinesis, OpenSearch, …) | An Allow for the share rule above, with the resource's **own tag values written in** at synthesis time (e.g. `aws:PrincipalTag/org:product = "pr-invoicing"`). The §4.10 deny statements are widened only to the same scope. For `read` sharing, an extra deny blocks every write action for anyone but the owning project. |
 | **Provider KMS key** (if the data is encrypted) | Key policy grant for the same share rule, limited with `kms:ViaService` to the service in use |
 | **Cross-account role** (pattern B, for services without resource policies) | Trust policy: any principal in the organization **with matching `org:product` / `org:portfolio` and `org:environment` tags**, instead of named consumer roles |
-| **Consumer side** | When a consumer draws a connection to a shared resource (picked from the **shareable-resource catalog**, which is built from share tags), the platform checks the tags match, then generates the exact-ARN statements and the contract binding **without asking the provider**. The consumer's boundary allows cross-project access only to resources whose `aws:ResourceTag/org:share-scope` and product/portfolio match the consumer's tags (where the service supports resource-tag conditions), and only inside the organization. |
+| **Consumer side** | When a consumer draws a connection to a shared resource (picked from the **shareable-resource catalog**, which is built from share tags), the platform checks the tags match, then raises an **access request** in the sharing approval workflow (§4.11.6). Only after approval does it generate the exact-ARN statements and the contract binding (auto-approved, with a notification to the provider, if the resource is tagged `org:share-approval=auto`). Because only the platform creates runtime roles and their policies, **no consumer can use a shared resource without an approved request**, even when the tags would match. The consumer's boundary allows cross-project access only to resources whose `aws:ResourceTag/org:share-scope` and product/portfolio match the consumer's tags (where the service supports resource-tag conditions), and only inside the organization. |
 
 **Example: generated statements for a bucket tagged `org:product=pr-invoicing`, `org:share-scope=product`, `org:share-access=read`, `org:environment=prod` (illustrative):**
 
@@ -702,7 +705,7 @@ The environment deny statement from §4.10.2 stays unchanged, and the service-li
   - `public`/`internal` data: any scope.
   - `confidential`: up to `product`.
   - `restricted`: `none`, so agreements only.
-- **Extra approval** from a security reviewer when widening scope beyond `product` or granting anything other than `read`.
+- **Every change to share tags is a share-offer request** in the approval workflow (§4.11.6). It needs a security reviewer when widening scope beyond `product` or granting anything other than `read`.
 - **Tag Policies** enforce the allowed values. The **shareable-resource catalog** in the UI lists every resource with a share scope, its owner, access level and classification.
 - **IAM Access Analyzer:** archive rules are generated from the share tags, so expected access (e.g. "principals in o-exampleorg with product pr-invoicing, read") is archived automatically, and anything else alerts.
 - **Revoking** = setting `org:share-scope=none`. The next deploy regenerates the policies and access stops for everyone at once. The consumers' connections are flagged in their projects.
@@ -778,6 +781,68 @@ sequenceDiagram
 - **Revocation and expiry:** revoking (by either owner or security) or expiry opens PRs that remove both sides. Expiry warnings go out 30 and 7 days before.
 - **DR/HA (§10):** agreements cover both regions of each side. Resource policies are generated in every region where the provider resource or replica exists, and the contract lists per-region ARNs.
 - **Audit:** every agreement, approval, change and revocation is in the release records. **IAM Access Analyzer** findings that match an active agreement are archived automatically; any other cross-account access raises an alert.
+
+#### 4.11.6 Sharing approval workflow
+
+**All sharing is granted through one approval workflow in the platform UI.** Tags (and agreements) define what *can* be shared. The workflow decides what *is* shared, by whom, and records why.
+
+**Request types:**
+
+| Request | Raised by | Effect when approved |
+|---|---|---|
+| **Share offer** | Provider owner | Sets or changes `org:share-scope` / `org:share-access` / `org:share-approval` on a resource. Opens the provider infra PR |
+| **Access request** | Consumer owner (by drawing a connection to a shared resource) | Grants one consumer component access within the tag rule. Opens the consumer infra PR (and the provider PR where a per-consumer grant is needed, e.g. a KMS grant) |
+| **Agreement request** | Consumer owner | Creates a sharing agreement (§4.11.2). Opens both PRs |
+| **Renewal** | Platform (before expiry / at recertification) | Extends the access or agreement; if not approved in time, access is removed |
+| **Revocation** | Provider, consumer, security | Removes access on both sides. Emergency revocation needs only security and takes effect at once |
+
+**Approval routing** (defaults; configurable by platform admins, D38):
+
+| Situation | Approvers |
+|---|---|
+| Share offer, scope `product`, access `read`, data ≤ `internal` | Provider product owner |
+| Share offer, scope `portfolio`/`organization`, **or** any access beyond `read`, **or** data `confidential` | Provider product owner **+ security reviewer** |
+| Access request within an approved offer, resource tagged `org:share-approval=auto` | **Auto-approved** (provider notified; request still recorded) |
+| Access request within an approved offer, `org:share-approval=required` (default) | Provider product owner |
+| Access request or agreement for **PROD** with `confidential` data | Provider product owner **+ security reviewer** |
+| Agreement **outside the AWS Organization**, or a cross-environment exception | Provider product owner + security reviewer **+ platform admin** |
+| Renewal | Same approvers as the original request |
+| Emergency revocation | Security reviewer (single approver) |
+
+**Workflow rules:**
+- **Separation of duties:** the requester cannot approve their own request; two-approver steps need two different people. Approvers come from the registry groups of the provider product (owners) and from the security group.
+- **Evidence on one page:**
+  - what is shared and with whom (project, product, account, environment);
+  - access level → exact actions;
+  - data classification;
+  - the **generated policy diff** for both sides;
+  - the Access Analyzer preview of the resulting access.
+- **Timeouts and escalation:** reminders after 2 business days; escalation to the product's secondary owner after 5; pending requests expire after 30 days.
+- **Approval leads to deployment, never manual edits:** an approved request opens the infra PRs, which go through the normal gates. For STAGE/PROD they also need the usual release approval (§8.3). The release reviewer sees the sharing approval as evidence, so the decision is not asked twice: release approval checks the change, sharing approval checks the access.
+- **Recertification:** every active access and agreement is re-approved periodically (default quarterly, by the provider owner). Anything not recertified is removed automatically.
+- **Audit:** every request, decision, comment, generated policy and deployment is in the release records. Exportable per resource ("who can access this and who approved it") and per consumer ("what does this project use and who approved it").
+
+**Engine:** AWS Step Functions (human approval steps with task tokens), state in DynamoDB, notifications through the in-app inbox and Amazon SES. These are the same AWS services as the rest of the control plane (§1).
+
+```mermaid
+stateDiagram-v2
+  [*] --> Submitted
+  Submitted --> AutoApproved: access request, org:share-approval=auto
+  Submitted --> PendingApproval: routing matrix
+  PendingApproval --> Approved: all required approvers
+  PendingApproval --> Rejected: any approver rejects
+  PendingApproval --> Expired: 30 days
+  AutoApproved --> Deploying
+  Approved --> Deploying: infra PRs + normal gates
+  Deploying --> Active: readiness check passed
+  Active --> PendingRenewal: expiry / recertification due
+  PendingRenewal --> Active: re-approved
+  PendingRenewal --> Revoked: not re-approved
+  Active --> Revoked: revocation request
+  Rejected --> [*]
+  Expired --> [*]
+  Revoked --> [*]
+```
 
 ---
 
@@ -2223,6 +2288,7 @@ CloudInfraAutomation/
 | D35 | Sharing agreement policy | Default expiry (12 months?) and recertification (quarterly?); does PROD sharing always need a security reviewer, or only for `confidential`+ data? |
 | D36 | Cross-environment sharing | Allow same-tier only (recommended), or permit specific exceptions such as PROD → non-PROD read of anonymized data? |
 | D37 | Share-tag limits | Maximum `org:share-scope` per data classification (default: public/internal any, confidential ≤ product, restricted none) and whether `organization` scope is allowed at all? |
+| D38 | Sharing approval routing | Accept the default routing matrix (§4.11.6)? Allow providers to choose `org:share-approval=auto`, or require approval for every access request? Recertification frequency (default quarterly)? |
 
 ---
 
@@ -2240,7 +2306,7 @@ CloudInfraAutomation/
 | **P5c — Application golden paths** | Compute slot catalog types, contract publishing (SSM + API), `platform-workflows` (build per language, deploy per compute type), app deploy roles, "Create application repo" flow, contract viewer | A Python Lambda app and a Java ECS app deploy from their own repos to DEV and promote to PROD with approvals; an app repo cannot create IAM or touch another project; an app deploy stops cleanly when the contract lacks a required value |
 | **P5d — Full service catalog** | Catalog sync job (CFN schemas + Service Authorization Reference), Tier 2 generator, generic connection kinds, database blocks (Aurora/RDS/DynamoDB first), layered stacks, pairwise CI, nightly deploy tests, reference patterns | Any enabled resource type can be composed and passes all gates; pairwise suite green; every database engine deploy-tested weekly |
 | **P5e — Multi-region DR/HA** | Resilience modes in wizard and payload, conditions in generated templates, global stack, per-service replication wiring, two-region pipeline, failover/failback operations, ARC readiness, DR drills, multi-region control plane | A DR project deploys to us-east-1 (active) and us-east-2 (standby); a STAGE drill fails over and back within target RTO/RPO; an HA project serves traffic from both regions |
-| **P5f — Cross-account sharing** | Sharing agreements (registry, UI, approvals), shareable-resource catalog, generators for patterns A–F, consumer contract `external` bindings, readiness checks, expiry/revocation, Access Analyzer integration | A consumer in account A reads an approved S3 prefix and consumes an approved SQS queue in account B; any other project or environment in A is denied; revoking the agreement removes access on both sides |
+| **P5f — Cross-account sharing** | Sharing approval workflow (share offers, access requests, agreements, renewals, revocations), sharing agreements, shareable-resource catalog, generators for patterns A–F, consumer contract `external` bindings, readiness checks, expiry/revocation, Access Analyzer integration | A consumer in account A reads an approved S3 prefix and consumes an approved SQS queue in account B; any other project or environment in A is denied; revoking the agreement removes access on both sides |
 | **P6 — Production control plane** | Step Functions, webhooks, reconciler, quotas, observability, Config compliance | 100 concurrent jobs on one installation complete without failing on rate limits; tag compliance dashboard live |
 
 **Next step:** review this document, answer §17, and approve a phase to start. No code will be written until then.
