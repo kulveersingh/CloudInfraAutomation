@@ -1,10 +1,11 @@
 # CloudInfraAutomation — Architecture
 
-**Status:** Draft v2.10 for review. No code is written until this design is approved.
+**Status:** Draft v2.11 for review. No code is written until this design is approved.
 **Date:** 2026-10-03
-**Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9). Every solution is **DR-capable**: it can run in one region, as DR (us-east-1 active, us-east-2 standby) or as an HA pair (both active) (§10).
+**Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9). Every solution is **DR-capable**: it can run in one region, as DR (primary active, secondary standby) or as an HA pair (both active), with **any region pair chosen in the UI** (default us-east-1 / us-east-2) (§10).
 
 **Changes in v2:** added the org registry and tagging strategy (§4); permissions based on tags (§4.5–4.8); multi-account, five-environment model (§5); promotion pipeline (§8). Payload, provisioning, security and scaling sections are updated to match.
+**Changes in v2.11:** any region pair is allowed. Users pick the primary and secondary regions in the UI (pre-filled with us-east-1 / us-east-2). Admins manage enabled regions in the UI. Adds per-pair availability and replication checks, us-east-1 placement for CloudFront certificates/WAF, and region changes after creation (§10.9).
 **Changes in v2.10:** runtime isolation by tags (§4.10). Every component can only talk to resources with the same project and environment tag values, enforced by four layers generated into the template: the runtime role's policy, the permissions boundary, a same-tag resource policy on the target, and an SCP.
 **Changes in v2.9:** multi-region resilience (§10): every template is DR-capable. Projects choose single region, DR (deployed to us-east-1 and us-east-2, only us-east-1 active) or HA pair (both active). Adds per-service replication rules, a global stack, a two-region pipeline, failover/failback, DR drills and a multi-region control plane. Sections 10–17 renumbered to 11–18.
 **Changes in v2.8:** the catalog now covers every project-scoped AWS service, including all major databases, in every combination (§6.8). It is generated from AWS's own schemas and authorization data, with curated secure blocks for common services, generic connection kinds, database defaults (network, Secrets Manager credentials, RDS Proxy, snapshots), layered stacks, and pairwise + real-deploy testing.
@@ -344,7 +345,7 @@ What the server adds before synthesis (shown in the preview, read-only):
 | `project.name` | `^[a-z][a-z0-9]*(-[a-z0-9]+)*$`, 3–30 chars, no `--`, **unique within the GitHub org and across the registry** | `org:project` must identify exactly one project. `--` is reserved as the name separator. |
 | `resources[].id` | `^[a-z][a-z0-9-]{0,19}$`, unique | Logical ID + physical name. |
 | `len(project.name) + len(id)` for S3 | ≤ 31 | Bucket name `{project}--{id}-{account}-{region}` must stay ≤ 63 chars. |
-| `resilience` | `mode` ∈ single/dr/ha, allowed by the environment's policy; regions from the allowed pairs (default us-east-1 / us-east-2); in HA every data store must support active/active (§10.3) | DR-capable from the start; impossible combinations are rejected early. |
+| `resilience` | `mode` ∈ single/dr/ha, allowed by the environment's policy; `primaryRegion` / `secondaryRegion`: **any two different regions** from the platform's region list, chosen in the UI (pre-filled with us-east-1 / us-east-2); every selected service must be available in both regions; in HA every data store must support active/active (§10.3, §10.9) | DR-capable from the start; impossible combinations are rejected early. |
 | `environmentOverrides` | Only settings the catalog marks as overridable, within per-environment ranges (e.g. prod log retention ≥ 90 days) | Environments differ in size, not in shape. |
 | Connections | Source/target must exist; the pair of types must be allowed; no overlapping S3 notifications; no write access to a bucket that also triggers the same function on an overlapping prefix | Correctness + stops S3 ↔ Lambda infinite loops. |
 
@@ -399,6 +400,7 @@ flowchart TD
   - **Portfolio:** only portfolios where the user has at least one entitled product.
   - **Product/Platform:** filtered by the chosen portfolio *and* the user's IdP groups. Shows a badge for kind (Product or Platform).
   - **Project:** a new name typed by the user (validated for format and uniqueness, §3.3), not a dropdown.
+  - **Resilience:** single region / DR / HA pair; then **Primary region** and **Secondary region** dropdowns listing every region the platform has enabled, pre-filled with us-east-1 / us-east-2 (§10.9).
 - **Read-only fields shown after selection:** cost center, classification ceiling, and target account per environment (from the account bindings). The user sees exactly where the project will deploy.
 - **Server-side re-check** on preview and on create (registry + entitlement). This guards against a stale UI and against crafted requests.
 - **IDs are immutable; display names can change.** Tag values are IDs (`pr-invoicing`), so renaming "Invoicing" to "AP Invoicing" changes nothing in AWS.
@@ -511,7 +513,7 @@ SCPs apply to every principal in the account, including humans and other tools. 
 | **Require tags on create** | All workload OUs | For callers tagged `org:managed-by=cloudinfra`: deny create actions on catalog services if `aws:RequestTag/org:project` or `org:environment` is missing. Scoped to platform principals so other tooling isn't broken. |
 | **Environment lock** | Each environment OU | Deny create if `aws:RequestTag/org:environment` ≠ that OU's environment (e.g. only `prod` in the Prod OU). |
 | **Classification gate** | Sandbox OU | Deny create if `aws:RequestTag/org:data-classification` is `confidential` or `restricted`. |
-| **Region allow-list** | All workload OUs | Only approved regions. |
+| **Region allow-list** | All workload OUs | Only regions enabled in the platform's region list (§10.9). **Generated from that list**, so enabling a region in the admin screen updates the SCP (after approval). |
 | **Tag Policies** | Root | Allowed keys + **allowed values** for `org:portfolio`/`org:product`, **generated from the registry and synced automatically**; enforce letter case; enforce on resource types that support it. |
 
 Note: Tag Policies standardize values and report non-compliance; they enforce only for supported resource types. **SCP + IAM conditions are the actual enforcement**; Tag Policies are the consistency and reporting layer.
@@ -680,7 +682,7 @@ These are the **default profiles** for the five seeded environments. All of them
 | Layer | What | Deployed by | When |
 |---|---|---|---|
 | **Account bootstrap** | GitHub OIDC provider; shared policies `cloudinfra-deploy-abac`, `cloudinfra-exec-abac`, `cloudinfra-app-boundary`; `CloudInfraProvisioner` role (trusted only by the Platform account, with `aws:PrincipalOrgID`); in gated accounts, the `PlatformReleaseExecutor` role (§8.3.1: execute reviewed change sets / release reviewed artifacts only; session tag `org:project` required) | **Service-managed StackSet** targeting the workload OUs, auto-deploying to new accounts | Once; updates roll out across the org |
-| **Shared Services** | Artifact bucket per region; its bucket policy lets org accounts' execution roles read `${aws:PrincipalTag/org:project}/*` only (`aws:PrincipalOrgID` + principal-tag condition) | Platform IaC | Once per region |
+| **Shared Services** | Artifact bucket per **enabled** region (created when an admin enables a region, §10.9); its bucket policy lets org accounts' execution roles read `${aws:PrincipalTag/org:project}/*` only (`aws:PrincipalOrgID` + principal-tag condition) | Platform IaC | Once per region |
 | **Project bootstrap** | Per enabled environment: `GitHubDeployRole` + `CfnExecutionRole`, **tagged with the project's tags** and attaching the shared policies. Small, because the policies already exist. | Orchestrator via `CloudInfraProvisioner` in each target account (in parallel, throttled per account) | Once per project per environment |
 
 Lambda requires the code bucket to be in the **same region** as the function; it can be in another account. Hence one artifact bucket per region in Shared Services.
@@ -1673,7 +1675,7 @@ Every project chooses a **resilience mode** in the project wizard. Every templat
 | **DR (active / standby)** | **Primary + secondary** | **Primary only.** Secondary is deployed, data replicates continuously, compute and event sources are inactive | Minutes to < 1 h / seconds to minutes (replication lag) | Business-critical workloads that can tolerate a short failover |
 | **HA pair (active / active)** | **Primary + secondary** | **Both** | Near zero / near zero (depends on data store) | Customer-facing, always-on workloads |
 
-**Default regions:** primary **us-east-1**, secondary **us-east-2**. Platform admins can change the defaults and the allowed region pairs in the environment configuration (§5.5); the region allow-list SCP (§4.7) must include both regions.
+**Regions are chosen in the UI.** **Any pair of two different regions is allowed.** The user picks the primary and secondary region from dropdowns in the project wizard; the selection becomes the project's DR/HA pair. The dropdowns are **pre-filled with us-east-1 (primary) / us-east-2 (secondary)**. Admins manage the list of enabled regions and the default pair in the UI (§10.9).
 
 **DR strategy (DR mode only):**
 
@@ -1733,7 +1735,7 @@ Every catalog entry (§6.8) declares a **multi-region capability**: `native-glob
 | **Secrets Manager** | Secret **replicated** to secondary | Replicated | Multi-region secrets |
 | **KMS** | **Multi-Region keys** for anything replicated, so replicas decrypt locally | Multi-Region keys | `MultiRegion: true` |
 | **SSM contract** (§9.4) | Written in both regions, with `regionRole` and `activationState` | Both | Each regional stack writes its own |
-| **CloudFront / WAF / Route 53** | Global services: deployed once, in the global stack | Same | Origin groups for origin failover |
+| **CloudFront / WAF / Route 53** | Global services: deployed once, in the global stack. CloudFront certificates (ACM) and CloudFront-scope WAF web ACLs **must live in us-east-1**, whatever the selected pair (§10.9) | Same | Origin groups for origin failover |
 | **Cognito user pools** | **Limited**: no native replication; flagged in the preview with a documented pattern (or excluded from DR/HA projects) | Same | — |
 
 **Validation examples:**
@@ -1807,6 +1809,54 @@ Failover is a **platform operation** started from the release console, not a cod
 - **DR drills:** a scheduled failover and failback in **QA/STAGE** (default monthly) for every DR/HA project, run by the platform with the steps above.
 - **Gate G5 addition (§8.4):** a PROD release of a DR/HA project requires a **successful STAGE DR drill within the last N days** (default 30) and a healthy secondary in PROD.
 - **Measured, not assumed:** each drill records the achieved RTO/RPO against the targets set in the wizard, shown per project.
+
+### 10.9 Region selection: any pair, chosen in the UI
+
+**User experience (project wizard):**
+1. Choose **Resilience**: single region / DR / HA pair.
+2. Choose **Primary region** (dropdown) and, for DR/HA, **Secondary region** (dropdown). Both list every region the platform has enabled. They are pre-filled with **us-east-1 / us-east-2**, and any combination of two different regions can be selected.
+3. The preview immediately shows, for the chosen pair:
+   - the target account per environment and region;
+   - service availability in both regions;
+   - replication support for each data store;
+   - indicative cost including **cross-region data transfer**;
+   - expected RTO/RPO.
+
+**What the platform validates for the selected pair:**
+
+| Check | Source | If it fails |
+|---|---|---|
+| Primary ≠ secondary | Payload | Rejected |
+| Both regions are **enabled in the platform** and **onboarded** in each target account (opt-in regions enabled, account bootstrap present, artifact bucket present) | Environment config + onboarding checks (§5.5.3) | Region not selectable for that environment until onboarding completes |
+| Every selected service, engine version and instance class **exists in both regions** | AWS public SSM parameters (`/aws/service/global-infrastructure/regions/{region}/services`) + CloudFormation `describe-type` per region + RDS/ElastiCache orderable options APIs | Field-level error naming the missing service in the region |
+| The data store's **cross-region feature supports this pair** (e.g. Aurora Global Database, DynamoDB global tables, ElastiCache Global Datastore, multi-Region KMS) | Catalog multi-region capability (§10.3), checked per region | Rejected with alternatives |
+| Optional **data-residency rules** (e.g. a classification limited to certain regions) | Admin-defined region groups; none by default | Rejected only if an admin has defined such a rule |
+
+**Global-service placement, independent of the pair:**
+- **CloudFront** certificates (ACM) and **CloudFront-scope WAF** web ACLs must be created in **us-east-1** by AWS rule. The global stack therefore deploys those specific resources to us-east-1 even when the pair is, say, eu-west-1 / eu-central-1.
+- Route 53 is global.
+- All other global-stack resources (DynamoDB global table definition, Aurora global cluster, multi-Region KMS primary keys, ARC controls) are created in the **selected primary region**.
+
+**Admin screen: Regions** (part of the environment configuration, §5.5):
+
+| Setting | Purpose |
+|---|---|
+| **Enabled regions** | The list shown in the wizard dropdowns. Enabling a region triggers onboarding: account-bootstrap StackSet instances in that region for all workload accounts, a Shared Services artifact bucket in that region, ECR replication rules, and an SCP region allow-list update (with approval, §4.7). |
+| **Default pair** | Pre-fill for the wizard (default us-east-1 / us-east-2), per environment if needed |
+| **Region groups (optional)** | Data-residency rules by classification; empty by default, so all pairs are allowed |
+| **Per-environment policy** | Which resilience modes each environment allows (defaults in §10.5) |
+
+**Account bindings per region:** an account binding (§5.5.2) is per environment **and region**. By default, the same account serves every region of an environment, so a newly enabled region needs no new binding, only onboarding. A separate DR account can be bound per region if D31 chooses that.
+
+**Changing regions later** (also from the UI, as an infrastructure change request with approvals):
+
+| Change | How |
+|---|---|
+| Single region → DR/HA | Add the secondary region: deploy the regional stacks there in standby (DR) or active (HA), start replication, run readiness checks |
+| Change the **secondary** region | Build the new secondary and wait for replication to catch up; switch the pair; then retire the old secondary |
+| Change the **primary** region | A **planned switchover** (§10.6) to the secondary, then the old primary is rebuilt or retired. It is treated as a PROD release with approvals and a DR drill beforehand |
+
+**GitHub variables** (§10.5) carry the selection per environment: `AWS_PRIMARY_REGION`, `AWS_SECONDARY_REGION`, and the regional artifact buckets. The platform updates them when a pair changes. Workflows contain no region names.
 
 ### 10.8 Platform control plane is multi-region too
 
@@ -2012,7 +2062,7 @@ CloudInfraAutomation/
 | D26 | Open-source license policy | Allow Apache-2.0, MIT, BSD, MPL-2.0 and LGPL (as libraries); exclude AGPL and source-available licenses unless approved? |
 | D27 | Tier 1 services at launch | Confirm the proposed curated list (§6.8.2), or start smaller (e.g. compute + integration + Aurora/RDS PostgreSQL + DynamoDB) and grow? |
 | D28 | Commercial DB engines | Exclude RDS for Oracle / SQL Server (default, per open-source policy), or allow them? |
-| D30 | Default region pair | **us-east-1 (primary) / us-east-2 (secondary)** as default; any other allowed pairs? |
+| D30 | Region pairs | **Decided:** any two different regions, chosen in the UI per project; default pre-fill us-east-1 / us-east-2; admins manage the enabled-region list |
 | D31 | DR account model | Same account for both regions of an environment (default), or a separate DR account per environment? |
 | D32 | DR defaults | Pilot light (default) or warm standby for DR projects? QA/STAGE mirrors PROD's mode (default)? DR drill frequency (default monthly) and G5 recency (default 30 days)? |
 | D33 | Cognito and other non-replicating services | Exclude from DR/HA projects, or allow with a documented recovery pattern? |

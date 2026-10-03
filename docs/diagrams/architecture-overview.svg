@@ -21,7 +21,7 @@ text{font-family:Arial,Helvetica,sans-serif;fill:#1F2D3D}
 <rect x="900" y="550" width="880" height="225" rx="10" fill="#E9F6EE" stroke="#B8C2CC" stroke-width="1.5"/>
 <text x="914" y="572" class="lane">AWS Organization</text>
 <rect x="20" y="800" width="1760" height="215" rx="10" fill="#E8F4F4" stroke="#B8C2CC" stroke-width="1.5"/>
-<text x="34" y="822" class="lane">Environment accounts (configurable) — each DR-capable across us-east-1 / us-east-2</text>
+<text x="34" y="822" class="lane">Environment accounts (configurable) — DR-capable across any region pair chosen in the UI (default us-east-1 / us-east-2)</text>
 <rect x="325" y="50" width="260" height="54" rx="7" fill="#FFFFFF" stroke="#5B6B7B" stroke-width="1.5"/>
 <text x="455.0" y="72.5" class="bt">Product developers</text>
 <text x="455.0" y="91.5" class="bs">infra requests · solution code</text>
@@ -119,31 +119,31 @@ text{font-family:Arial,Helvetica,sans-serif;fill:#1F2D3D}
 <text x="1410.0" y="737.5" class="bs">artifact buckets per region</text>
 <rect x="45" y="860" width="320" height="135" rx="7" fill="#FFFFFF" stroke="#5B6B7B" stroke-width="1.5"/>
 <text x="205.0" y="894.5" class="bt">Sandbox</text>
-<text x="205.0" y="913.5" class="bs">us-east-1 (single region)</text>
+<text x="205.0" y="913.5" class="bs">primary region only</text>
 <text x="205.0" y="932.5" class="bs">infra stacks · contract in SSM</text>
 <text x="205.0" y="951.5" class="bs">solution code (versions, tasks, pods)</text>
 <text x="205.0" y="970.5" class="bs">deployed by GitHub Actions</text>
 <rect x="390" y="860" width="320" height="135" rx="7" fill="#FFFFFF" stroke="#5B6B7B" stroke-width="1.5"/>
 <text x="550.0" y="894.5" class="bt">DEV</text>
-<text x="550.0" y="913.5" class="bs">us-east-1 (single region)</text>
+<text x="550.0" y="913.5" class="bs">primary region only</text>
 <text x="550.0" y="932.5" class="bs">infra stacks · contract in SSM</text>
 <text x="550.0" y="951.5" class="bs">solution code (versions, tasks, pods)</text>
 <text x="550.0" y="970.5" class="bs">deployed by GitHub Actions</text>
 <rect x="735" y="860" width="320" height="135" rx="7" fill="#FFFFFF" stroke="#5B6B7B" stroke-width="1.5"/>
 <text x="895.0" y="894.5" class="bt">TEST</text>
-<text x="895.0" y="913.5" class="bs">us-east-1 (DR / HA optional)</text>
+<text x="895.0" y="913.5" class="bs">primary region (DR / HA optional)</text>
 <text x="895.0" y="932.5" class="bs">infra stacks · contract in SSM</text>
 <text x="895.0" y="951.5" class="bs">solution code (versions, tasks, pods)</text>
 <text x="895.0" y="970.5" class="bs">deployed by GitHub Actions</text>
 <rect x="1080" y="860" width="320" height="135" rx="7" fill="#FFFFFF" stroke="#D9822B" stroke-width="2.4"/>
 <text x="1240.0" y="894.5" class="bt">QA/STAGE</text>
-<text x="1240.0" y="913.5" class="bs">mirrors PROD: us-east-1 + us-east-2</text>
+<text x="1240.0" y="913.5" class="bs">mirrors PROD: primary + secondary</text>
 <text x="1240.0" y="932.5" class="bs">infra stacks · contract in SSM</text>
 <text x="1240.0" y="951.5" class="bs">solution code (versions, tasks, pods)</text>
 <text x="1240.0" y="970.5" class="bs">approval required</text>
 <rect x="1425" y="860" width="320" height="135" rx="7" fill="#FFFFFF" stroke="#D9822B" stroke-width="2.4"/>
 <text x="1585.0" y="894.5" class="bt">PROD</text>
-<text x="1585.0" y="913.5" class="bs">us-east-1 active · us-east-2 standby (DR) / active (HA)</text>
+<text x="1585.0" y="913.5" class="bs">primary active · secondary standby (DR) / active (HA)</text>
 <text x="1585.0" y="932.5" class="bs">infra stacks · contract in SSM</text>
 <text x="1585.0" y="951.5" class="bs">solution code (versions, tasks, pods)</text>
 <text x="1585.0" y="970.5" class="bs">approval required</text>
@@ -174,5 +174,5 @@ text{font-family:Arial,Helvetica,sans-serif;fill:#1F2D3D}
 <text x="40" y="1190" class="lg">⑥ Test, scan and change-set evidence goes to the gate service; reviewers approve in the release console.</text>
 <text x="40" y="1216" class="lg">⑦ Only after gates pass and a reviewer approves does the release executor apply the exact reviewed change to STAGE / PROD.</text>
 <text x="40" y="1242" class="lg">⑧ SCPs and Tag Policies enforce tag rules in every account; build-once artifacts come from Shared Services (one bucket per region).</text>
-<text x="40" y="1268" class="lg">DR projects deploy to us-east-1 (active) and us-east-2 (standby); HA pairs run active in both. Failover is a release-console operation (section 10).</text>
+<text x="40" y="1268" class="lg">DR projects deploy to the primary (active) and secondary (standby) region chosen in the UI; HA pairs run active in both. Failover is a release-console operation (section 10).</text>
 </svg>
