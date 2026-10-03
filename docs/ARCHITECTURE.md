@@ -1,10 +1,12 @@
 # CloudInfraAutomation — Architecture
 
-**Status:** Draft v2.6 for review. No code is written until this design is approved.
+**Status:** Draft v2.8 for review. No code is written until this design is approved.
 **Date:** 2026-10-03
 **Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9).
 
 **Changes in v2:** added the org registry and tagging strategy (§4); permissions based on tags (§4.5–4.8); multi-account, five-environment model (§5); promotion pipeline (§8). Payload, provisioning, security and scaling sections are updated to match.
+**Changes in v2.8:** the catalog now covers every project-scoped AWS service, including all major databases, in every combination (§6.8). It is generated from AWS's own schemas and authorization data, with curated secure blocks for common services, generic connection kinds, database defaults (network, Secrets Manager credentials, RDS Proxy, snapshots), layered stacks, and pairwise + real-deploy testing.
+**Changes in v2.7:** runtime infrastructure is AWS services only; email notifications use Amazon SES (no SMTP option).
 **Changes in v2.6:** technology policy added: AWS + GitHub + open source only (§1). Commercial products removed or replaced (CMDB/ITSM, chat tools, paid GitHub security features). Approvals now work on any GitHub plan via platform-executed releases (§8.3.1); GitHub Enterprise features are optional.
 **Changes in v2.5:** infrastructure and solution code are now explicitly independent (§9.9): contract-first development, placeholder artifacts, expand → migrate → contract changes, optional bindings, local/ephemeral testing, and a responsibilities table. Product teams no longer have to sign off on infrastructure changes.
 **Changes in v2.4:** added developer consumption (§9): infrastructure contract published per environment, application repos linked to compute slots, golden-path build/deploy workflows per language and compute type (Lambda, ECS, EKS, Step Functions), and least-privilege application deploy roles. Sections 9–16 renumbered to 10–17.
@@ -47,7 +49,7 @@
 - Supports many portfolios, products and projects at once without hitting GitHub or AWS API limits.
 
 ### Non-goals (v1)
-- A general-purpose infrastructure designer. v1 offers a fixed catalog of services that can be connected to each other.
+- Free-form CloudFormation authoring. Users compose from a catalog that covers **every project-scoped AWS resource type** (curated Tier 1 + schema-driven Tier 2, §6.8); account- and organization-wide resources are excluded.
 - Creating new AWS accounts. The account landing zone (AWS Organizations / Control Tower) already exists; the platform only *uses* its accounts.
 - Editing the Portfolio/Product lists in this UI. They come from the org registry (§4.2), which is the master; maintained in the platform admin screen or imported via CSV/REST.
 
@@ -66,6 +68,8 @@
 ### Technology policy: AWS + GitHub + open source only
 
 The platform is built **in-house**. Its only commercial dependencies are the two systems it exists to automate: **AWS** (the target cloud, including its native services) and **GitHub** (source control and Actions). Every other component is either written by us or is **open-source software**. No other commercial product, SaaS or paid add-on is required.
+
+**AWS services only for runtime infrastructure:** everything the platform runs on, and everything it creates, is an AWS service: compute, storage, database, workflow, email (Amazon SES), secrets, monitoring. No non-AWS infrastructure (mail servers, self-hosted databases, external SaaS) is created or required.
 
 **Rules:**
 - No feature may *require* a paid GitHub tier. Features that only exist on GitHub Enterprise are **optional add-ons**, and every one of them has a built-in equivalent (§8.3.1).
@@ -99,7 +103,7 @@ The platform is built **in-house**. Its only commercial dependencies are the two
 |---|---|
 | ServiceNow / external CMDB as source of truth | **Platform registry is the master**, with CSV/REST import (§4.2) |
 | ITSM change tickets | **Built-in change record** in the release console (§8.5); external ITSM optional via outgoing webhook |
-| Slack / Microsoft Teams notifications | **Email** (Amazon SES or any SMTP server) + **in-app inbox** + generic **signed webhooks** |
+| Slack / Microsoft Teams notifications | **In-app inbox** + **email via Amazon SES** + optional generic **signed webhooks** |
 | CodeQL (needs paid GitHub Advanced Security for private repos) | Language SAST tools above |
 | GitHub secret scanning push protection (paid for private repos) | gitleaks in PR checks and pre-commit hooks |
 | GitHub artifact attestations (paid for private repos) | cosign + AWS KMS signatures, verified by the gate |
@@ -108,6 +112,12 @@ The platform is built **in-house**. Its only commercial dependencies are the two
 ---
 
 ## 2. System architecture
+
+### 2.0 Architecture overview
+
+![Architecture overview](diagrams/architecture-overview.png)
+
+The numbered flows are explained under the diagram. A Word version of this whole document, with all diagrams, is in [CloudInfraAutomation-Architecture.docx](CloudInfraAutomation-Architecture.docx).
 
 ### 2.1 Component diagram
 
@@ -186,7 +196,7 @@ sequenceDiagram
 
   UI->>API: GET /v1/org-registry (filtered by user's entitlements)
   API->>REG: portfolios → products the user may use
-  U->>UI: Pick Portfolio, Product/Platform; name project; select Lambda + S3; connect S3 → Lambda
+  U->>UI: Pick Portfolio and Product/Platform, name project, select Lambda + S3, connect S3 → Lambda
   UI->>API: POST /v1/projects:preview
   API->>REG: check selection + resolve account per environment
   API-->>UI: files + resolved tags + target accounts per environment
@@ -327,9 +337,9 @@ What the server adds before synthesis (shown in the preview, read-only):
 | `environmentOverrides` | Only settings the catalog marks as overridable, within per-environment ranges (e.g. prod log retention ≥ 90 days) | Environments differ in size, not in shape. |
 | Connections | Source/target must exist; the pair of types must be allowed; no overlapping S3 notifications; no write access to a bucket that also triggers the same function on an overlapping prefix | Correctness + stops S3 ↔ Lambda infinite loops. |
 
-**v1 catalog:**
-- **Resource types:** `s3.bucket`, `lambda.python`, `dynamodb.table`.
-- **Connection kinds:** `s3.notify` (bucket → function) and `iam.access` (function → bucket/table; `read` | `write` | `readwrite`).
+**Catalog:**
+- **Resource types:** any project-scoped AWS resource type. Tier 1 curated (including all major database engines) and Tier 2 schema-driven; see §6.8.
+- **Connection kinds:** generic kinds (`iam.access`, `network.access`, `event.source`, `event.notify`, `event.rule`, `api.route`, `workflow.task`, `secret.binding`, `cdn.origin`) that work across services (§6.8.4). The example payload's `s3.notify` is the S3-specific form of `event.notify`.
 
 ### 3.4 Persistent model (DynamoDB, single table)
 
@@ -748,6 +758,132 @@ flowchart LR
 
 ---
 
+### 6.8 Full AWS service coverage: every service and every combination, including databases
+
+**Goal:** users can build any combination of AWS services that CloudFormation supports, including all database engines, with the same security, tagging, environment and approval guarantees as the Lambda + S3 example.
+
+**Why the hand-written approach must change:** AWS has well over a thousand CloudFormation resource types and adds more every month. Hand-writing a block and binder for each one, and testing every combination by hand, does not scale. The engine therefore **generates** most of the catalog from AWS's own machine-readable specifications and adds **curated, opinionated blocks** on top for the services people use most.
+
+#### 6.8.1 Two inputs published by AWS
+
+| Source | What it gives the platform | How it is used |
+|---|---|---|
+| **CloudFormation resource provider schemas** (JSON Schema for every resource type; `aws cloudformation describe-type` / published schema bundle per region) | Every property, its type, required/read-only/create-only fields, which properties force **replacement**, available `GetAtt` attributes, tagging support | Generates the UI form, payload validation, the replacement-risk classifier (§8.4.2) and correct `Ref`/`GetAtt` wiring for any resource type |
+| **AWS Service Authorization Reference** (machine-readable JSON per service: actions, resource ARN formats, condition keys, access levels) | For every action: read/write/list/tagging level, ARN pattern, whether `aws:ResourceTag` / `aws:RequestTag` are supported | Generates least-privilege `iam.access` statements for **any** service, the tag-condition support matrix (§4.6) and the per-service parts of the shared tag-based policies (§4.5) |
+
+A nightly **catalog sync job** downloads both, diffs them against the current catalog version, and opens a PR on the platform repo with new and changed types. A platform engineer reviews it, the golden tests run, and it ships as a new `catalogVersion`. Nothing reaches users without review.
+
+```mermaid
+flowchart LR
+  A["CloudFormation resource schemas"] --> S["Catalog sync job (nightly)"]
+  B["Service Authorization Reference"] --> S
+  S --> G["Generated layer<br/>forms · validation · IAM action sets ·<br/>tag-support matrix · replacement rules"]
+  C["Curated overlays (hand-written)<br/>secure defaults · binders · env profiles"] --> M["Catalog version N"]
+  G --> M
+  M --> R["Review PR + golden tests +<br/>sandbox deploy tests"]
+  R --> E["Enablement by platform admins<br/>(per environment / portfolio)"]
+  E --> UI["Service catalog in the UI"]
+```
+
+#### 6.8.2 Catalog tiers
+
+| Tier | What | Defaults and wiring | Who can use it |
+|---|---|---|---|
+| **Tier 1: Curated** | The most-used services (list below) | Hand-written secure defaults per environment profile, binders for connections, tested combinations, reference patterns | All users |
+| **Tier 2: Schema-driven** | **Any other project-scoped CloudFormation resource type** | Generated form + validation; mandatory guardrails applied to every type (naming, tags, encryption where the schema has it, deletion policies for stateful types); generic `iam.access` binder from the Service Authorization Reference | Enabled per service by platform admins after a short review (ABAC support, guard rules, cost); can be limited to sandbox/dev first |
+| **Excluded** | Account-wide or organization-wide types (Organizations, Control Tower, IAM Identity Center, account settings, IAM users/groups, VPC creation where the landing zone owns the network, billing) and anything that can't be scoped to one project | — | Not offered; managed by the landing zone / platform team |
+
+Promoting a Tier 2 service to Tier 1 is a normal catalog change: add a curated overlay and binders.
+
+**Tier 1 at launch (proposal, D27):**
+
+| Category | Services |
+|---|---|
+| Compute | Lambda, ECS (Fargate), EKS workloads (shared clusters), App Runner, Batch |
+| Integration | Step Functions, EventBridge (buses, rules, Scheduler, Pipes), SQS, SNS, Kinesis Data Streams, Amazon Data Firehose, Amazon MQ, MSK |
+| API & edge | API Gateway (REST, HTTP, WebSocket), Application/Network Load Balancer (listener rules on shared or project ALB), CloudFront, AWS WAF (web ACL association) |
+| Storage | S3, EFS |
+| **Databases** | **Aurora PostgreSQL / MySQL (incl. Serverless v2), RDS PostgreSQL / MySQL / MariaDB, DynamoDB, DocumentDB, Neptune, ElastiCache (Valkey / Redis OSS / Memcached), MemoryDB, Keyspaces, Timestream, Redshift Serverless, OpenSearch Service (incl. Serverless)** |
+| Analytics | Glue (jobs, crawlers, Data Catalog), Athena workgroups, Lake Formation permissions (project-scoped) |
+| Security & config | KMS keys (project keys), Secrets Manager, SSM parameters, AppConfig, Cognito user pools |
+| Observability | CloudWatch alarms, dashboards, log groups, X-Ray groups |
+| Machine learning | SageMaker endpoints/models (project-scoped), Amazon Bedrock access (model invocation permissions) |
+
+**Commercial database engines:** RDS for Oracle and RDS for SQL Server include third-party vendor licenses. Because of the open-source/no-commercial-products policy (§1), they are **excluded by default** and can be enabled only by an explicit decision (D28).
+
+#### 6.8.3 Databases: what the platform adds
+
+Databases need more than a resource: network placement, credentials, backups and engine-specific settings. The curated database blocks provide these automatically.
+
+| Concern | Built-in behavior |
+|---|---|
+| **Network** | Placed in the landing zone's private database subnets (published to SSM by the network team, D23). A **security group per database**. Ingress is opened only by a connection (`network.access`, below) from a specific compute slot's security group, on the engine port. **Never public.** |
+| **Credentials** | **No passwords in templates or repos.** RDS/Aurora/DocumentDB/Redshift use **AWS-managed master credentials in Secrets Manager** (`ManageMasterUserPassword`) with rotation. App runtime roles get `secretsmanager:GetSecretValue` on that one secret only. **IAM database authentication** (`rds-db:connect` for a specific DB user) is offered where the engine supports it. |
+| **Connections from Lambda** | **RDS Proxy** added automatically when a Lambda slot connects to RDS/Aurora (connection pooling + IAM auth) |
+| **Encryption** | At rest with the project KMS key (stage/prod) or AWS-managed key (sandbox/dev); TLS required (parameter group `require_secure_transport` / `rds.force_ssl`) |
+| **Resilience per environment profile** | Sandbox/dev: single-AZ, small instance or serverless minimum, 1-day backups. Stage/prod: Multi-AZ / Aurora replicas, longer backup retention, Performance Insights, enhanced monitoring |
+| **Data protection** | `DeletionProtection` on stage/prod; `DeletionPolicy: Snapshot` (or `RetainExceptOnCreate` where snapshots don't apply) and `UpdateReplacePolicy: Snapshot`. Any change that would **replace** a database is classified **high risk** and blocked without an override (§8.4.2). |
+| **Parameter groups** | Generated per database from the engine family, with secure defaults; overridable settings limited to an allow-list |
+| **Contract exposes** | Endpoint(s) (writer/reader), port, engine/version, database name, secret ARN, proxy endpoint, IAM auth user, security group ID |
+| **Schema migrations** | Owned by the **application repo** (solution code), using open-source tools such as Flyway, Liquibase or Alembic. Run by the golden-path pipeline as a one-off ECS task or Lambda **inside the VPC**, before the new code version is released. Same approvals as the app deploy (§9.9 independence preserved). |
+
+#### 6.8.4 Connection kinds that cover any combination
+
+Combinations are built from a **small set of generic connection kinds** that work across services, not from a binder per pair of services:
+
+| Connection kind | Examples | What the binder generates |
+|---|---|---|
+| `iam.access` (read / write / readwrite / admin-data) | Lambda → DynamoDB, ECS → S3, Step Functions → Lambda, Glue → S3 | Least-privilege statements from the Service Authorization Reference for the target's ARN; tag conditions where supported |
+| `network.access` | ECS → Aurora (5432), Lambda → ElastiCache (6379), EKS workload → OpenSearch (443) | Security group ingress rule (source SG → target SG, engine port only); VPC config on the source if missing |
+| `event.source` (poll-based) | SQS / Kinesis / DynamoDB Streams / MSK / Amazon MQ → Lambda | Event source mapping + the poller permissions on the source |
+| `event.notify` (push-based) | S3 → Lambda/SQS/SNS/EventBridge, SNS → SQS/Lambda | Notification config + resource policy on the target with `SourceArn`/`SourceAccount` (the §6.3 pattern, generalized) |
+| `event.rule` | EventBridge rule/schedule/pipe → any supported target | Rule/schedule/pipe + target role or resource policy |
+| `api.route` | API Gateway / ALB → Lambda / ECS / Step Functions | Integration, route, permission/target group |
+| `workflow.task` | Step Functions → Lambda / ECS / DynamoDB / SQS / SNS / Glue / Batch / Bedrock … | Task state substitution values + state machine role statements for that integration |
+| `secret.binding` | Any compute → database secret / Secrets Manager secret / SSM parameter | `GetSecretValue`/`GetParameter` on that one ARN + KMS decrypt on its key; value name injected as env var |
+| `cdn.origin` | CloudFront → S3 / ALB / API Gateway | Origin + origin access control and the matching bucket/resource policy |
+
+Each connection kind declares **which source and target types it accepts**, using capabilities from the generated layer (e.g. "can be a Lambda event source", "has a security group", "has an ARN"). So a new service is usable in combinations as soon as its schema and authorization data are in the catalog. The **compatibility matrix** shown in the UI is computed, not hand-maintained.
+
+#### 6.8.5 Scaling templates: layered stacks
+
+Large combinations can exceed CloudFormation limits (500 resources per stack, 1 MB template) and mix very different change rates. The engine splits a project into **layer stacks** automatically when needed:
+
+| Stack | Contains | Change rate | Protection |
+|---|---|---|---|
+| `{project}-data` | Databases, buckets, tables, streams, KMS keys, secrets | Rare | Strongest: stack policy denies replace/delete; retain/snapshot policies |
+| `{project}-integration` | Queues, topics, event buses, rules, APIs | Medium | Standard |
+| `{project}-compute` | Lambda shells, ECS services, EKS namespace resources, state machine roles | Frequent | Standard |
+| `{project}-edge` | CloudFront, WAF associations, DNS records | Rare | Standard |
+
+- Layers reference each other through **SSM parameters**, not CloudFormation exports (same reason as §9.4).
+- They deploy in dependency order in the same pipeline run, each through its own change set, and STAGE/PROD reviewers approve **all layer change sets together** as one release.
+- Small projects stay a single stack.
+
+#### 6.8.6 How "all combinations" are validated and tested
+
+Exhaustive testing of every combination is impossible, so correctness rests on **construction rules** plus **systematic sampling**:
+
+1. **By construction:** every resource is validated against its AWS schema; every connection against the computed compatibility matrix; every IAM statement is generated from the authorization data and passes the least-privilege linter; every template passes cfn-lint and cfn-guard. A combination that passes these is valid by design.
+2. **Golden tests:** every Tier 1 block and every connection kind has reference templates in CI.
+3. **Pairwise combination tests:** CI generates **pairwise (all-pairs) combinations** of Tier 1 types × connection kinds × environment profiles. This covers every interaction between any two choices with a manageable number of cases. Each case is synthesized and linted on every change.
+4. **Real deploy tests:** a nightly job deploys a rotating sample of combinations (including every database engine at least weekly) into a dedicated **platform test account**, runs connectivity checks (e.g. Lambda → RDS Proxy → Aurora with IAM auth), then deletes them.
+5. **Reference patterns:** popular combinations are offered as one-click **patterns** in the UI, each fully deploy-tested. Examples:
+   - REST API + Lambda + Aurora Serverless;
+   - containerized service on ECS + ALB + RDS PostgreSQL + ElastiCache;
+   - event pipeline (S3 → EventBridge → Step Functions → Lambda → DynamoDB);
+   - streaming (Kinesis → Lambda → OpenSearch);
+   - data lake (S3 + Glue + Athena + Lake Formation).
+
+#### 6.8.7 Governance for a large catalog
+
+- **Enablement:** admins enable services per environment tier and per portfolio (e.g. Neptune allowed in sandbox only until reviewed). Disabled services are hidden in the UI and also denied by SCP, so the rule holds outside the platform too.
+- **Cost visibility:** the preview shows an indicative monthly cost per environment for each resource. It is computed in-house from the **AWS Price List API** (AWS service, no third-party tool).
+- **Quotas:** the preview warns when a combination would approach an account quota (e.g. VPC security groups, Lambda concurrency), using the Service Quotas API.
+- **Deprecations:** when AWS deprecates a resource type, property or engine version, the catalog sync flags the affected projects and the platform opens upgrade PRs on their infrastructure repos.
+
+---
+
 ## 7. GitHub repository provisioning
 
 ### 7.1 Identity: GitHub App (recommended)
@@ -798,13 +934,13 @@ Webhooks: `workflow_run`, `deployment`, `deployment_status`, `deployment_review`
 
 ```mermaid
 flowchart LR
-  subgraph GHJ["GitHub job: environment = prod"]
-    J["deploy-prod"] -->|"JWT sub = repo:acme-platform/invoice-ingest:environment:prod"| X[" "]
+  subgraph GHJ["GitHub job: environment = dev"]
+    J["deploy-dev"] -->|"JWT sub = repo:acme-platform/invoice-ingest:environment:dev"| X[" "]
   end
-  X -->|"AssumeRoleWithWebIdentity"| STS["STS in PROD account"]
-  STS -->|"trust: aud + sub exact match"| DR["GitHubDeployRole (PROD)<br/>tags: org:project=invoice-ingest,<br/>org:environment=prod, …"]
+  X -->|"AssumeRoleWithWebIdentity"| STS["STS in DEV account"]
+  STS -->|"trust: aud + sub exact match"| DR["GitHubDeployRole (DEV)<br/>tags: org:project=invoice-ingest,<br/>org:environment=dev, …"]
   DR -->|"CreateChangeSet with stack tags<br/>(must equal role tags)"| CFN["CloudFormation"]
-  CFN -->|"assumes"| ER["CfnExecutionRole (PROD)<br/>same tags · cloudinfra-exec-abac"]
+  CFN -->|"assumes"| ER["CfnExecutionRole (DEV)<br/>same tags · cloudinfra-exec-abac"]
   ER -->|"create/update only own-tagged resources"| APP["invoice-ingest stack"]
 ```
 
@@ -820,8 +956,8 @@ flowchart LR
   M["push to main"] --> V2["validate"] --> BLD["build once<br/>(starter mode: zip src/*;<br/>split model: no code build)"]
   BLD --> DEV["deploy: dev<br/>+ smoke tests"]
   DEV --> TEST["deploy: test<br/>+ integration tests"]
-  TEST --> CSS["plan: stage<br/>(create change set only)"] --> AS{"GitHub reviewer approval<br/>(required)"} --> STG["deploy: stage<br/>execute reviewed change set<br/>+ UAT checks"]
-  STG --> CSP["plan: prod<br/>(create change set only)"] --> AP{"GitHub reviewer approval<br/>(required)"} --> PRD["deploy: prod<br/>execute reviewed change set<br/>+ post-deploy checks"]
+  TEST --> CSS["plan: stage<br/>(create change set only)"] --> AS{"Reviewer approval<br/>(required, release console)"} --> STG["deploy: stage<br/>release executor applies<br/>reviewed change set + UAT checks"]
+  STG --> CSP["plan: prod<br/>(create change set only)"] --> AP{"Reviewer approval<br/>(required, release console)"} --> PRD["deploy: prod<br/>release executor applies<br/>reviewed change set + checks"]
 ```
 
 - **Build once:** one zip per function per commit, uploaded to the regional artifact bucket at a key based on content. Every environment deploys that exact key. No rebuilds between environments.
@@ -907,12 +1043,12 @@ Why this approach:
 
 ```mermaid
 flowchart LR
-  G1["G1 · Pull request<br/>required checks + code review"] --> G2["G2 · Build<br/>SBOM · vuln scan · attestation"]
+  G1["G1 · Pull request<br/>required checks + code review"] --> G2["G2 · Build<br/>SBOM · vuln scan · signed provenance"]
   G2 --> G3["G3 · DEV / TEST<br/>smoke + integration tests"]
   G3 --> G4["G4 · Pre-STAGE automated gate<br/>change set risk · drift · policy checks"]
   G4 --> H1{"Reviewer approval<br/>STAGE"}
   H1 --> S["STAGE deploy<br/>+ UAT · alarms"]
-  S --> G5["G5 · Pre-PROD automated gate<br/>bake time · STAGE health · same artifact ·<br/>change window · change ticket"]
+  S --> G5["G5 · Pre-PROD automated gate<br/>bake time · STAGE health · same artifact ·<br/>change window · change record"]
   G5 --> H2{"Reviewer approval<br/>PROD"}
   H2 --> P["PROD deploy<br/>alarm-based rollback"]
   P --> G6["G6 · Post-deploy verification"]
@@ -1042,7 +1178,7 @@ sequenceDiagram
 
 - **Reviewer identity:** each reviewer links their GitHub account once (GitHub App user authorization, OAuth). The platform stores the refresh token encrypted. It uses the token only to submit approvals, and only for runs in that reviewer's own products.
 - **Double check on our side:** before calling GitHub, the platform checks that the user is in the product's reviewer group for that environment, is not the person who triggered the run, and that the automated gate passed. GitHub then enforces its own rules again.
-- **Notifications:** new pending approvals, gate failures, rejections and rollbacks go to the **in-app inbox** and **email** (Amazon SES or any SMTP server), with a deep link to the approval detail page. Generic **signed outgoing webhooks** let an organization forward events to any chat tool it uses, without the platform depending on that tool. Reminders go out after a configurable wait (e.g. 4 h).
+- **Notifications:** new pending approvals, gate failures, rejections and rollbacks go to the **in-app inbox** and **email via Amazon SES**, with a deep link to the approval detail page. Generic **signed outgoing webhooks** let an organization forward events to any chat tool it uses, without the platform depending on that tool. Reminders go out after a configurable wait (e.g. 4 h).
 - **Promotion mode** (configurable per environment, §5.5.1):
   - `auto`: STAGE plan starts automatically after TEST succeeds.
   - `on-request`: a user clicks **Promote to STAGE/PROD** in the UI, which starts the plan job via `workflow_dispatch`.
@@ -1594,7 +1730,7 @@ CloudInfraAutomation/
 | D15 | GitHub plan | Not a blocker: Mode A works on any plan. If you have GitHub Enterprise, should Mode B (GitHub environment reviewers in addition) be turned on? |
 | D16 | Quality-gate thresholds | Coverage minimum (e.g. 80%), vulnerability policy (block critical/high), STAGE bake time before PROD (e.g. 24 h), change windows / freeze calendar, built-in change record required for PROD? |
 | D17 | PROD approvals | One GitHub approval (simplest), or two approvals from different groups collected in the release console (§8.5.4)? |
-| D18 | Notifications | **Decided:** in-app inbox + email (SES or SMTP) + generic signed webhooks. Which email option: Amazon SES or an existing SMTP relay? |
+| D18 | Notifications | **Decided:** in-app inbox + email via Amazon SES + optional signed webhooks |
 | D19 | Application repo granularity | One repo per compute slot (simplest permissions), or allow monorepos serving several slots? |
 | D20 | EKS deploy model | **Argo CD GitOps** (recommended) or pipeline-driven `helm upgrade`? Does a shared EKS cluster per portfolio per environment already exist, and who runs it? |
 | D21 | Languages in v1 | Python, Java, Go, Rust, Node.js all at once, or start with two (e.g. Python + Java)? |
@@ -1603,6 +1739,9 @@ CloudInfraAutomation/
 | D24 | Deprecation window | Minimum time a deprecated contract value stays after it becomes unused in an environment (e.g. 0 days in DEV/TEST, 14 days in STAGE/PROD)? |
 | D25 | Infra approvals | Should product reviewers also approve infra deploys to STAGE/PROD, or the platform team only? |
 | D26 | Open-source license policy | Allow Apache-2.0, MIT, BSD, MPL-2.0 and LGPL (as libraries); exclude AGPL and source-available licenses unless approved? |
+| D27 | Tier 1 services at launch | Confirm the proposed curated list (§6.8.2), or start smaller (e.g. compute + integration + Aurora/RDS PostgreSQL + DynamoDB) and grow? |
+| D28 | Commercial DB engines | Exclude RDS for Oracle / SQL Server (default, per open-source policy), or allow them? |
+| D29 | Network ownership | Does the landing zone provide shared VPCs with database/private subnets per environment account, or must the platform create project VPCs? |
 
 ---
 
@@ -1618,6 +1757,7 @@ CloudInfraAutomation/
 | **P5 — API + UI** | Registry API, **environment & account admin screens**, **release console (pipeline view, approval inbox, approval detail)**, cascading dropdowns, preview, status per environment | Click-to-DEV in the browser; entitlement filtering verified; an admin can add/reorder an environment and bind an account, and onboarding checks block an invalid account |
 | **P5b — Quality gate service** | Release record, deployment protection rule app, change set risk analysis, Access Analyzer checks, G4/G5 | A high-risk change set is blocked; PROD is refused if the artifact differs from STAGE or bake time is not met |
 | **P5c — Application golden paths** | Compute slot catalog types, contract publishing (SSM + API), `platform-workflows` (build per language, deploy per compute type), app deploy roles, "Create application repo" flow, contract viewer | A Python Lambda app and a Java ECS app deploy from their own repos to DEV and promote to PROD with approvals; an app repo cannot create IAM or touch another project; an app deploy stops cleanly when the contract lacks a required value |
+| **P5d — Full service catalog** | Catalog sync job (CFN schemas + Service Authorization Reference), Tier 2 generator, generic connection kinds, database blocks (Aurora/RDS/DynamoDB first), layered stacks, pairwise CI, nightly deploy tests, reference patterns | Any enabled resource type can be composed and passes all gates; pairwise suite green; every database engine deploy-tested weekly |
 | **P6 — Production control plane** | Step Functions, webhooks, reconciler, quotas, observability, Config compliance | 100 concurrent jobs on one installation complete without failing on rate limits; tag compliance dashboard live |
 
 **Next step:** review this document, answer §16, and approve a phase to start. No code will be written until then.

@@ -1,0 +1,177 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1290" viewBox="0 0 1800 1290">
+<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+<path d="M0,0 L10,5 L0,10 z" fill="context-stroke"/></marker>
+<style>
+text{font-family:Arial,Helvetica,sans-serif;fill:#1F2D3D}
+.lane{font-size:15px;font-weight:bold;fill:#3B4B5B}
+.bt{font-size:15px;font-weight:bold;text-anchor:middle}
+.bs{font-size:13px;text-anchor:middle;fill:#3B4B5B}
+.lbl{font-size:13px;fill:#22313F;paint-order:stroke;stroke:#FFFFFF;stroke-width:4px}
+.lg{font-size:14.5px}
+</style></defs>
+<rect width="1800" height="1290" fill="#FFFFFF"/>
+<rect x="20" y="20" width="1760" height="100" rx="10" fill="#F4F6F8" stroke="#B8C2CC" stroke-width="1.5"/>
+<text x="34" y="42" class="lane">People</text>
+<rect x="20" y="135" width="1760" height="125" rx="10" fill="#EAF2FB" stroke="#B8C2CC" stroke-width="1.5"/>
+<text x="34" y="157" class="lane">Platform UI (React, open source)</text>
+<rect x="20" y="280" width="1760" height="235" rx="10" fill="#FFF6E5" stroke="#B8C2CC" stroke-width="1.5"/>
+<text x="232" y="302" class="lane">Control plane — Platform account (AWS services only: Lambda/ECS, Step Functions, DynamoDB, SES)</text>
+<rect x="20" y="550" width="860" height="225" rx="10" fill="#F2EFFA" stroke="#B8C2CC" stroke-width="1.5"/>
+<text x="34" y="572" class="lane">GitHub</text>
+<rect x="900" y="550" width="880" height="225" rx="10" fill="#E9F6EE" stroke="#B8C2CC" stroke-width="1.5"/>
+<text x="914" y="572" class="lane">AWS Organization</text>
+<rect x="20" y="800" width="1760" height="215" rx="10" fill="#E8F4F4" stroke="#B8C2CC" stroke-width="1.5"/>
+<text x="34" y="822" class="lane">Environment accounts (names, order and account numbers configurable by platform admins)</text>
+<rect x="325" y="50" width="260" height="54" rx="7" fill="#FFFFFF" stroke="#5B6B7B" stroke-width="1.5"/>
+<text x="455.0" y="72.5" class="bt">Product developers</text>
+<text x="455.0" y="91.5" class="bs">infra requests · solution code</text>
+<rect x="970" y="50" width="260" height="54" rx="7" fill="#FFFFFF" stroke="#5B6B7B" stroke-width="1.5"/>
+<text x="1100.0" y="72.5" class="bt">Reviewers</text>
+<text x="1100.0" y="91.5" class="bs">approve STAGE / PROD</text>
+<rect x="1400" y="50" width="260" height="54" rx="7" fill="#FFFFFF" stroke="#5B6B7B" stroke-width="1.5"/>
+<text x="1530.0" y="72.5" class="bt">Platform admins</text>
+<text x="1530.0" y="91.5" class="bs">registry · environments · gates</text>
+<rect x="60" y="163" width="360" height="76" rx="7" fill="#FFFFFF" stroke="#5B6B7B" stroke-width="1.5"/>
+<text x="240.0" y="187.0" class="bt">Project wizard</text>
+<text x="240.0" y="206.0" class="bs">Portfolio → Product → Project</text>
+<text x="240.0" y="225.0" class="bs">service catalog · connections · preview</text>
+<rect x="490" y="163" width="360" height="76" rx="7" fill="#FFFFFF" stroke="#5B6B7B" stroke-width="1.5"/>
+<text x="670.0" y="187.0" class="bt">Developer view</text>
+<text x="670.0" y="206.0" class="bs">contract viewer · app repos</text>
+<text x="670.0" y="225.0" class="bs">change infrastructure</text>
+<rect x="920" y="163" width="360" height="76" rx="7" fill="#FFFFFF" stroke="#5B6B7B" stroke-width="1.5"/>
+<text x="1100.0" y="187.0" class="bt">Release console</text>
+<text x="1100.0" y="206.0" class="bs">pipeline view · approval inbox</text>
+<text x="1100.0" y="225.0" class="bs">evidence · overrides</text>
+<rect x="1350" y="163" width="360" height="76" rx="7" fill="#FFFFFF" stroke="#5B6B7B" stroke-width="1.5"/>
+<text x="1530.0" y="187.0" class="bt">Admin</text>
+<text x="1530.0" y="206.0" class="bs">registry · environments · account</text>
+<text x="1530.0" y="225.0" class="bs">bindings · gate thresholds</text>
+<path d="M 415,104 L 330,163" fill="none" stroke="#34495E" stroke-width="1.8" marker-end="url(#ah)"/>
+<path d="M 495,104 L 670,163" fill="none" stroke="#34495E" stroke-width="1.8" marker-end="url(#ah)"/>
+<path d="M 1100,104 L 1100,163" fill="none" stroke="#34495E" stroke-width="1.8" marker-end="url(#ah)"/>
+<path d="M 1530,104 L 1530,163" fill="none" stroke="#34495E" stroke-width="1.8" marker-end="url(#ah)"/>
+<rect x="60" y="315" width="300" height="70" rx="7" fill="#FFFFFF" stroke="#5B6B7B" stroke-width="1.5"/>
+<text x="210.0" y="345.5" class="bt">Project API</text>
+<text x="210.0" y="364.5" class="bs">FastAPI · SSO · entitlements</text>
+<rect x="395" y="315" width="300" height="70" rx="7" fill="#FFFFFF" stroke="#5B6B7B" stroke-width="1.5"/>
+<text x="545.0" y="345.5" class="bt">Registry + environment config</text>
+<text x="545.0" y="364.5" class="bs">DynamoDB · tag values · accounts</text>
+<rect x="730" y="315" width="300" height="70" rx="7" fill="#FFFFFF" stroke="#5B6B7B" stroke-width="1.5"/>
+<text x="880.0" y="345.5" class="bt">Synthesis + validation</text>
+<text x="880.0" y="364.5" class="bs">schema-driven catalog · cfn-lint/guard</text>
+<rect x="1065" y="315" width="300" height="70" rx="7" fill="#FFFFFF" stroke="#5B6B7B" stroke-width="1.5"/>
+<text x="1215.0" y="345.5" class="bt">Orchestrator</text>
+<text x="1215.0" y="364.5" class="bs">Step Functions saga · undo steps</text>
+<rect x="1400" y="315" width="300" height="70" rx="7" fill="#FFFFFF" stroke="#5B6B7B" stroke-width="1.5"/>
+<text x="1550.0" y="345.5" class="bt">Notifications</text>
+<text x="1550.0" y="364.5" class="bs">in-app inbox · Amazon SES · webhooks</text>
+<rect x="60" y="430" width="300" height="70" rx="7" fill="#FFFFFF" stroke="#5B6B7B" stroke-width="1.5"/>
+<text x="210.0" y="460.5" class="bt">Jobs + release records</text>
+<text x="210.0" y="479.5" class="bs">DynamoDB · audit</text>
+<rect x="395" y="430" width="300" height="70" rx="7" fill="#FFFFFF" stroke="#5B6B7B" stroke-width="1.5"/>
+<text x="545.0" y="460.5" class="bt">Reconciler</text>
+<text x="545.0" y="479.5" class="bs">repos · variables · protection drift</text>
+<rect x="730" y="430" width="300" height="70" rx="7" fill="#FFFFFF" stroke="#5B6B7B" stroke-width="1.5"/>
+<text x="880.0" y="460.5" class="bt">Gate service</text>
+<text x="880.0" y="479.5" class="bs">OPA policies · evidence intake</text>
+<rect x="1400" y="430" width="300" height="70" rx="7" fill="#FFFFFF" stroke="#D9822B" stroke-width="2.2"/>
+<text x="1550.0" y="460.5" class="bt">Release executor</text>
+<text x="1550.0" y="479.5" class="bs">applies approved changes only</text>
+<path d="M 240,239 L 240,252" fill="none" stroke="#34495E" stroke-width="1.8"/>
+<path d="M 670,239 L 670,252" fill="none" stroke="#34495E" stroke-width="1.8"/>
+<path d="M 1100,239 L 1100,252" fill="none" stroke="#34495E" stroke-width="1.8"/>
+<path d="M 1530,239 L 1530,252" fill="none" stroke="#34495E" stroke-width="1.8"/>
+<path d="M 240,252 L 1530,252" fill="none" stroke="#34495E" stroke-width="1.8"/>
+<path d="M 210,252 L 210,315" fill="none" stroke="#34495E" stroke-width="1.8" marker-end="url(#ah)"/>
+<path d="M 210,385 L 210,408 L 1215,408" fill="none" stroke="#34495E" stroke-width="1.8"/>
+<path d="M 545,408 L 545,385" fill="none" stroke="#34495E" stroke-width="1.8" marker-end="url(#ah)"/>
+<path d="M 880,408 L 880,385" fill="none" stroke="#34495E" stroke-width="1.8" marker-end="url(#ah)"/>
+<path d="M 1215,408 L 1215,385" fill="none" stroke="#34495E" stroke-width="1.8" marker-end="url(#ah)"/>
+<path d="M 1030,465 L 1400,465" fill="none" stroke="#D9822B" stroke-width="1.8" marker-end="url(#ah)"/>
+<text x="1215" y="457" class="lbl" text-anchor="middle">approved + gates passed</text>
+<rect x="50" y="595" width="390" height="66" rx="7" fill="#FFFFFF" stroke="#5B6B7B" stroke-width="1.5"/>
+<text x="245.0" y="623.5" class="bt">Infrastructure repos</text>
+<text x="245.0" y="642.5" class="bs">template.yaml · infra.json · deploy.yml</text>
+<rect x="460" y="595" width="390" height="66" rx="7" fill="#FFFFFF" stroke="#5B6B7B" stroke-width="1.5"/>
+<text x="655.0" y="623.5" class="bt">Application repos</text>
+<text x="655.0" y="642.5" class="bs">Python · Java · Go · Rust · Node.js · app.yaml</text>
+<rect x="50" y="690" width="390" height="66" rx="7" fill="#FFFFFF" stroke="#5B6B7B" stroke-width="1.5"/>
+<text x="245.0" y="718.5" class="bt">platform-workflows</text>
+<text x="245.0" y="737.5" class="bs">build per language · deploy per compute</text>
+<rect x="460" y="690" width="390" height="66" rx="7" fill="#FFFFFF" stroke="#5B6B7B" stroke-width="1.5"/>
+<text x="655.0" y="718.5" class="bt">GitHub Actions</text>
+<text x="655.0" y="737.5" class="bs">OIDC · variables per environment</text>
+<path d="M 245,661 L 245,690" fill="none" stroke="#34495E" stroke-width="1.8" marker-end="url(#ah)"/>
+<path d="M 655,661 L 655,690" fill="none" stroke="#34495E" stroke-width="1.8" marker-end="url(#ah)"/>
+<path d="M 460,640 L 440,700" fill="none" stroke="#34495E" stroke-width="1.8" marker-end="url(#ah)"/>
+<rect x="930" y="595" width="310" height="66" rx="7" fill="#FFFFFF" stroke="#5B6B7B" stroke-width="1.5"/>
+<text x="1085.0" y="623.5" class="bt">IAM Identity Center</text>
+<text x="1085.0" y="642.5" class="bs">human access · tag-based (ABAC)</text>
+<rect x="1260" y="595" width="300" height="66" rx="7" fill="#FFFFFF" stroke="#5B6B7B" stroke-width="1.5"/>
+<text x="1410.0" y="623.5" class="bt">Security + log archive</text>
+<text x="1410.0" y="642.5" class="bs">CloudTrail · Config · audit</text>
+<rect x="930" y="690" width="310" height="66" rx="7" fill="#FFFFFF" stroke="#5B6B7B" stroke-width="1.5"/>
+<text x="1085.0" y="718.5" class="bt">Management</text>
+<text x="1085.0" y="737.5" class="bs">SCPs · Tag Policies · StackSets</text>
+<rect x="1260" y="690" width="300" height="66" rx="7" fill="#FFFFFF" stroke="#5B6B7B" stroke-width="1.5"/>
+<text x="1410.0" y="718.5" class="bt">Shared Services</text>
+<text x="1410.0" y="737.5" class="bs">artifact buckets per region</text>
+<rect x="45" y="860" width="320" height="135" rx="7" fill="#FFFFFF" stroke="#5B6B7B" stroke-width="1.5"/>
+<text x="205.0" y="894.5" class="bt">Sandbox</text>
+<text x="205.0" y="913.5" class="bs">infra stack(s) · tagged IAM roles</text>
+<text x="205.0" y="932.5" class="bs">contract in SSM Parameter Store</text>
+<text x="205.0" y="951.5" class="bs">solution code (versions, tasks, pods)</text>
+<text x="205.0" y="970.5" class="bs">deployed by GitHub Actions</text>
+<rect x="390" y="860" width="320" height="135" rx="7" fill="#FFFFFF" stroke="#5B6B7B" stroke-width="1.5"/>
+<text x="550.0" y="894.5" class="bt">DEV</text>
+<text x="550.0" y="913.5" class="bs">infra stack(s) · tagged IAM roles</text>
+<text x="550.0" y="932.5" class="bs">contract in SSM Parameter Store</text>
+<text x="550.0" y="951.5" class="bs">solution code (versions, tasks, pods)</text>
+<text x="550.0" y="970.5" class="bs">deployed by GitHub Actions</text>
+<rect x="735" y="860" width="320" height="135" rx="7" fill="#FFFFFF" stroke="#5B6B7B" stroke-width="1.5"/>
+<text x="895.0" y="894.5" class="bt">TEST</text>
+<text x="895.0" y="913.5" class="bs">infra stack(s) · tagged IAM roles</text>
+<text x="895.0" y="932.5" class="bs">contract in SSM Parameter Store</text>
+<text x="895.0" y="951.5" class="bs">solution code (versions, tasks, pods)</text>
+<text x="895.0" y="970.5" class="bs">deployed by GitHub Actions</text>
+<rect x="1080" y="860" width="320" height="135" rx="7" fill="#FFFFFF" stroke="#D9822B" stroke-width="2.4"/>
+<text x="1240.0" y="894.5" class="bt">QA/STAGE</text>
+<text x="1240.0" y="913.5" class="bs">infra stack(s) · tagged IAM roles</text>
+<text x="1240.0" y="932.5" class="bs">contract in SSM Parameter Store</text>
+<text x="1240.0" y="951.5" class="bs">solution code (versions, tasks, pods)</text>
+<text x="1240.0" y="970.5" class="bs">approval required</text>
+<rect x="1425" y="860" width="320" height="135" rx="7" fill="#FFFFFF" stroke="#D9822B" stroke-width="2.4"/>
+<text x="1585.0" y="894.5" class="bt">PROD</text>
+<text x="1585.0" y="913.5" class="bs">infra stack(s) · tagged IAM roles</text>
+<text x="1585.0" y="932.5" class="bs">contract in SSM Parameter Store</text>
+<text x="1585.0" y="951.5" class="bs">solution code (versions, tasks, pods)</text>
+<text x="1585.0" y="970.5" class="bs">approval required</text>
+<path d="M 1110,385 L 1110,532 L 245,532 L 245,595" fill="none" stroke="#34495E" stroke-width="1.8" marker-end="url(#ah)"/>
+<path d="M 655,532 L 655,595" fill="none" stroke="#34495E" stroke-width="1.8" marker-end="url(#ah)"/>
+<text x="255" y="588" class="lbl" text-anchor="start">③ create repos · environments · variables · commit</text>
+<path d="M 1250,385 L 1250,812" fill="none" stroke="#34495E" stroke-width="1.8" marker-end="url(#ah)"/>
+<text x="1258" y="790" class="lbl" text-anchor="start">④ bootstrap tagged roles (all accounts)</text>
+<path d="M 560,756 L 560,845" fill="none" stroke="#34495E" stroke-width="1.8" marker-end="url(#ah)"/>
+<text x="568" y="790" class="lbl" text-anchor="start">⑤ OIDC deploy: Sandbox · DEV · TEST</text>
+<text x="568" y="806" class="lbl" text-anchor="start">(STAGE / PROD: plan only)</text>
+<path d="M 850,735 L 888,735 L 888,500" fill="none" stroke="#34495E" stroke-width="1.8" marker-end="url(#ah)"/>
+<text x="896" y="545" class="lbl" text-anchor="start">⑥ evidence + events</text>
+<path d="M 1650,500 L 1650,835 L 1240,835 L 1240,860" fill="none" stroke="#D9822B" stroke-width="1.8" marker-end="url(#ah)"/>
+<path d="M 1585,835 L 1585,860" fill="none" stroke="#D9822B" stroke-width="1.8" marker-end="url(#ah)"/>
+<text x="1660" y="600" class="lbl" text-anchor="start">⑦ execute reviewed</text>
+<text x="1660" y="616" class="lbl" text-anchor="start">change (STAGE/PROD)</text>
+<path d="M 1085,756 L 1085,812" fill="none" stroke="#34495E" stroke-width="1.8" stroke-dasharray="6,5" marker-end="url(#ah)"/>
+<text x="1093" y="790" class="lbl" text-anchor="start">⑧ guardrails</text>
+<path d="M 1535,756 L 1535,812" fill="none" stroke="#34495E" stroke-width="1.8" stroke-dasharray="6,5" marker-end="url(#ah)"/>
+<text x="1543" y="790" class="lbl" text-anchor="start">code artifacts</text>
+<rect x="20" y="1030" width="1760" height="245" rx="10" fill="#FFFFFF" stroke="#B8C2CC" stroke-width="1.5"/>
+<text x="34" y="1056" class="lane">How it flows</text>
+<text x="40" y="1086" class="lg">① People use the platform UI; ② every UI action goes through the Project API, which validates against the registry and synthesizes files.</text>
+<text x="40" y="1112" class="lg">③ The orchestrator creates the infrastructure repo (and application repos), GitHub environments, variables and one atomic commit.</text>
+<text x="40" y="1138" class="lg">④ It bootstraps tagged deploy / CloudFormation / plan roles in each environment account; tags limit every role to its own project.</text>
+<text x="40" y="1164" class="lg">⑤ GitHub Actions deploys Sandbox, DEV and TEST through OIDC; for STAGE and PROD it only creates change sets (plan).</text>
+<text x="40" y="1190" class="lg">⑥ Test, scan and change-set evidence goes to the gate service; reviewers approve in the release console.</text>
+<text x="40" y="1216" class="lg">⑦ Only after gates pass and a reviewer approves does the release executor apply the exact reviewed change to STAGE / PROD.</text>
+<text x="40" y="1242" class="lg">⑧ SCPs and Tag Policies enforce tag rules in every account; build-once artifacts come from Shared Services.</text>
+</svg>
