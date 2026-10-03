@@ -1,10 +1,11 @@
 # CloudInfraAutomation — Architecture
 
-**Status:** Draft v2.14 for review. No code is written until this design is approved.
+**Status:** Draft v2.15 for review. No code is written until this design is approved.
 **Date:** 2026-10-03
 **Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9). Every solution is **DR-capable**: it can run in one region, as DR (primary active, secondary standby) or as an HA pair (both active), with **any region pair chosen in the UI** (default us-east-1 / us-east-2) (§10).
 
 **Changes in v2:** added the org registry and tagging strategy (§4); permissions based on tags (§4.5–4.8); multi-account, five-environment model (§5); promotion pipeline (§8). Payload, provisioning, security and scaling sections are updated to match.
+**Changes in v2.15:** Appendix A (§19): a complete set of approval and workflow diagrams (landscape, release in default mode, release decision flow, override, sharing routing, access request, infrastructure change request, configuration change, DR failover, recertification, application release) plus an approval summary table.
 **Changes in v2.14:** all sharing is granted through a sharing approval workflow (§4.11.6). Covers share offers, access requests, agreements, renewal and revocation, with risk-based routing, optional auto-approval within an approved tag offer, recertification and audit.
 **Changes in v2.13:** sharing by tags (§4.11.1). Providers set `org:share-scope` (product / portfolio / organization) and `org:share-access` on a resource, and any consumer in any account whose tags match (same environment, inside the organization) can connect self-service. Agreements remain for everything tags cannot express.
 **Changes in v2.12:** cross-account access (§4.11). Infrastructure can use assets in other AWS accounts (S3, SQS, SNS, KMS, DynamoDB, secrets, events, private APIs) through approved sharing agreements. Both sides are generated with tag conditions, inside the organization by default, with expiry, revocation and audit.
@@ -42,6 +43,7 @@
 16. [Proposed repository layout](#16-proposed-repository-layout)
 17. [Decisions needed from you](#17-decisions-needed-from-you)
 18. [Implementation phases](#18-implementation-phases)
+19. [Appendix A: Approval and workflow diagrams](#19-appendix-a-approval-and-workflow-diagrams)
 
 ---
 
@@ -2310,3 +2312,268 @@ CloudInfraAutomation/
 | **P6 — Production control plane** | Step Functions, webhooks, reconciler, quotas, observability, Config compliance | 100 concurrent jobs on one installation complete without failing on rate limits; tag compliance dashboard live |
 
 **Next step:** review this document, answer §17, and approve a phase to start. No code will be written until then.
+
+---
+
+## 19. Appendix A: Approval and workflow diagrams
+
+This appendix collects every approval flow in the design in one place. Each diagram links back to the section that defines the rules. The same diagrams are available as PNG and SVG files in `docs/diagrams/approvals/`.
+
+**Approval summary:**
+
+| What needs approval | Approvers | Enforced by | Defined in |
+|---|---|---|---|
+| STAGE / PROD release (infrastructure or application) | Product reviewers (QA for STAGE; product owner + change management for PROD) | Gate service first; release executor applies only the reviewed change | §8.3, §8.4, §8.5 |
+| High-risk change override | Platform admin (not the requester) | Gate service blocks until the override is recorded | §8.4.2 |
+| Sharing: offer, access request, agreement, renewal, revocation | Provider owner; + security / platform admin by risk; auto-approval only if the provider allows it | Sharing workflow, generated PRs, normal gates | §4.11.6 |
+| Infrastructure change request (from a product team) | Platform team (code review), then release approvals per environment | Infra repo PR + gates | §9.9.6 |
+| Environment, account binding or region change | Platform admin; + second platform admin for prod tier or the SCP region list | Configuration service (versioned, audited) | §5.5.4, §10.9 |
+| DR failover / failback | Incident lead + second approver (break-glass) | Release executor runbook | §10.6 |
+
+### A.1 Approval landscape
+
+```mermaid
+flowchart LR
+  H1["REQUEST"]:::hdr --> H2["APPROVERS"]:::hdr --> H3["ENFORCEMENT"]:::hdr
+  R1["STAGE / PROD release<br/>infrastructure or application"] --> A1["Product reviewers<br/>QA for STAGE · owner + change mgmt for PROD"] --> E1["Gate service passes first<br/>release executor applies the exact reviewed change"]
+  R2["High-risk change override"] --> A2["Platform admin<br/>not the requester"] --> E2["Gate blocks until override recorded<br/>for this change set only"]
+  R3["Sharing request<br/>offer · access · agreement · renewal · revocation"] --> A3["Provider owner<br/>+ security / platform admin by risk"] --> E3["Generated infra PRs on both sides<br/>normal gates · recertified quarterly"]
+  R4["Infrastructure change request<br/>from a product team"] --> A4["Platform team code review<br/>then release approvals per environment"] --> E4["Infra repo PR · gates ·<br/>declared contract updated at once"]
+  R5["Environment / account / region change"] --> A5["Platform admin<br/>+ second admin for prod tier or SCP"] --> E5["Versioned config · onboarding checks ·<br/>sync PRs to existing projects"]
+  R6["DR failover / failback"] --> A6["Incident lead + second approver<br/>break-glass"] --> E6["Release executor runbook ·<br/>ARC traffic switch · RTO/RPO recorded"]
+  classDef hdr fill:#1F3864,color:#ffffff,stroke:#1F3864,font-weight:bold
+```
+
+### A.2 STAGE / PROD release: default mode (any GitHub plan)
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant GA as GitHub Actions
+  participant AWS as STAGE or PROD account
+  participant GS as Gate service
+  participant RC as Release console
+  actor R as Reviewer
+  participant EX as Release executor
+  GA->>AWS: plan job: OIDC plan role creates change set cs-sha-run
+  GA->>GS: evidence: change set summary, tests, scans, signed provenance
+  GS->>GS: evaluate G4 or G5 policies (OPA)
+  alt gate failed
+    GS-->>RC: GateFailed with reasons, reviewers not asked
+  else high-risk change
+    GS-->>RC: OverrideRequested, see A.4
+  else gate passed
+    GS-->>RC: AwaitingApproval, inbox item for reviewers
+    R->>RC: review evidence, approve with comment
+    RC->>RC: check reviewer group, not the requester, still the latest candidate
+    RC->>EX: release the approved change set
+    EX->>AWS: assume executor role with session tag org:project, ExecuteChangeSet
+    AWS-->>EX: UPDATE_COMPLETE or automatic rollback
+    EX-->>GA: result to the waiting release job, GitHub deployment and commit status
+  end
+```
+
+### A.3 Release decision flow
+
+```mermaid
+flowchart TD
+  S["Change reaches the STAGE / PROD gate"] --> P{"Change set created<br/>by the plan job?"}
+  P -->|no| F1["Stop: plan failed"]
+  P -->|yes| G{"Automated gate<br/>G4 / G5 passed?"}
+  G -->|no| F2["Stop: gate failed<br/>reasons shown"]
+  G -->|yes| HR{"High-risk change?<br/>replace or delete data · IAM widening"}
+  HR -->|yes| O{"Override approved<br/>by a platform admin?"}
+  O -->|no| F3["Stop: rejected"]
+  O -->|yes| Q
+  HR -->|no| Q{"Reviewer decision<br/>not the requester"}
+  Q -->|reject| F4["Stop: rejected"]
+  Q -->|30 days, no decision| F5["Expired"]
+  Q -->|newer commit arrived| F6["Superseded"]
+  Q -->|approve| X["Release executor applies<br/>the exact reviewed change set"]
+  X --> D{"Healthy during<br/>monitoring window?"}
+  D -->|no| RB["Automatic rollback<br/>CloudFormation alarms"]
+  D -->|yes| OK["Deployed and recorded"]
+  classDef stop fill:#FBE5E1,stroke:#C0504D,color:#7F1D1D
+  classDef ok fill:#E2F0D9,stroke:#548235,color:#1E4620
+  class F1,F2,F3,F4,F5,F6,RB stop
+  class OK ok
+```
+
+### A.4 High-risk change override
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor REQ as Requester
+  participant RC as Release console
+  actor PA as Platform admin
+  participant GS as Gate service
+  GS-->>RC: high-risk change detected, for example a database replacement
+  REQ->>RC: request override with reason, data protection and rollback plan
+  RC->>RC: validate: approver is not the requester, change set still current
+  RC->>PA: approval request with change set diff and risk details
+  alt approved
+    PA->>RC: approve, scope limited to this change set
+    RC->>GS: record override and re-evaluate
+    GS-->>RC: AwaitingApproval, the normal reviewer step is still required
+  else rejected
+    PA->>RC: reject with comment
+    RC-->>REQ: promotion stopped, environment unchanged
+  end
+```
+
+### A.5 Sharing approval routing
+
+```mermaid
+flowchart TD
+  S["Sharing request"] --> T{"Request type"}
+  T -->|share offer| O1{"Scope wider than product, or<br/>access beyond read, or data confidential?"}
+  O1 -->|no| AO["Provider product owner"]
+  O1 -->|yes| AOS["Provider owner + security"]
+  T -->|access request| AR{"Within an approved offer and<br/>org:share-approval = auto?"}
+  AR -->|yes| AUTO["Auto-approved<br/>provider notified"]
+  AR -->|no| PC{"PROD and data<br/>confidential?"}
+  PC -->|no| AP["Provider product owner"]
+  PC -->|yes| APS["Provider owner + security"]
+  T -->|agreement| AG{"Outside the organization<br/>or across environments?"}
+  AG -->|yes| AGX["Provider owner + security<br/>+ platform admin"]
+  AG -->|no| PC
+  T -->|renewal| RN["Same approvers as the original request"]
+  T -->|revocation| RV{"Emergency?"}
+  RV -->|yes| RVS["Security reviewer alone<br/>takes effect at once"]
+  RV -->|no| RVO["Provider or consumer owner"]
+  classDef stop fill:#FBE5E1,stroke:#C0504D,color:#7F1D1D
+  classDef ok fill:#E2F0D9,stroke:#548235,color:#1E4620
+  class AUTO ok
+  class RVS stop
+```
+
+### A.6 Access request to a shared resource
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor C as Consumer owner
+  participant UI as Platform UI
+  participant WF as Sharing workflow
+  actor P as Provider owner
+  participant GH as Infra repos
+  participant AWS as AWS accounts
+  C->>UI: draw a connection to a shared resource from the catalog
+  UI->>WF: access request, tag rule pre-checked: environment, organization, product or portfolio
+  alt resource allows auto-approval
+    WF-->>P: notification only
+  else approval required
+    WF->>P: inbox item with evidence and generated policy diff
+    P->>WF: approve
+  end
+  WF->>GH: PR on consumer infra repo: role statements and contract binding
+  WF->>GH: PR on provider infra repo when a per-consumer grant is needed, for example KMS
+  GH->>AWS: deploy through normal gates, STAGE and PROD need release approval
+  AWS-->>WF: readiness check passed, a harmless test read
+  WF-->>C: access active, contract exposes the resource
+```
+
+### A.7 Infrastructure change request from a product team
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor D as Product developer
+  participant UI as Platform UI
+  participant PL as Synthesis and contract
+  participant GH as Infra repo
+  actor PT as Platform team
+  participant ENV as Environments
+  D->>UI: Change infrastructure, for example add a table and grant access
+  UI->>PL: synthesize and validate
+  PL-->>D: declared contract updated at once, development continues
+  PL->>GH: PR with regenerated template and risk classification
+  GH->>PT: code review by CODEOWNERS
+  PT->>GH: approve and merge
+  GH->>ENV: Sandbox, DEV and TEST deploy automatically
+  GH->>ENV: STAGE and PROD via plan, reviewer approval and release executor
+  ENV-->>D: deployed contract updated per environment
+```
+
+### A.8 Environment, account or region configuration change
+
+```mermaid
+flowchart TD
+  A["Platform admin edits an environment,<br/>account binding or enabled region"] --> V{"Validation and onboarding checks pass?<br/>account in org · OU tier · bootstrap · unique account"}
+  V -->|no| X["Rejected with reasons"]
+  V -->|yes| T{"Affects a prod-tier environment<br/>or the SCP region list?"}
+  T -->|no| AP["Applied: versioned and audited"]
+  T -->|yes| S{"Second platform admin approves?<br/>not the editor"}
+  S -->|no| X
+  S -->|yes| AP
+  AP --> PR["Propagation: new projects use it at once,<br/>existing projects get sync PRs, never silent"]
+  classDef stop fill:#FBE5E1,stroke:#C0504D,color:#7F1D1D
+  classDef ok fill:#E2F0D9,stroke:#548235,color:#1E4620
+  class X stop
+  class AP ok
+```
+
+### A.9 DR failover (break-glass)
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor IL as Incident lead
+  actor A2 as Second approver
+  participant RC as Release console
+  participant EX as Release executor
+  participant SEC as Secondary region
+  participant ARC as Route 53 ARC
+  IL->>RC: fail over project to the secondary region, with reason
+  RC->>A2: break-glass approval request, paged
+  A2->>RC: approve
+  RC->>EX: start the failover runbook
+  EX->>SEC: promote databases, Aurora global failover or replica promotion
+  EX->>SEC: set ActivationState active, scale up, enable event sources
+  EX->>ARC: switch routing control to the secondary region
+  EX->>SEC: health checks and smoke tests
+  EX-->>RC: failover complete, RTO and RPO recorded, GitHub variables updated
+  Note over RC,EX: Failback later is planned and approved like a PROD release
+```
+
+### A.10 Sharing recertification and expiry
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant WF as Sharing workflow
+  actor P as Provider owner
+  participant GH as Infra repos
+  participant AWS as AWS accounts
+  WF->>P: recertification due, or expiry in 30 and 7 days
+  alt re-approved
+    P->>WF: confirm the access is still needed
+    WF->>WF: extend expiry and record the decision
+  else not re-approved in time
+    WF->>GH: PRs removing consumer statements and provider grants
+    GH->>AWS: deploy through normal gates
+    WF-->>P: access revoked, consumers notified
+  end
+```
+
+### A.11 Application release to PROD (default mode)
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant AP as App pipeline
+  participant AWS as PROD account
+  participant GS as Gate service
+  actor R as Reviewer
+  participant EX as Release executor
+  AP->>AWS: prepare only: upload artifact, publish Lambda version or register task definition
+  AP->>GS: evidence: deploy diff, tests, scans, signed provenance
+  GS->>GS: G5: same artifact as STAGE, bake time, STAGE health, DR drill
+  R->>GS: approve in the release console
+  GS->>EX: release
+  EX->>AWS: move live alias, update ECS service or sync the GitOps commit
+  AWS-->>EX: healthy, or automatic rollback
+  EX-->>AP: status
+```
+
