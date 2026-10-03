@@ -1,10 +1,11 @@
 # CloudInfraAutomation — Architecture
 
-**Status:** Draft v2.5 for review. No code is written until this design is approved.
+**Status:** Draft v2.6 for review. No code is written until this design is approved.
 **Date:** 2026-10-03
 **Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9).
 
 **Changes in v2:** added the org registry and tagging strategy (§4); permissions based on tags (§4.5–4.8); multi-account, five-environment model (§5); promotion pipeline (§8). Payload, provisioning, security and scaling sections are updated to match.
+**Changes in v2.6:** technology policy added: AWS + GitHub + open source only (§1). Commercial products removed or replaced (CMDB/ITSM, chat tools, paid GitHub security features). Approvals now work on any GitHub plan via platform-executed releases (§8.3.1); GitHub Enterprise features are optional.
 **Changes in v2.5:** infrastructure and solution code are now explicitly independent (§9.9): contract-first development, placeholder artifacts, expand → migrate → contract changes, optional bindings, local/ephemeral testing, and a responsibilities table. Product teams no longer have to sign off on infrastructure changes.
 **Changes in v2.4:** added developer consumption (§9): infrastructure contract published per environment, application repos linked to compute slots, golden-path build/deploy workflows per language and compute type (Lambda, ECS, EKS, Step Functions), and least-privilege application deploy roles. Sections 9–16 renumbered to 10–17.
 **Changes in v2.3:** STAGE and PROD require GitHub reviewer approval before deployment, using a plan → approve → apply-reviewed-change-set flow that cannot be turned off (§8.3). Added a layered quality-gate strategy for STAGE and PROD (§8.4). Added the release console: promotion and approval workflow in the platform UI, with approvals submitted to GitHub as the reviewer (§8.5).
@@ -48,7 +49,7 @@
 ### Non-goals (v1)
 - A general-purpose infrastructure designer. v1 offers a fixed catalog of services that can be connected to each other.
 - Creating new AWS accounts. The account landing zone (AWS Organizations / Control Tower) already exists; the platform only *uses* its accounts.
-- Editing the Portfolio/Product lists in this UI. They come from the org registry (§4.2), whose source of truth is a CMDB or a platform admin screen.
+- Editing the Portfolio/Product lists in this UI. They come from the org registry (§4.2), which is the master; maintained in the platform admin screen or imported via CSV/REST.
 
 ### Design principles
 | Principle | What it means here |
@@ -61,6 +62,48 @@
 | **Short-lived credentials everywhere** | OIDC for GitHub Actions → AWS, GitHub App installation tokens, STS AssumeRole between accounts. No long-lived keys by default. |
 | **Infrastructure and solution code are independent** | Every solution has two parts: infrastructure (platform-owned) and solution code (product-owned). They live in separate repos with separate pipelines, versions, release schedules and approvals, joined only by a versioned contract. Neither team waits for the other (§9.9). |
 | **Async and safe to retry** | Long-running provisioning is orchestrated as a series of steps, each safe to repeat (keyed by the request ID), with undo steps for anything that fails partway. |
+
+### Technology policy: AWS + GitHub + open source only
+
+The platform is built **in-house**. Its only commercial dependencies are the two systems it exists to automate: **AWS** (the target cloud, including its native services) and **GitHub** (source control and Actions). Every other component is either written by us or is **open-source software**. No other commercial product, SaaS or paid add-on is required.
+
+**Rules:**
+- No feature may *require* a paid GitHub tier. Features that only exist on GitHub Enterprise are **optional add-ons**, and every one of them has a built-in equivalent (§8.3.1).
+- Integrations with commercial tools (chat, ITSM, CMDB, portals) are **never required**. The platform exposes **generic, signed outgoing webhooks and a REST API**, so an organization can connect any tool it likes without the platform depending on it.
+- Open-source licenses allowed by default: Apache-2.0, MIT, BSD, MPL-2.0; LGPL as unmodified libraries. AGPL and "source-available" licenses (BSL, SSPL, Elastic, the Semgrep Rules License, etc.) are excluded unless approved (D26).
+
+**Open-source components chosen:**
+
+| Purpose | Choice | License |
+|---|---|---|
+| Backend API / models | FastAPI, pydantic | MIT |
+| GitHub client / AWS SDK / secret encryption | PyGithub, boto3, PyNaCl | LGPL-3.0 (library), Apache-2.0, Apache-2.0 |
+| Web UI | React, TypeScript | MIT, Apache-2.0 |
+| CloudFormation lint / policy | cfn-lint, cfn-guard | MIT-0, Apache-2.0 |
+| IaC security scan | Checkov | Apache-2.0 |
+| Gate policy engine (G4/G5 rules as code) | Open Policy Agent (OPA) / Conftest | Apache-2.0 |
+| SAST per language | bandit (Python), SpotBugs + Find Security Bugs (Java), gosec (Go), cargo-audit + clippy (Rust), eslint-plugin-security (Node.js) | Apache-2.0 / LGPL-2.1 / Apache-2.0 / Apache-2.0+MIT / Apache-2.0 |
+| Dependency / vulnerability scanning | OSV-Scanner, Trivy | Apache-2.0 |
+| SBOM | Syft | Apache-2.0 |
+| Secret scanning (PR check + pre-commit hook) | gitleaks | MIT |
+| Artifact signing and provenance | cosign (Sigstore) **with keys in AWS KMS** (no dependency on public Sigstore services); SLSA/in-toto provenance format | Apache-2.0 |
+| Kubernetes GitOps / admission policy | Argo CD, Kyverno | Apache-2.0 |
+| Local AWS emulation | moto (server mode), AWS SAM CLI; LocalStack **Community** edition optional | Apache-2.0 |
+| Telemetry | OpenTelemetry (export to CloudWatch/X-Ray) | Apache-2.0 |
+| Developer portal (optional) | Backstage | Apache-2.0 |
+| Dependency update PRs | Dependabot (built into GitHub, free on all plans); Renovate as an alternative if license approved | — / AGPL-3.0 |
+
+**Removed or replaced compared with earlier drafts:**
+
+| Earlier mention | Replaced by |
+|---|---|
+| ServiceNow / external CMDB as source of truth | **Platform registry is the master**, with CSV/REST import (§4.2) |
+| ITSM change tickets | **Built-in change record** in the release console (§8.5); external ITSM optional via outgoing webhook |
+| Slack / Microsoft Teams notifications | **Email** (Amazon SES or any SMTP server) + **in-app inbox** + generic **signed webhooks** |
+| CodeQL (needs paid GitHub Advanced Security for private repos) | Language SAST tools above |
+| GitHub secret scanning push protection (paid for private repos) | gitleaks in PR checks and pre-commit hooks |
+| GitHub artifact attestations (paid for private repos) | cosign + AWS KMS signatures, verified by the gate |
+| GitHub environment required reviewers / custom deployment protection rules (Enterprise for private repos) | **Built-in approval with platform-executed release** (§8.3.1); GitHub features used additionally only if available |
 
 ---
 
@@ -169,7 +212,7 @@ sequenceDiagram
 |---|---|---|
 | **Web UI** | Cascading ownership dropdowns, service catalog, connection editor, preview (files, tags, target accounts), job status per environment. | Static on CDN |
 | **Project API** | Authentication, entitlement checks, validation, preview, job creation, idempotency. Keeps no state between requests. | Horizontal containers |
-| **Org registry** | Source of the Portfolio → Product/Platform tree, projects, cost centers, entitlements, allowed tag values. | DynamoDB + cache; synced from CMDB |
+| **Org registry** | Source of the Portfolio → Product/Platform tree, projects, cost centers, entitlements, allowed tag values. | DynamoDB + cache; master data, CSV/REST import |
 | **Environment config** | Admin-managed list of environments (name, order, tier, protection and guardrail profiles) and **account bindings** (environment + portfolio/product + region → AWS account ID). Validates and onboards accounts before they can be used (§5.5). | DynamoDB, versioned, audited |
 | **Synthesis engine** | Payload → template, starter code, workflow, per-environment parameter files. Pure function with no I/O. | Runs in-process |
 | **Validation gate** | Schema, connection rules, cfn-lint, cfn-guard (rules differ per environment), IAM least-privilege + tag linter. | Runs in-process |
@@ -330,7 +373,7 @@ flowchart TD
 **Default isolation:** a project can create, change and delete only resources tagged with its own `org:project`. Sharing within the same product is opt-in and read-only by default. Sharing across products is never automatic.
 
 ### 4.2 Org registry → UI dropdowns
-- **Source of truth:** the CMDB (e.g. ServiceNow) or a platform admin screen, synced into the registry table. The UI never hardcodes the lists.
+- **Source of truth:** the **platform registry is the master**, maintained in the platform admin screen. Bulk changes can be imported via CSV or the REST API (so any existing inventory can feed it), but no external product is required. The UI never hardcodes the lists.
 - **Cascading dropdowns:**
   - **Portfolio:** only portfolios where the user has at least one entitled product.
   - **Product/Platform:** filtered by the chosen portfolio *and* the user's IdP groups. Shows a badge for kind (Product or Platform).
@@ -498,7 +541,7 @@ These are the **default profiles** for the five seeded environments. All of them
 |---|---|---|---|---|---|
 | Purpose | Experiments, feature branches | Integration on `main` | Automated test suites | Production-like, UAT | Live |
 | Deploy trigger | Manual dispatch from **any branch** | Auto on push to `main` | Auto after DEV succeeds | After TEST + **approval** | After STAGE + **approval** |
-| GitHub env protection | None | Branch: `main` | Branch: `main` | `main`, **required GitHub reviewers** (QA), prevent self-review | `main`/release tags, **required GitHub reviewers** (product owner + change mgmt), prevent self-review, optional wait timer |
+| GitHub env protection | None | Branch: `main` | Branch: `main` | `main`, **required reviewer approval** (QA; release console, GitHub identities), no self-approval | `main`/release tags, **required reviewer approval** (product owner + change mgmt; release console, GitHub identities), no self-approval, optional wait timer |
 | Data classification allowed | ≤ internal | ≤ confidential (synthetic data) | ≤ confidential | as product ceiling | as product ceiling |
 | `retainOnDelete` default | false | false | false | true | true (+ stack policy blocks replace/delete) |
 | Log retention | 7 d | 14 d | 14 d | 90 d | ≥ 365 d |
@@ -510,7 +553,7 @@ These are the **default profiles** for the five seeded environments. All of them
 
 | Layer | What | Deployed by | When |
 |---|---|---|---|
-| **Account bootstrap** | GitHub OIDC provider; shared policies `cloudinfra-deploy-abac`, `cloudinfra-exec-abac`, `cloudinfra-app-boundary`; `CloudInfraProvisioner` role (trusted only by the Platform account, with `aws:PrincipalOrgID`) | **Service-managed StackSet** targeting the workload OUs, auto-deploying to new accounts | Once; updates roll out across the org |
+| **Account bootstrap** | GitHub OIDC provider; shared policies `cloudinfra-deploy-abac`, `cloudinfra-exec-abac`, `cloudinfra-app-boundary`; `CloudInfraProvisioner` role (trusted only by the Platform account, with `aws:PrincipalOrgID`); in gated accounts, the `PlatformReleaseExecutor` role (§8.3.1: execute reviewed change sets / release reviewed artifacts only; session tag `org:project` required) | **Service-managed StackSet** targeting the workload OUs, auto-deploying to new accounts | Once; updates roll out across the org |
 | **Shared Services** | Artifact bucket per region; its bucket policy lets org accounts' execution roles read `${aws:PrincipalTag/org:project}/*` only (`aws:PrincipalOrgID` + principal-tag condition) | Platform IaC | Once per region |
 | **Project bootstrap** | Per enabled environment: `GitHubDeployRole` + `CfnExecutionRole`, **tagged with the project's tags** and attaching the shared policies. Small, because the policies already exist. | Orchestrator via `CloudInfraProvisioner` in each target account (in parallel, throttled per account) | Once per project per environment |
 
@@ -789,7 +832,7 @@ flowchart LR
 
 **Rule:** nothing is deployed to STAGE or PROD until a GitHub reviewer approves. The approval happens **before** the deploy job starts. Until then the job has no OIDC token and no AWS access, so nothing in the account can change.
 
-**How it works: plan, approve, then apply the reviewed change set**
+**How it works: plan, approve, then apply the reviewed change set.** The diagram and table below show the flow with GitHub environment reviewers (**Mode B**). In the default **Mode A** (§8.3.1) the steps are the same, except that approval happens in the release console and the **platform release executor**, not a GitHub job, executes the change set.
 
 ```mermaid
 sequenceDiagram
@@ -811,7 +854,7 @@ sequenceDiagram
 |---|---|
 | GitHub environments | Two per gated stage: `stage-plan` / `stage` and `prod-plan` / `prod`. Only `stage` and `prod` have **required reviewers**. The plan environments have a branch rule (`main`) but no reviewers. |
 | Plan role (`{project}-plan`, per gated account) | Trusted only for `sub = repo:{owner}/{repo}:environment:{env}-plan`. Can create, describe and delete change sets on its own stack (same tag rules as §4.5) and read the artifact. **Cannot execute change sets** or touch resources. |
-| Deploy role in gated accounts | For STAGE and PROD it may **only execute an existing change set** (plus describe). It cannot create a new change set, so what runs is exactly what was reviewed. If the stack changed after the plan, execution fails and the pipeline re-plans; reviewers then approve the new plan. |
+| Deploy role in gated accounts | **Mode A:** there is no GitHub-assumable deploy role in STAGE/PROD; only the platform release executor can execute. **Mode B:** for STAGE and PROD it may **only execute an existing change set** (plus describe). It cannot create a new change set, so what runs is exactly what was reviewed. If the stack changed after the plan, execution fails and the pipeline re-plans; reviewers then approve the new plan. |
 | Reviewers | Set on each environment from the registry: the product's reviewer GitHub team(s) per environment (default: QA reviewers for STAGE; product owner group + change management for PROD). Up to 6 users/teams per environment; one approval releases the job. |
 | Prevent self-review | Enabled on `stage` and `prod`: the person who triggered the run cannot approve it. |
 | Branch rule | `stage` and `prod` deploy only from `main` (PROD optionally also from release tags). |
@@ -821,11 +864,34 @@ sequenceDiagram
 
 **The gate cannot be turned off**
 - In the environment configuration (§5.5.1), `requiresApproval` is **locked to `true` for STAGE and for every `prod`-tier environment**. Admins can change *who* reviews, but cannot remove the gate. Any new environment of tier `prod` gets the gate automatically.
-- The product's GitHub team has the `maintain` role, not `admin`, so it cannot edit environment protection rules.
+- Approval is checked by the platform before the release executor runs (Mode A), so no repo setting can bypass it. In Mode B, the product's GitHub team also has only the `maintain` role, so it cannot edit environment protection rules.
 - The reconciler checks every repo's `stage` and `prod` environments nightly. Missing reviewers, disabled prevent-self-review or a changed branch rule is **restored automatically and alerted**.
-- AWS backs it up: the gated deploy role can only execute change sets. Even a workflow edited to skip the plan job cannot deploy new changes to STAGE or PROD.
+- AWS backs it up: in gated accounts, only the release executor (Mode A) or an execute-only deploy role (Mode B) can apply changes, and only to existing, reviewed change sets. Even a workflow edited to skip the plan job cannot deploy new changes to STAGE or PROD.
 
-**GitHub plan requirement:** required reviewers on **private or internal** repositories need GitHub Enterprise Cloud (public repos have them on all plans). Please confirm your plan (D15).
+#### 8.3.1 Approval enforcement modes (no paid GitHub features required)
+
+GitHub's environment required reviewers and custom deployment protection rules need **GitHub Enterprise Cloud** for private and internal repos. So the design does **not depend on them**. The default mode gives the same guarantee on any GitHub plan.
+
+| | **Mode A: platform-executed release (default, any GitHub plan)** | **Mode B: add GitHub environment protection (optional, Enterprise)** |
+|---|---|---|
+| Plan | GitHub job creates the change set with the plan role (as above) | Same |
+| Approval | Reviewers approve in the **release console** (§8.5). They sign in with their **GitHub identity** (OAuth); the platform checks live, via the GitHub API, that they are in the product's reviewer GitHub team for that environment and not the person who triggered the run. | Mode A approval **plus** GitHub required reviewers on the `stage`/`prod` environments (submitted from the console as the reviewer) |
+| Who executes | The platform's **release executor** executes the exact reviewed change set (or, for application deploys, releases the exact reviewed artifact, §9.7). GitHub Actions **holds no execute permission** in STAGE/PROD accounts. | Same, or the GitHub deploy job executes it after GitHub approval |
+| AWS-side guarantee | Only the executor role can execute change sets/releases in gated accounts. It is assumable only from the Platform account (`aws:PrincipalOrgID` + ExternalId), and **only with a session tag `org:project`**, so even the executor is limited by tags to one project per session. | Same |
+| Record of approval | Release record (who, when, comment, evidence); also written back to GitHub as a **deployment status and commit status** on the SHA, so the approval is visible in GitHub | GitHub audit log as well |
+
+**Mode A sequence (STAGE shown; PROD is identical):**
+1. `plan-stage` job (GitHub): creates change set `cs-{sha}-{run}`, posts the summary and evidence to the platform.
+2. Gate service: evaluates G4 (§8.4). If it fails, stop.
+3. Release console: reviewer approves.
+4. Release executor: assumes `PlatformReleaseExecutor` in the STAGE account with session tag `org:project=invoice-ingest`, executes `cs-{sha}-{run}`, and waits for completion.
+5. Status flows back to the GitHub run (the waiting `release-stage` job polls the platform API, or a `repository_dispatch` updates it) and to the release console.
+
+Why this is at least as strong as GitHub reviewers alone:
+- The only identity that can change STAGE/PROD is the platform executor, and it acts only on approved, gate-passed change sets.
+- An edited workflow, a leaked GitHub token or a compromised runner cannot deploy to STAGE/PROD in either mode.
+- The gate rules live in the platform, not in repo YAML.
+
 
 ### 8.4 Quality gates for STAGE and PROD (recommended strategy)
 
@@ -854,12 +920,12 @@ flowchart LR
 
 | Gate | When | Checks | Blocks on | Enforced by |
 |---|---|---|---|---|
-| **G1 · Pull request** | Before merge to `main` | cfn-lint; cfn-guard (all environment rule sets, so a PROD violation is caught early); IaC security scan (e.g. Checkov); unit tests + coverage threshold; SAST (CodeQL / bandit); dependency scan (Dependabot / pip-audit); secret scanning with push protection; 1 code review from the product's team (CODEOWNERS) | Any failure | GitHub **ruleset** on `main` (required status checks + required review), set by the platform at repo creation and checked by the reconciler |
-| **G2 · Build** | Once per commit on `main` | SBOM (e.g. Syft); vulnerability scan of the bundle (e.g. Grype); **artifact attestation** (GitHub artifact attestations / Sigstore) binding the zip digest to the commit and workflow | Critical/high vulnerabilities without an approved exception; missing attestation | Build job; digest + results recorded as evidence |
+| **G1 · Pull request** | Before merge to `main` | cfn-lint; cfn-guard (all environment rule sets, so a PROD violation is caught early); IaC security scan (Checkov); unit tests + coverage threshold; SAST (bandit / SpotBugs+FindSecBugs / gosec / cargo-audit / eslint-plugin-security); dependency scan (OSV-Scanner); secret scanning (gitleaks); 1 code review from the product's team (CODEOWNERS) | Any failure | GitHub **ruleset** on `main` (required status checks + required review), set by the platform at repo creation and checked by the reconciler |
+| **G2 · Build** | Once per commit on `main` | SBOM (Syft); vulnerability scan of the bundle (Trivy / OSV-Scanner); **signed provenance**: cosign signature with an AWS KMS key plus a SLSA provenance statement binding the artifact digest to the commit and workflow run | Critical/high vulnerabilities without an approved exception; missing attestation | Build job; digest + results recorded as evidence |
 | **G3 · DEV / TEST** | After each deploy | DEV: smoke tests. TEST: integration/contract tests against the deployed stack; results published as check runs | Any failed suite | `needs:` in the workflow + evidence record |
-| **G4 · Pre-STAGE** | In `plan-stage`, before approval | Evidence check: G1–G3 passed **for this SHA and digest**. Attestation verified. **Change set risk analysis** (below). **Drift detection** on the STAGE stack. **IAM Access Analyzer custom policy checks**: no new access compared with the currently deployed template (`CheckNoNewAccess`) and no forbidden actions (`CheckAccessNotGranted`) | Any failed check; high-risk change without an explicit override | Gate service (deployment protection rule) |
+| **G4 · Pre-STAGE** | In `plan-stage`, before approval | Evidence check: G1–G3 passed **for this SHA and digest**. Attestation verified. **Change set risk analysis** (below). **Drift detection** on the STAGE stack. **IAM Access Analyzer custom policy checks**: no new access compared with the currently deployed template (`CheckNoNewAccess`) and no forbidden actions (`CheckAccessNotGranted`) | Any failed check; high-risk change without an explicit override | Gate service (Mode A: before the release executor; Mode B: also as a deployment protection rule) |
 | **Reviewer (STAGE)** | After G4 passes | Human approval with the evidence summary | Rejection / no approval | GitHub required reviewers (§8.3) |
-| **G5 · Pre-PROD** | In `plan-prod`, before approval | Everything in G4 for the PROD stack, plus: **same artifact digest that ran in STAGE**; STAGE **bake time** met (e.g. ≥ 24 h, set per environment); STAGE CloudWatch alarms **green** during the bake; UAT sign-off recorded; **change window** open / no freeze; optional **ITSM change ticket** approved | Any failed check | Gate service (deployment protection rule) |
+| **G5 · Pre-PROD** | In `plan-prod`, before approval | Everything in G4 for the PROD stack, plus: **same artifact digest that ran in STAGE**; STAGE **bake time** met (e.g. ≥ 24 h, set per environment); STAGE CloudWatch alarms **green** during the bake; UAT sign-off recorded; **change window** open / no freeze; optional **change record** approved (built-in; external ITSM only via webhook if an organization wants it) | Any failed check | Gate service (Mode A: before the release executor; Mode B: also as a deployment protection rule) |
 | **Reviewer (PROD)** | After G5 passes | Human approval with the evidence summary | Rejection / no approval | GitHub required reviewers (§8.3) |
 | **G6 · Post-deploy** | During and after the PROD deploy | CloudFormation **rollback triggers** (`RollbackConfiguration` with CloudWatch alarms and a monitoring window) roll the stack back automatically if alarms fire; post-deploy health checks | Alarm during the monitoring window → automatic rollback | CloudFormation + pipeline |
 
@@ -881,10 +947,12 @@ The plan job sends the change set to the gate service, which classifies every ch
 
 #### 8.4.4 How the gate plugs into GitHub
 
+In **Mode A** (default) the gate is checked by the platform before the release executor runs, with no GitHub feature needed. In **Mode B** it is also connected to GitHub as follows:
+
 - The platform's GitHub App is registered as a **custom deployment protection rule** on every `stage` and `prod` environment, set at repo creation and checked by the reconciler.
 - When a `deploy-stage` / `deploy-prod` job is about to start, GitHub sends a `deployment_protection_rule` event. The gate service evaluates G4/G5 and answers approve or reject, with a link to the evidence.
 - The job starts only when **both** the gate service and a human reviewer approve. If the gate rejects, reviewers are never asked.
-- **GitHub plan requirement:** custom deployment protection rules, like required reviewers, need GitHub Enterprise Cloud for private/internal repos (D15).
+- **Mode A (default, any plan):** the gate service is evaluated by the platform itself before the release executor runs (§8.3.1). The deployment protection rule integration above applies only in **Mode B** (GitHub Enterprise).
 
 #### 8.4.5 Gate settings are configurable per environment
 
@@ -893,7 +961,7 @@ These thresholds are part of the environment's `guardrailProfile` (§5.5.1) and 
 - allowed vulnerability severity;
 - bake time;
 - change windows / freeze calendar;
-- whether an ITSM ticket is required;
+- whether a change record is required;
 - which risk levels need an override.
 
 The **gates themselves cannot be disabled for STAGE or prod-tier environments**; only their thresholds can be tuned.
@@ -948,7 +1016,9 @@ stateDiagram-v2
 - **Superseded:** if a newer commit reaches the same gate, the older pending approval is closed automatically, so reviewers only see the latest candidate.
 - The state is driven by GitHub webhooks (`workflow_run`, `deployment`, `deployment_status`, `deployment_review`, `deployment_protection_rule`) and the gate service, stored in the job/release tables (§3.4).
 
-#### 8.5.3 How an approval in the UI reaches GitHub
+#### 8.5.3 How an approval in the UI reaches GitHub (Mode B only)
+
+In **Mode A** (default), an approval in the console goes straight to the release executor (§8.3.1), and the platform writes a deployment status and commit status back to GitHub. The sequence below applies only when GitHub environment reviewers are also enabled (Mode B).
 
 ```mermaid
 sequenceDiagram
@@ -972,7 +1042,7 @@ sequenceDiagram
 
 - **Reviewer identity:** each reviewer links their GitHub account once (GitHub App user authorization, OAuth). The platform stores the refresh token encrypted. It uses the token only to submit approvals, and only for runs in that reviewer's own products.
 - **Double check on our side:** before calling GitHub, the platform checks that the user is in the product's reviewer group for that environment, is not the person who triggered the run, and that the automated gate passed. GitHub then enforces its own rules again.
-- **Notifications:** new pending approvals, gate failures, rejections and rollbacks are sent to Slack/Teams/email with a deep link to the approval detail page. Reminders go out after a configurable wait (e.g. 4 h).
+- **Notifications:** new pending approvals, gate failures, rejections and rollbacks go to the **in-app inbox** and **email** (Amazon SES or any SMTP server), with a deep link to the approval detail page. Generic **signed outgoing webhooks** let an organization forward events to any chat tool it uses, without the platform depending on that tool. Reminders go out after a configurable wait (e.g. 4 h).
 - **Promotion mode** (configurable per environment, §5.5.1):
   - `auto`: STAGE plan starts automatically after TEST succeeds.
   - `on-request`: a user clicks **Promote to STAGE/PROD** in the UI, which starts the plan job via `workflow_dispatch`.
@@ -992,7 +1062,7 @@ sequenceDiagram
 | Permissions | `id-token: write`, `contents: read` |
 | Structure | A reusable workflow `deploy-env.yml` (inputs: environment) holds all deploy steps and is identical in every repo. The caller `deploy.yml` is **generated from the environment configuration**: one job per enabled environment, chained in the configured order; gated environments (STAGE, PROD) get a `plan-{env}` job followed by a `deploy-{env}` job, with the quality gate (§8.4) and reviewer approval (§8.3) between them. If admins change the environment list later, the platform opens a "sync pipeline" PR in affected repos instead of changing them silently. |
 | Concurrency | One group per environment (`deploy-{env}`), `cancel-in-progress: false` |
-| Supply chain | Actions pinned to commit SHAs; Dependabot |
+| Supply chain | Actions pinned to commit SHAs (only GitHub-owned `actions/*`, `aws-actions/*` and the platform's own actions are allowed); Dependabot |
 | Per-environment job steps | 1. OIDC credentials (`role-to-assume: vars.AWS_ROLE_ARN`, `aws-region: vars.AWS_REGION`, scoped to that GitHub environment)<br/>2. **Guard:** caller account must equal `vars.AWS_ACCOUNT_ID` and `vars.ENVIRONMENT_NAME` must equal the job's environment<br/>3. **Pre-flight stack-state check** (table below)<br/>4. `aws cloudformation deploy` with `--role-arn $CFN_EXEC_ROLE_ARN`, `--parameter-overrides` from `config/{env}.json` + code prefix, `--tags` = the full `org:*` set built from GitHub variables (`vars.ORG_*`, `vars.PROJECT_NAME`, `vars.ENVIRONMENT_NAME`), `--no-fail-on-empty-changeset` (**DEV/TEST/sandbox only**; STAGE/PROD use the plan → approve → execute flow in §8.3)<br/>5. Post-deploy checks; outputs to job summary<br/>6. On failure: failed stack events (resource, type, reason) to job summary, exit non-zero |
 
 Tags passed with `--tags` come from GitHub variables set by the platform (§5.5.5). **Even if someone changes them, IAM denies any value that doesn't match the deploy role's tags (§4.4).**
@@ -1184,7 +1254,7 @@ A central, versioned repo of **reusable GitHub workflows**. Application repos ca
 | Rust | `bootstrap` via `cargo lambda build --arm64` → `provided.al2023` | Distroless image |
 | Node.js | bundled zip (esbuild) → `nodejs22.x` | Docker image |
 
-Every build: unit tests → SAST/dependency scan → SBOM → vulnerability scan → **artifact attestation** → (Lambda) **AWS Signer code signing** → publish to the artifact bucket (zip) or ECR (image, by digest). This is the application version of gates G1–G2.
+Every build: unit tests → SAST/dependency scan → SBOM → vulnerability scan → **signed provenance (cosign + AWS KMS)** → (Lambda) **AWS Signer code signing** → publish to the artifact bucket (zip) or ECR (image, by digest). This is the application version of gates G1–G2.
 
 **Deploy workflows (per compute type):** `deploy-lambda.yml`, `deploy-ecs.yml`, `deploy-eks.yml` (GitOps update), `deploy-sfn.yml`. Each one:
 1. Assumes the **app deploy role** for the environment via OIDC.
@@ -1219,6 +1289,8 @@ For application deploys, the "change set" the reviewer approves is a **deploy di
 | `s3:PutObject` | `artifact-bucket/apps/{project}/*` |
 | `eks:DescribeCluster` | Shared cluster (for GitOps, nothing else; Kubernetes access goes through Argo CD) |
 
+**Gated environments (STAGE/PROD), Mode A:** the app deploy role only **prepares** a release: it uploads the artifact, publishes a Lambda version, registers a task definition revision, or proposes a GitOps commit. The **platform release executor** performs the traffic-affecting step after approval: moving the `live` alias, updating the ECS service, merging/syncing the GitOps change, or executing the app stack change set.
+
 **Never allowed:** `iam:Create*`/`Put*`/`Attach*`, any change to buckets/tables/queues/VPC/security groups/triggers, any resource of another project.
 
 **Extra safeguards:**
@@ -1238,7 +1310,7 @@ For application deploys, the "change set" the reviewer approves is a **deploy di
 | Use resources in code | Read the environment variables the deploy injects (`UPLOADS_BUCKET_NAME`, …). This works the same way in every language, with no platform SDK. The language templates include small examples (boto3, AWS SDK for Java v2, AWS SDK for Go v2, AWS SDK for Rust). |
 | Get a new bucket/table/permission | Platform UI → **"Change infrastructure"** → the platform regenerates the template and opens a **PR on the infrastructure repo** → gates and approvals → infra promotes → the contract updates → the app can use it |
 | Run or test locally | IAM Identity Center access to sandbox/DEV, with tag-based access to the product's resources (§4.8); `platform env export --env dev` writes the contract values as local env vars |
-| Discover what exists | Platform UI project page (infra repo, bound app repos per slot, environments, versions). Each repo also gets a `catalog-info.yaml` so a **Backstage** portal can show the same view, if you use one. |
+| Discover what exists | Platform UI project page (infra repo, bound app repos per slot, environments, versions). Each repo also gets a `catalog-info.yaml` so an open-source **Backstage** portal can show the same view, if you choose to run one (optional). |
 
 **GitHub variables in application repos** (§5.5.5 rules apply). These are the only variables an application repo needs; everything else comes from the contract at deploy time:
 
@@ -1312,7 +1384,7 @@ The platform knows exactly which value each **deployed** app version requires, b
 | Need | Mechanism |
 |---|---|
 | Unit tests | Language templates include fakes/mocks for the AWS SDK calls they use; tests read the same env vars the deploy injects |
-| Local integration | `platform dev up` starts **LocalStack** (or service emulators) configured from the **declared contract**: same bucket/table/queue names and env vars |
+| Local integration | `platform dev up` starts **open-source emulators** (moto server; AWS SAM CLI for Lambda; LocalStack Community optional) configured from the **declared contract**: same bucket/table/queue names and env vars |
 | Real AWS without waiting | **Ephemeral sandbox environments**: the platform deploys the declared infrastructure into the sandbox account with a TTL (`org:expires-on`) for a feature branch, without touching shared environments |
 | Contract tests | The golden-path build checks the app's `requires`/`optional` against the declared contract (catches typos and stale names before any deploy) |
 
@@ -1370,7 +1442,7 @@ Synthesis is cheap. The real limits are **GitHub API quotas per installation**, 
 |---|---|
 | UI | Static on CloudFront (includes the release console); registry responses cached per user with a short TTL |
 | API | Stateless containers, autoscaled |
-| Registry | DynamoDB; read-heavy, cached; CMDB sync is event-driven |
+| Registry | DynamoDB; read-heavy, cached; admin edits and imports are event-driven |
 | Orchestration | Step Functions Standard (durable, holding many jobs open costs no compute); per-environment bootstrap runs as a `Map` state with a concurrency cap |
 | Workers | Lambda with reserved concurrency per worker type |
 | Status | Webhooks → DynamoDB Streams → SSE/WebSocket; reconciler for missed events |
@@ -1385,7 +1457,7 @@ Synthesis is cheap. The real limits are **GitHub API quotas per installation**, 
 
 ### 10.4 Catalog and registry growth
 - **New service** = block + binders + tag-support matrix entry + additions to the shared policies (rolled out via StackSets) + golden tests. No UI-protocol or orchestrator changes.
-- **New portfolio/product** = registry entry (CMDB sync). Tag Policy allowed values update automatically. No IAM changes.
+- **New portfolio/product** = registry entry (admin screen or import). Tag Policy allowed values update automatically. No IAM changes.
 - **New account** = joins an OU, is bootstrapped automatically, then an admin binds it to an environment in the application.
 - **New environment** (e.g. adding `perf` between TEST and STAGE) = admin creates it in the application, binds accounts, and approves. New projects pick it up at once; existing projects get a sync-pipeline PR.
 
@@ -1474,7 +1546,7 @@ CloudInfraAutomation/
 │   └── runbooks/
 ├── backend/
 │   ├── api/                           ← FastAPI, auth, entitlements, idempotency
-│   ├── registry/                      ← org registry model, CMDB sync, tag-policy sync
+│   ├── registry/                      ← org registry model, CSV/REST import, tag-policy sync
 │   ├── synth/                         ← models, blocks, binders, linters, starters, env profiles
 │   ├── provisioning/                  ← github/, aws/ (multi-account), saga/
 │   ├── webhooks/                      ← workflow_run / deployment_status + reconciler
@@ -1511,25 +1583,26 @@ CloudInfraAutomation/
 | D4 | Main isolation level | **Project** (default) with opt-in read sharing within a product |
 | D5 | Hierarchy | **Decided:** three levels, Portfolio → Product/Platform → Project. No team level or team tag. |
 | D6 | Account granularity | **B: per portfolio per environment**, with C available per product |
-| D7 | Registry source of truth | CMDB (which one?) synced into the platform registry, or the platform registry as the master |
+| D7 | Registry source of truth | **Decided:** the platform registry is the master (CSV/REST import available) |
 | D8 | Sandbox model | Shared sandbox account per portfolio with 14-day TTL, or per-product sandbox accounts? |
-| D9 | Approvers | **Decided:** STAGE and PROD require GitHub reviewer approval before deployment. Open: which groups review each (default QA for STAGE; product owner + change management for PROD), and is an ITSM (e.g. ServiceNow change) link required? |
+| D9 | Approvers | **Decided:** STAGE and PROD require GitHub reviewer approval before deployment. Open: which groups review each (default QA for STAGE; product owner + change management for PROD), and is a built-in change record required for PROD? |
 | D10 | Regions | Single region in v1, or multi-region from the start? |
 | D11 | Onboarded today? | Do Control Tower / OUs per environment already exist, or does `org/` need to create the OU structure too? |
 | D12 | LLM | Exclude from v1, or NL → draft payload only? |
 | D13 | Who can configure environments and accounts | **Platform admins only, with a second-person approval** for changes to production-tier environments. Normal users see environments read-only. (If you meant every user should configure them, note that whoever binds an account decides where code deploys.) |
 | D14 | Binding scope | Bind accounts per **portfolio** by default, with a per-product override (matches D6), or per product only? |
-| D15 | GitHub plan | Required reviewers on private/internal repos need **GitHub Enterprise Cloud**. Which plan do you have? |
-| D16 | Quality-gate thresholds | Coverage minimum (e.g. 80%), vulnerability policy (block critical/high), STAGE bake time before PROD (e.g. 24 h), change windows / freeze calendar, ITSM ticket required for PROD? |
+| D15 | GitHub plan | Not a blocker: Mode A works on any plan. If you have GitHub Enterprise, should Mode B (GitHub environment reviewers in addition) be turned on? |
+| D16 | Quality-gate thresholds | Coverage minimum (e.g. 80%), vulnerability policy (block critical/high), STAGE bake time before PROD (e.g. 24 h), change windows / freeze calendar, built-in change record required for PROD? |
 | D17 | PROD approvals | One GitHub approval (simplest), or two approvals from different groups collected in the release console (§8.5.4)? |
-| D18 | Notifications | Slack, Microsoft Teams, email, or several? |
+| D18 | Notifications | **Decided:** in-app inbox + email (SES or SMTP) + generic signed webhooks. Which email option: Amazon SES or an existing SMTP relay? |
 | D19 | Application repo granularity | One repo per compute slot (simplest permissions), or allow monorepos serving several slots? |
 | D20 | EKS deploy model | **Argo CD GitOps** (recommended) or pipeline-driven `helm upgrade`? Does a shared EKS cluster per portfolio per environment already exist, and who runs it? |
 | D21 | Languages in v1 | Python, Java, Go, Rust, Node.js all at once, or start with two (e.g. Python + Java)? |
-| D22 | Developer portal | Platform UI only, or also Backstage (`catalog-info.yaml` generated either way)? |
+| D22 | Developer portal | Platform UI only (default), or also open-source Backstage (`catalog-info.yaml` generated either way)? |
 | D23 | Networking for ECS/EKS | Shared VPC from the landing zone (subnets/SGs published to SSM by the network team)? |
 | D24 | Deprecation window | Minimum time a deprecated contract value stays after it becomes unused in an environment (e.g. 0 days in DEV/TEST, 14 days in STAGE/PROD)? |
 | D25 | Infra approvals | Should product reviewers also approve infra deploys to STAGE/PROD, or the platform team only? |
+| D26 | Open-source license policy | Allow Apache-2.0, MIT, BSD, MPL-2.0 and LGPL (as libraries); exclude AGPL and source-available licenses unless approved? |
 
 ---
 
