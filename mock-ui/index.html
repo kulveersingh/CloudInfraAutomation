@@ -1,0 +1,714 @@
+<title>CloudInfra Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Condensed:wght@600;700&display=swap">
+<style>
+/* Layout: operations console — fixed left rail of destinations, a working canvas, state shown as chips and stripes. */
+:root{
+  --bg:#F3F5F6; --surface:#FFFFFF; --sunken:#E9EDEF; --line:#D5DCE0; --line-strong:#B4BFC6;
+  --fg:#16222B; --muted:#53636E; --faint:#7C8B95;
+  --accent:#0B6E79; --accent-ink:#FFFFFF; --accent-soft:#DDF0F1;
+  --rail:#12232D; --rail-fg:#C9D6DD; --rail-active:#1E3A47;
+  --ok:#2E7D32; --ok-soft:#E3F1E4; --warn:#B26A00; --warn-soft:#FBEFD9; --crit:#B3261E; --crit-soft:#F8E1DF; --info:#2C5AA0; --info-soft:#E1EAF7;
+  --f-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-display:"IBM Plex Sans Condensed","IBM Plex Sans",system-ui,sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --r:6px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0E171D; --surface:#15222A; --sunken:#1B2B34; --line:#2A3C47; --line-strong:#3B515E;
+  --fg:#E4ECF0; --muted:#A3B3BC; --faint:#7F919B;
+  --accent:#4FB7C2; --accent-ink:#06262A; --accent-soft:#163D43;
+  --rail:#0A1318; --rail-fg:#B9C8D0; --rail-active:#1A2F3A;
+  --ok:#7CC583; --ok-soft:#1B3320; --warn:#E3A84A; --warn-soft:#3A2C12; --crit:#F08B83; --crit-soft:#3D1D1B; --info:#86AEEA; --info-soft:#1C2B42;
+  color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0E171D; --surface:#15222A; --sunken:#1B2B34; --line:#2A3C47; --line-strong:#3B515E;
+  --fg:#E4ECF0; --muted:#A3B3BC; --faint:#7F919B;
+  --accent:#4FB7C2; --accent-ink:#06262A; --accent-soft:#163D43;
+  --rail:#0A1318; --rail-fg:#B9C8D0; --rail-active:#1A2F3A;
+  --ok:#7CC583; --ok-soft:#1B3320; --warn:#E3A84A; --warn-soft:#3A2C12; --crit:#F08B83; --crit-soft:#3D1D1B; --info:#86AEEA; --info-soft:#1C2B42;
+  color-scheme:dark}
+html,body{height:100%}
+body{background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:14px;line-height:1.5}
+*{box-sizing:border-box}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.app{display:grid;grid-template-columns:232px minmax(0,1fr);min-height:100%}
+/* rail */
+.rail{background:var(--rail);color:var(--rail-fg);padding-block:18px;display:flex;flex-direction:column;gap:18px;position:sticky;top:env(safe-area-inset-top,0px);height:100vh;overflow:auto}
+.brand{padding-inline:18px;display:flex;flex-direction:column;gap:2px}
+.brand b{font-family:var(--f-display);font-size:19px;letter-spacing:.01em;color:#FFFFFF}
+.brand span{font-size:11px;letter-spacing:.08em;text-transform:uppercase;opacity:.7}
+.nav{display:flex;flex-direction:column;gap:2px;padding-inline:10px}
+.nav a{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border-radius:var(--r);color:var(--rail-fg);text-decoration:none;font-weight:500}
+.nav a:hover{background:var(--rail-active)}
+.nav a.on{background:var(--rail-active);color:#FFFFFF;box-shadow:inset 3px 0 0 var(--accent)}
+.nav .count{font-family:var(--f-mono);font-size:11px;background:#C46A1A;color:#FFFFFF;border-radius:10px;padding:0 7px}
+.nav-label{padding-inline:20px;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;opacity:.55;margin-top:6px}
+.rail-foot{margin-top:auto;padding-inline:18px;font-size:12px;opacity:.75;display:flex;flex-direction:column;gap:6px}
+/* main */
+.main{min-width:0;display:flex;flex-direction:column}
+.topbar{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--surface);border-bottom:1px solid var(--line);padding:10px 24px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.crumbs{font-size:13px;color:var(--muted);flex:1;min-width:0}
+.crumbs b{color:var(--fg)}
+.mock{font-family:var(--f-mono);font-size:11px;background:var(--warn-soft);color:var(--warn);border:1px solid var(--warn);border-radius:4px;padding:1px 7px;letter-spacing:.04em}
+.role{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+select,input[type=text],input[type=search],textarea{background:var(--surface);border:1px solid var(--line-strong);border-radius:var(--r);padding:6px 9px;min-width:0}
+textarea{width:100%;resize:vertical}
+.content{padding:22px 24px 48px;display:flex;flex-direction:column;gap:20px;max-width:1280px;width:100%}
+h1{font-family:var(--f-display);font-size:26px;line-height:1.15;margin:0;text-wrap:balance}
+h2{font-family:var(--f-display);font-size:18px;margin:0;text-wrap:balance}
+h3{font-size:14px;margin:0;font-weight:600}
+.sub{color:var(--muted);margin:2px 0 0;max-width:72ch}
+.head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r)}
+.panel-h{padding:12px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.panel-b{padding:14px 16px;display:flex;flex-direction:column;gap:12px}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.spacer{flex:1}
+.btn{border:1px solid var(--line-strong);background:var(--surface);border-radius:var(--r);padding:6px 12px;cursor:pointer;font-weight:500;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.btn:hover{border-color:var(--accent)}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.danger{background:var(--crit);border-color:var(--crit);color:#FFFFFF}
+.btn.ghost{border-color:transparent;background:transparent;color:var(--accent)}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+.label{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);font-weight:600}
+.mono{font-family:var(--f-mono);font-size:12.5px}
+.muted{color:var(--muted)}
+.tbl-wrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th{text-align:left;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);font-weight:600;padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:0}
+tr.click{cursor:pointer}
+tr.click:hover td{background:var(--sunken)}
+.num{font-variant-numeric:tabular-nums;font-family:var(--f-mono)}
+/* chips */
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;border-radius:999px;padding:1px 9px;border:1px solid transparent;white-space:nowrap}
+.chip::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.chip.ok{background:var(--ok-soft);color:var(--ok)}
+.chip.warn{background:var(--warn-soft);color:var(--warn)}
+.chip.crit{background:var(--crit-soft);color:var(--crit)}
+.chip.info{background:var(--info-soft);color:var(--info)}
+.chip.idle{background:var(--sunken);color:var(--muted)}
+.tag{font-family:var(--f-mono);font-size:11.5px;background:var(--sunken);border:1px solid var(--line);border-radius:4px;padding:1px 6px;white-space:nowrap}
+.tag b{color:var(--accent);font-weight:500}
+.tags{display:flex;flex-wrap:wrap;gap:6px}
+.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}
+.kpi{padding:14px 16px}
+.kpi .v{font-family:var(--f-display);font-size:28px;line-height:1.1;font-variant-numeric:tabular-nums}
+.kpi .k{font-size:12px;color:var(--muted)}
+/* pipeline */
+.pipe{display:grid;grid-template-columns:repeat(5,minmax(150px,1fr));gap:10px;overflow-x:auto;padding-bottom:4px}
+.stage{border:1px solid var(--line);border-radius:var(--r);background:var(--surface);padding:10px 12px;display:flex;flex-direction:column;gap:6px;position:relative;min-width:0}
+.stage.gated{border-color:var(--warn)}
+.stage .env{font-family:var(--f-display);font-size:15px;font-weight:700;display:flex;justify-content:space-between;align-items:center}
+.stage .meta{font-size:12px;color:var(--muted)}
+.stage .chip{align-self:flex-start}
+td.mono{white-space:nowrap}
+.stage .stripe{position:absolute;inset:0 auto 0 0;width:4px;border-radius:var(--r) 0 0 var(--r)}
+.gates{display:flex;gap:4px;flex-wrap:wrap}
+.g{font-family:var(--f-mono);font-size:10.5px;border-radius:3px;padding:0 5px;border:1px solid var(--line)}
+.g.p{color:var(--ok);border-color:var(--ok)} .g.f{color:var(--crit);border-color:var(--crit)} .g.w{color:var(--faint)}
+/* wizard */
+.steps{display:flex;gap:6px;flex-wrap:wrap;counter-reset:s}
+.step{display:flex;align-items:center;gap:8px;padding:6px 12px 6px 6px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--muted);font-weight:500;cursor:pointer}
+.step i{font-style:normal;width:22px;height:22px;border-radius:50%;display:grid;place-items:center;background:var(--sunken);font-size:12px;font-family:var(--f-mono)}
+.step.on{border-color:var(--accent);color:var(--fg)} .step.on i{background:var(--accent);color:var(--accent-ink)}
+.step.done i{background:var(--ok-soft);color:var(--ok)}
+.field{display:flex;flex-direction:column;gap:5px;min-width:0}
+.field label{font-weight:600;font-size:13px}
+.hint{font-size:12px;color:var(--muted)}
+.err{font-size:12px;color:var(--crit);font-weight:500}
+.choice{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.opt{border:1px solid var(--line-strong);border-radius:var(--r);padding:12px;cursor:pointer;background:var(--surface);display:flex;flex-direction:column;gap:4px;text-align:left}
+.opt.on{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent);background:var(--accent-soft)}
+.opt b{font-size:14px}
+.cat{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px}
+.svc{border:1px solid var(--line);border-radius:var(--r);padding:10px;display:flex;flex-direction:column;gap:4px;background:var(--surface)}
+.svc .row{justify-content:space-between}
+.pill{font-size:10.5px;font-family:var(--f-mono);color:var(--muted);border:1px solid var(--line);border-radius:3px;padding:0 4px}
+.code{font-family:var(--f-mono);font-size:12px;background:var(--sunken);border:1px solid var(--line);border-radius:var(--r);padding:12px;overflow:auto;max-height:360px;white-space:pre;line-height:1.55}
+.kv{display:grid;grid-template-columns:minmax(120px,max-content) minmax(0,1fr);gap:6px 14px;font-size:13px}
+.kv dt{color:var(--muted)} .kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.risk-h{border-left:3px solid var(--crit)} .risk-m{border-left:3px solid var(--warn)} .risk-l{border-left:3px solid var(--line-strong)}
+.notice{border:1px solid var(--line);border-left:4px solid var(--info);background:var(--info-soft);border-radius:var(--r);padding:10px 12px;font-size:13px}
+.notice.warn{border-left-color:var(--warn);background:var(--warn-soft)}
+.notice.crit{border-left-color:var(--crit);background:var(--crit-soft)}
+.notice.ok{border-left-color:var(--ok);background:var(--ok-soft)}
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);overflow-x:auto}
+.tabs button{border:0;background:transparent;padding:8px 12px;cursor:pointer;color:var(--muted);font-weight:500;border-bottom:2px solid transparent;white-space:nowrap}
+.tabs button.on{color:var(--fg);border-bottom-color:var(--accent)}
+.prog{display:flex;flex-direction:column;gap:8px}
+.prog div{display:flex;gap:10px;align-items:center;font-size:13px}
+.dot{width:18px;height:18px;border-radius:50%;border:2px solid var(--line-strong);flex:none;display:grid;place-items:center;font-size:10px}
+.dot.run{border-color:var(--accent);border-top-color:transparent;animation:spin 1s linear infinite}
+.dot.done{background:var(--ok);border-color:var(--ok);color:#FFFFFF}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion: reduce){.dot.run{animation:none}}
+.region{border:1px solid var(--line);border-radius:var(--r);padding:12px;display:flex;flex-direction:column;gap:8px;background:var(--surface)}
+.region.active{border-top:4px solid var(--ok)} .region.standby{border-top:4px solid var(--info)}
+.toast{position:fixed;right:20px;bottom:calc(20px + env(safe-area-inset-bottom,0px));background:var(--fg);color:var(--bg);padding:10px 14px;border-radius:var(--r);font-size:13px;max-width:min(420px,calc(100vw - 40px));z-index:20;box-shadow:0 6px 24px rgba(0,0,0,.25)}
+.empty{padding:28px;text-align:center;color:var(--muted)}
+.split{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:16px;align-items:start}
+.diff-add{color:var(--ok)} .diff-del{color:var(--crit)}
+@media (max-width: 980px){
+  .app{grid-template-columns:minmax(0,1fr)}
+  .rail{position:static;height:auto;flex-direction:row;flex-wrap:wrap;align-items:center;padding:10px 16px;gap:10px}
+  .brand{padding:0} .nav{flex-direction:row;overflow-x:auto;padding:0;flex:1 1 100%} .nav a{white-space:nowrap}
+  .nav-label,.rail-foot{display:none}
+  .split,.grid2,.grid3{grid-template-columns:minmax(0,1fr)}
+  .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .choice{grid-template-columns:minmax(0,1fr)}
+}
+@media (max-width: 520px){
+  .content{padding:16px 16px 40px} .topbar{padding:10px 16px}
+  .kpis{grid-template-columns:minmax(0,1fr)}
+}
+</style>
+
+<div class="app">
+  <aside class="rail" aria-label="Main navigation">
+    <div class="brand"><b>CloudInfra Console</b><span>Infrastructure self-service</span></div>
+    <nav class="nav" id="nav"></nav>
+    <div class="rail-foot">
+      <div>Catalog <span class="mono">2026.10.0</span></div>
+      <div>Org <span class="mono">o-exampleorg</span></div>
+    </div>
+  </aside>
+  <div class="main">
+    <header class="topbar">
+      <div class="crumbs" id="crumbs"></div>
+      <span class="mock" title="All names, accounts and numbers on this page are invented for the mock-up">MOCK DATA</span>
+      <label class="role" for="roleSel">Viewing as
+        <select id="roleSel"></select>
+      </label>
+    </header>
+    <main class="content" id="view"></main>
+  </div>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+/* ---------------- Mock data (all invented) ---------------- */
+const ROLES = {
+  dev:   {name:"Jordan Lee", title:"Developer · Invoicing", can:["create"]},
+  rev:   {name:"Sam Patel", title:"Reviewer · QA + Invoicing owner", can:["approve","provider"]},
+  admin: {name:"Alex Kim", title:"Platform admin", can:["admin","override","approve"]},
+  dl:    {name:"Morgan Diaz", title:"Provider owner · Data Lake", can:["provider"]},
+};
+let role = "rev";
+
+const REGISTRY = [
+  {id:"pf-payments", name:"Payments", products:[
+    {id:"pr-invoicing", name:"Invoicing", kind:"product", cc:"CC-4410", ceiling:"confidential"},
+    {id:"pl-payments-core", name:"Payments Core", kind:"platform", cc:"CC-4400", ceiling:"restricted"}]},
+  {id:"pf-retail", name:"Retail", products:[
+    {id:"pr-storefront", name:"Storefront", kind:"product", cc:"CC-5120", ceiling:"internal"},
+    {id:"pr-loyalty", name:"Loyalty", kind:"product", cc:"CC-5130", ceiling:"confidential"}]},
+  {id:"pf-data", name:"Data & Analytics", products:[
+    {id:"pl-datalake", name:"Data Lake Platform", kind:"platform", cc:"CC-7000", ceiling:"confidential"}]},
+];
+const ENVS = [
+  {id:"sandbox", name:"Sandbox", tier:"sandbox", order:1, approval:false, trigger:"Manual, any branch"},
+  {id:"dev", name:"DEV", tier:"nonprod", order:2, approval:false, trigger:"Auto on main"},
+  {id:"test", name:"TEST", tier:"nonprod", order:3, approval:false, trigger:"After DEV"},
+  {id:"stage", name:"QA/STAGE", tier:"nonprod", order:4, approval:true, trigger:"After TEST + approval"},
+  {id:"prod", name:"PROD", tier:"prod", order:5, approval:true, trigger:"After STAGE + approval"},
+];
+const ACCOUNTS = {
+  "pf-payments": {sandbox:"111111111111", dev:"222222222222", test:"333333333333", stage:"444444444444", prod:"555555555555"},
+  "pf-retail":   {sandbox:"611111111111", dev:"622222222222", test:"633333333333", stage:"644444444444", prod:"655555555555"},
+  "pf-data":     {sandbox:"711111111111", dev:"722222222222", test:"733333333333", stage:"744444444444", prod:"666666666666"},
+};
+let REGIONS = [
+  {id:"us-east-1", name:"US East (N. Virginia)", on:true},
+  {id:"us-east-2", name:"US East (Ohio)", on:true},
+  {id:"us-west-2", name:"US West (Oregon)", on:true},
+  {id:"eu-west-1", name:"Europe (Ireland)", on:true},
+  {id:"eu-central-1", name:"Europe (Frankfurt)", on:true},
+  {id:"ap-southeast-2", name:"Asia Pacific (Sydney)", on:false},
+];
+const CATALOG = [
+  {cat:"Compute", items:[
+    {t:"lambda.function", n:"Lambda function", tier:1, mr:"replicated"},
+    {t:"ecs.service", n:"ECS service (Fargate)", tier:1, mr:"replicated"},
+    {t:"eks.workload", n:"EKS workload", tier:1, mr:"replicated"},
+    {t:"stepfunctions.workflow", n:"Step Functions workflow", tier:1, mr:"replicated"}]},
+  {cat:"Storage", items:[
+    {t:"s3.bucket", n:"S3 bucket", tier:1, mr:"replicated"},
+    {t:"efs.filesystem", n:"EFS file system", tier:1, mr:"replicated"}]},
+  {cat:"Databases", items:[
+    {t:"aurora.postgresql", n:"Aurora PostgreSQL", tier:1, mr:"global", ha:true},
+    {t:"rds.postgresql", n:"RDS PostgreSQL", tier:1, mr:"replica", ha:false},
+    {t:"dynamodb.table", n:"DynamoDB table", tier:1, mr:"global", ha:true},
+    {t:"elasticache.valkey", n:"ElastiCache (Valkey)", tier:1, mr:"global", ha:true},
+    {t:"documentdb.cluster", n:"DocumentDB", tier:1, mr:"global", ha:false},
+    {t:"opensearch.domain", n:"OpenSearch Service", tier:1, mr:"replicated", ha:true}]},
+  {cat:"Integration", items:[
+    {t:"sqs.queue", n:"SQS queue", tier:1, mr:"regional"},
+    {t:"sns.topic", n:"SNS topic", tier:1, mr:"regional"},
+    {t:"eventbridge.rule", n:"EventBridge rule", tier:1, mr:"regional"},
+    {t:"kinesis.stream", n:"Kinesis data stream", tier:1, mr:"regional"}]},
+  {cat:"API & edge", items:[
+    {t:"apigw.http", n:"API Gateway HTTP API", tier:1, mr:"regional"},
+    {t:"alb.rule", n:"ALB listener rule", tier:1, mr:"regional"}]},
+  {cat:"Security", items:[
+    {t:"kms.key", n:"KMS key (multi-Region)", tier:1, mr:"global"},
+    {t:"secrets.secret", n:"Secrets Manager secret", tier:1, mr:"replicated"}]},
+  {cat:"Schema-driven (Tier 2)", items:[
+    {t:"AWS::Timestream::Table", n:"Timestream table", tier:2, mr:"regional"},
+    {t:"AWS::Glue::Job", n:"Glue job", tier:2, mr:"regional"}]},
+];
+const svcName = t => CATALOG.flatMap(c=>c.items).find(i=>i.t===t)?.n || t;
+
+let PROJECTS = [
+  {id:"invoice-ingest", pf:"pf-payments", pr:"pr-invoicing", mode:"dr", primary:"us-east-1", secondary:"us-east-2", strategy:"Pilot light",
+   commit:"4f78c64", msg:"Add archive bucket and grant processor write to archive/",
+   stages:{sandbox:{s:"deployed", v:"feature/ocr · 9b1e2d0", g:"ppp"}, dev:{s:"deployed", v:"4f78c64", g:"ppp"}, test:{s:"deployed", v:"4f78c64", g:"ppp"}, stage:{s:"awaiting", v:"4f78c64", g:"pppp"}, prod:{s:"idle", v:"a1c03e9", g:"ppppw"}},
+   apps:[{repo:"acme-platform/invoice-processor", lang:"Python", slot:"processor", type:"Lambda"}]},
+  {id:"ledger-api", pf:"pf-payments", pr:"pl-payments-core", mode:"ha", primary:"us-east-1", secondary:"us-west-2", strategy:"—",
+   commit:"77d2a10", msg:"Raise API concurrency limit",
+   stages:{sandbox:{s:"idle", v:"—", g:""}, dev:{s:"deployed", v:"77d2a10", g:"ppp"}, test:{s:"deployed", v:"77d2a10", g:"ppp"}, stage:{s:"deployed", v:"77d2a10", g:"pppp"}, prod:{s:"awaiting", v:"77d2a10", g:"ppppp"}},
+   apps:[{repo:"acme-platform/ledger-service", lang:"Java", slot:"api", type:"ECS"},{repo:"acme-platform/ledger-reconcile", lang:"Go", slot:"reconcile", type:"Step Functions"}]},
+  {id:"storefront-search", pf:"pf-retail", pr:"pr-storefront", mode:"single", primary:"us-east-1", secondary:"", strategy:"—",
+   commit:"c90ab44", msg:"Change partition key of search-cache table",
+   stages:{sandbox:{s:"deployed", v:"c90ab44", g:"ppp"}, dev:{s:"deployed", v:"c90ab44", g:"ppp"}, test:{s:"deployed", v:"c90ab44", g:"ppp"}, stage:{s:"blocked", v:"c90ab44", g:"ppfw"}, prod:{s:"idle", v:"5e21b07", g:""}},
+   apps:[{repo:"acme-retail/search-api", lang:"Node.js", slot:"search", type:"Lambda"}]},
+  {id:"datalake-core", pf:"pf-data", pr:"pl-datalake", mode:"dr", primary:"eu-west-1", secondary:"eu-central-1", strategy:"Warm standby",
+   commit:"e4418f2", msg:"Add curated zone lifecycle rules",
+   stages:{sandbox:{s:"idle", v:"—", g:""}, dev:{s:"deployed", v:"e4418f2", g:"ppp"}, test:{s:"deployed", v:"e4418f2", g:"ppp"}, stage:{s:"deployed", v:"e4418f2", g:"pppp"}, prod:{s:"deployed", v:"e4418f2", g:"ppppp"}},
+   apps:[{repo:"acme-data/curation-jobs", lang:"Rust", slot:"curate", type:"Lambda"}]},
+];
+const prodName = id => REGISTRY.flatMap(p=>p.products).find(p=>p.id===id)?.name || id;
+const pfName = id => REGISTRY.find(p=>p.id===id)?.name || id;
+
+let APPROVALS = [
+  {id:"rel-1042", kind:"release", project:"invoice-ingest", env:"stage", requester:"Jordan Lee", age:"2 h", gate:"passed", risk:"medium",
+   changes:[
+     {a:"Add", type:"AWS::S3::Bucket", id:"ArchiveBucket", risk:"low", note:"New bucket invoice-ingest--archive-444444444444-us-east-1; versioned; same-tag bucket policy"},
+     {a:"Modify", type:"AWS::IAM::Role", id:"ProcessorRole", risk:"medium", note:"Adds s3:PutObject on archive bucket /archive/* (exact ARN, tag conditions)"},
+     {a:"Modify", type:"AWS::Lambda::Function", id:"ProcessorFunction", risk:"low", note:"Adds env var ARCHIVE_BUCKET_NAME"},
+     {a:"Add", type:"AWS::S3::BucketPolicy", id:"ArchiveBucketPolicy", risk:"low", note:"Deny other projects / environments, deny non-TLS"}],
+   evidence:{tests:"214 passed · coverage 86%", vulns:"0 critical · 0 high · 2 low", provenance:"Signed (cosign, KMS) · SLSA L3", drift:"No drift", analyzer:"No new external access", regions:"Change sets for us-east-1 and us-east-2 (standby)"}},
+  {id:"rel-1043", kind:"release", project:"ledger-api", env:"prod", requester:"Riley Ng", age:"35 min", gate:"passed", risk:"low",
+   changes:[{a:"Modify", type:"AWS::Lambda::Function", id:"ApiAuthorizer", risk:"low", note:"Reserved concurrency 200 → 400"},{a:"Modify", type:"AWS::ApplicationAutoScaling::ScalableTarget", id:"ApiServiceScaling", risk:"low", note:"Max tasks 20 → 30"}],
+   evidence:{tests:"512 passed · coverage 91%", vulns:"0 critical · 0 high", provenance:"Signed (cosign, KMS) · same artifact as STAGE", drift:"No drift", analyzer:"No new external access", regions:"HA: us-east-1 and us-west-2 (both active)", bake:"STAGE bake 26 h · alarms green · DR drill 9 days ago"}},
+  {id:"ovr-311", kind:"override", project:"storefront-search", env:"stage", requester:"Casey Moore", age:"5 h", gate:"high-risk", risk:"high",
+   changes:[{a:"Replace", type:"AWS::DynamoDB::Table", id:"SearchCacheTable", risk:"high", note:"Partition key change forces replacement. Table holds cache data only (rebuildable)"}],
+   evidence:{reason:"Cache table is rebuilt nightly from the catalog; no system-of-record data", rollback:"Re-deploy previous template; cache warms in ~20 min", tests:"188 passed", drift:"No drift"}},
+];
+let SHARES = [
+  {id:"datalake-curated", name:"datalake-core--curated (S3)", owner:"Data Lake Platform", pf:"pf-data", pr:"pl-datalake", scope:"organization", access:"read", approval:"required", cls:"internal", env:"prod", region:"eu-west-1"},
+  {id:"ledger-events", name:"ledger-api--events (SNS topic)", owner:"Payments Core", pf:"pf-payments", pr:"pl-payments-core", scope:"portfolio", access:"consume", approval:"auto", cls:"confidential", env:"prod", region:"us-east-1"},
+  {id:"fx-rates", name:"payments-core--fx-rates (DynamoDB)", owner:"Payments Core", pf:"pf-payments", pr:"pl-payments-core", scope:"product", access:"read", approval:"required", cls:"internal", env:"prod", region:"us-east-1"},
+];
+let SHARE_REQS = [
+  {id:"shr-88", type:"Access request", resource:"datalake-core--curated (S3)", consumer:"ledger-api · prod · 555555555555", access:"read · prefix invoices/", approvers:"Provider owner (Data Lake)", status:"pending", requester:"Riley Ng", providerRole:"dl"},
+  {id:"shr-87", type:"Share offer", resource:"invoice-ingest--uploads (S3)", consumer:"scope: product · read", access:"read", approvers:"Provider owner (Invoicing)", status:"pending", requester:"Jordan Lee", providerRole:"rev"},
+  {id:"shr-80", type:"Access request", resource:"ledger-api--events (SNS)", consumer:"invoice-ingest · prod", access:"consume", approvers:"Auto-approved (provider notified)", status:"active", requester:"Jordan Lee"},
+];
+
+/* ---------------- Helpers ---------------- */
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const chip = (cls, txt) => `<span class="chip ${cls}">${esc(txt)}</span>`;
+const stateChip = s => ({deployed:chip("ok","Deployed"), awaiting:chip("warn","Awaiting approval"), blocked:chip("crit","Gate: override needed"), deploying:chip("info","Deploying"), idle:chip("idle","Waiting"), rejected:chip("crit","Rejected")}[s] || chip("idle", s));
+const modeChip = m => ({single:chip("idle","Single region"), dr:chip("info","DR · active/standby"), ha:chip("ok","HA · active/active")}[m]);
+function toast(msg){const t=$("#toast"); t.textContent=msg; t.hidden=false; clearTimeout(toast._t); toast._t=setTimeout(()=>t.hidden=true,3600);}
+const can = c => ROLES[role].can.includes(c);
+const me = () => ROLES[role].name;
+const pendingCount = () => APPROVALS.length + SHARE_REQS.filter(r=>r.status==="pending").length;
+
+/* ---------------- Routing ---------------- */
+const ROUTES = [
+  {id:"projects", label:"Projects", group:"Work"},
+  {id:"new", label:"New project", group:"Work"},
+  {id:"releases", label:"Release console", group:"Work", count:true},
+  {id:"sharing", label:"Sharing", group:"Work"},
+  {id:"developer", label:"Developer view", group:"Work"},
+  {id:"resilience", label:"Resilience (DR/HA)", group:"Work"},
+  {id:"admin", label:"Admin", group:"Platform"},
+];
+let state = {project:"invoice-ingest", approval:null, adminTab:"environments", shareTab:"catalog", devEnv:"dev", devRegion:"primary", releaseTab:"inbox"};
+function route(){ const h=(location.hash||"#projects").slice(1); return ROUTES.some(r=>r.id===h)?h:"projects"; }
+function renderNav(){
+  const cur=route(); let html=""; let g="";
+  ROUTES.forEach(r=>{ if(r.group!==g){g=r.group; html+=`<div class="nav-label">${g}</div>`;}
+    const c = r.count && pendingCount() ? `<span class="count">${pendingCount()}</span>` : "";
+    html+=`<a href="#${r.id}" class="${cur===r.id?"on":""}">${r.label}${c}</a>`; });
+  $("#nav").innerHTML=html;
+  const r=ROUTES.find(x=>x.id===cur); $("#crumbs").innerHTML=`acme-platform / <b>${r.label}</b>`;
+}
+function render(){
+  renderNav();
+  const v=route(); const fn={projects:vProjects,new:vWizard,releases:vReleases,sharing:vSharing,developer:vDeveloper,resilience:vResilience,admin:vAdmin}[v];
+  $("#view").innerHTML=fn();
+}
+window.addEventListener("hashchange", ()=>{render(); window.scrollTo(0,0);});
+
+/* ---------------- Projects ---------------- */
+function vProjects(){
+  const rows = PROJECTS.map(p=>`<tr class="click" data-act="openProject" data-id="${p.id}">
+    <td><b>${p.id}</b><div class="muted" style="font-size:12px">${pfName(p.pf)} → ${prodName(p.pr)}</div></td>
+    <td>${modeChip(p.mode)}<div class="mono muted" style="margin-top:3px">${p.primary}${p.secondary?" · "+p.secondary:""}</div></td>
+    ${ENVS.map(e=>`<td>${stateChip(p.stages[e.id].s)}</td>`).join("")}
+  </tr>`).join("");
+  const awaiting = PROJECTS.reduce((n,p)=>n+Object.values(p.stages).filter(s=>s.s==="awaiting"||s.s==="blocked").length,0);
+  return `
+  <div class="head"><div><h1>Projects</h1><p class="sub">Every project is one infrastructure repository, deployed through your configured environments. Click a row to open its release pipeline.</p></div>
+    <a class="btn pri" href="#new">New project</a></div>
+  <div class="kpis">
+    <div class="panel kpi"><div class="v">${PROJECTS.length}</div><div class="k">Projects you can see</div></div>
+    <div class="panel kpi"><div class="v">${awaiting}</div><div class="k">Releases waiting on a gate or approval</div></div>
+    <div class="panel kpi"><div class="v">${PROJECTS.filter(p=>p.mode!=="single").length}</div><div class="k">DR / HA projects</div></div>
+    <div class="panel kpi"><div class="v">${SHARE_REQS.filter(r=>r.status==="pending").length}</div><div class="k">Sharing requests pending</div></div>
+  </div>
+  <div class="panel"><div class="tbl-wrap"><table>
+    <thead><tr><th>Project</th><th>Resilience</th>${ENVS.map(e=>`<th>${e.name}</th>`).join("")}</tr></thead>
+    <tbody>${rows}</tbody></table></div></div>`;
+}
+
+/* ---------------- Wizard ---------------- */
+let W = {step:1, pf:"pf-payments", pr:"pr-invoicing", name:"invoice-archive", cls:"confidential", mode:"dr", primary:"us-east-1", secondary:"us-east-2", strategy:"pilot",
+  resources:[{id:"uploads", t:"s3.bucket"},{id:"processor", t:"lambda.function"},{id:"invoices", t:"dynamodb.table"}],
+  connections:[{kind:"event.notify", from:"uploads", to:"processor", detail:"s3:ObjectCreated:* · prefix incoming/"},{kind:"iam.access", from:"processor", to:"invoices", detail:"readwrite"}],
+  envs:["sandbox","dev","test","stage","prod"], search:"", job:null};
+const WSTEPS = ["Ownership","Resilience","Services","Connections","Environments","Preview"];
+function wErrors(){
+  const e=[];
+  if(!/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/.test(W.name) || W.name.length<3 || W.name.length>30) e.push({s:1,m:"Project name must be 3–30 characters: lowercase letters, digits and single hyphens."});
+  if(PROJECTS.some(p=>p.id===W.name)) e.push({s:1,m:`A project named ${W.name} already exists.`});
+  if(W.mode!=="single" && W.primary===W.secondary) e.push({s:2,m:"Choose two different regions for the DR/HA pair."});
+  if(W.mode==="ha") W.resources.forEach(r=>{const it=CATALOG.flatMap(c=>c.items).find(i=>i.t===r.t); if(it && it.ha===false) e.push({s:3,m:`${it.n} (${r.id}) can be active in only one region. For an HA pair use Aurora PostgreSQL (global database) or DynamoDB global tables.`});});
+  if(W.mode==="ha" && W.resources.some(r=>r.t==="documentdb.cluster")) {}
+  if(!W.resources.length) e.push({s:3,m:"Add at least one service."});
+  if(W.envs.includes("prod") && !W.envs.includes("stage")) e.push({s:5,m:"PROD requires QA/STAGE to be enabled."});
+  return e;
+}
+function vWizard(){
+  if(W.job) return vJob();
+  const errs=wErrors();
+  const stepper = WSTEPS.map((s,i)=>`<button class="step ${W.step===i+1?"on":""} ${W.step>i+1?"done":""}" data-act="wStep" data-n="${i+1}"><i>${W.step>i+1?"✓":i+1}</i>${s}</button>`).join("");
+  const body = [wOwnership,wResilience,wServices,wConnections,wEnvs,wPreview][W.step-1](errs);
+  const stepErr = errs.filter(e=>e.s===W.step).map(e=>`<div class="err">${esc(e.m)}</div>`).join("");
+  return `
+  <div class="head"><div><h1>New project</h1><p class="sub">Pick who owns it, how resilient it must be and which AWS services it needs. The preview shows exactly what will be created before anything happens.</p></div></div>
+  <div class="steps">${stepper}</div>
+  <div class="panel"><div class="panel-b">${body}${stepErr}</div>
+    <div class="panel-h" style="border-top:1px solid var(--line);border-bottom:0">
+      <button class="btn" data-act="wPrev" ${W.step===1?"disabled":""}>Back</button>
+      <span class="hint">${errs.length?`${errs.length} item${errs.length>1?"s":""} to fix before creating`:"Ready to create"}</span>
+      ${W.step<6?`<button class="btn pri" data-act="wNext">Continue</button>`:`<button class="btn pri" data-act="wCreate" ${errs.length||!can("create")&&!can("admin")?"disabled":""}>Create repository and deploy</button>`}
+    </div></div>`;
+}
+function wOwnership(){
+  const pf=REGISTRY.find(p=>p.id===W.pf); const prod=pf.products.find(p=>p.id===W.pr)||pf.products[0];
+  return `<h2>Ownership</h2>
+  <div class="grid3">
+    <div class="field"><label for="wPf">Portfolio</label><select id="wPf" data-change="wPf">${REGISTRY.map(p=>`<option value="${p.id}" ${p.id===W.pf?"selected":""}>${p.name}</option>`).join("")}</select><span class="hint">Only portfolios where you are entitled to a product</span></div>
+    <div class="field"><label for="wPr">Product / Platform</label><select id="wPr" data-change="wPr">${pf.products.map(p=>`<option value="${p.id}" ${p.id===prod.id?"selected":""}>${p.name} (${p.kind})</option>`).join("")}</select><span class="hint">Filtered by portfolio and your groups</span></div>
+    <div class="field"><label for="wName">Project name</label><input type="text" id="wName" value="${esc(W.name)}" data-input="wName" autocomplete="off"><span class="hint">Becomes the repo name and the <span class="mono">org:project</span> tag</span></div>
+  </div>
+  <div class="grid3">
+    <div class="field"><label for="wCls">Data classification</label><select id="wCls" data-change="wCls">${["public","internal","confidential","restricted"].map(c=>`<option ${c===W.cls?"selected":""}>${c}</option>`).join("")}</select><span class="hint">Product ceiling: ${prod.ceiling}</span></div>
+    <div class="field"><label>Cost center</label><div class="mono" style="padding-top:6px">${prod.cc}</div><span class="hint">From the registry, read-only</span></div>
+    <div class="field"><label>Tag values</label><div class="tags" style="padding-top:4px"><span class="tag">org:portfolio=<b>${W.pf}</b></span><span class="tag">org:product=<b>${prod.id}</b></span><span class="tag">org:project=<b>${esc(W.name)}</b></span></div></div>
+  </div>`;
+}
+function wResilience(){
+  const regs=REGIONS.filter(r=>r.on);
+  const opt=(id,t,d)=>`<button class="opt ${W.mode===id?"on":""}" data-act="wMode" data-m="${id}"><b>${t}</b><span class="hint">${d}</span></button>`;
+  return `<h2>Resilience</h2>
+  <div class="choice">
+    ${opt("single","Single region","One region. Recovery means redeploying from code and backups.")}
+    ${opt("dr","DR · active / standby","Deployed to both regions. Only the primary is active; data replicates to the standby.")}
+    ${opt("ha","HA pair · active / active","Deployed and active in both regions, with traffic split by health checks.")}
+  </div>
+  <div class="grid3">
+    <div class="field"><label for="wPrim">Primary region</label><select id="wPrim" data-change="wPrim">${regs.map(r=>`<option value="${r.id}" ${r.id===W.primary?"selected":""}>${r.id} · ${r.name}</option>`).join("")}</select></div>
+    <div class="field"><label for="wSec">Secondary region</label><select id="wSec" data-change="wSec" ${W.mode==="single"?"disabled":""}>${regs.map(r=>`<option value="${r.id}" ${r.id===W.secondary?"selected":""}>${r.id} · ${r.name}</option>`).join("")}</select><span class="hint">Any pair is allowed. Default pair: us-east-1 / us-east-2</span></div>
+    ${W.mode==="dr"?`<div class="field"><label for="wStrat">DR strategy</label><select id="wStrat" data-change="wStrat"><option value="pilot" ${W.strategy==="pilot"?"selected":""}>Pilot light (compute off)</option><option value="warm" ${W.strategy==="warm"?"selected":""}>Warm standby (minimal capacity)</option></select></div>`:`<div></div>`}
+  </div>
+  ${W.mode!=="single"?`<div class="notice">Target RTO / RPO: <b>${W.mode==="ha"?"near zero / near zero":W.strategy==="warm"?"&lt; 15 min / &lt; 1 min":"&lt; 60 min / &lt; 5 min"}</b>. QA/STAGE mirrors this mode so failover can be tested before PROD. CloudFront certificates and CloudFront WAF, if used, are placed in us-east-1 regardless of the pair.</div>`:""}`;
+}
+function wServices(){
+  const q=W.search.toLowerCase();
+  const cats=CATALOG.map(c=>{const items=c.items.filter(i=>!q||i.n.toLowerCase().includes(q)||i.t.includes(q)); if(!items.length) return "";
+    return `<div class="field"><span class="label">${c.cat}</span><div class="cat">${items.map(i=>`<div class="svc"><div class="row"><b>${i.n}</b><span class="pill">${i.tier===1?"Tier 1":"Tier 2"}</span></div><div class="row"><span class="hint">Multi-region: ${i.mr}${i.ha===false?" · not HA":""}</span><button class="btn ghost" data-act="wAdd" data-t="${i.t}">Add</button></div></div>`).join("")}</div></div>`;}).join("");
+  const sel=W.resources.map((r,i)=>`<tr><td><input type="text" id="rid${i}" value="${esc(r.id)}" data-input="rid" data-i="${i}" style="width:150px"></td><td>${svcName(r.t)}</td><td class="mono muted">${r.t}</td><td><button class="btn ghost" data-act="wDel" data-i="${i}">Remove</button></td></tr>`).join("");
+  return `<div class="split"><div class="field" style="gap:12px"><div class="row"><h2>Service catalog</h2><span class="spacer"></span><input type="search" id="wSearch" placeholder="Search services" value="${esc(W.search)}" data-input="wSearch"></div>${cats||`<div class="empty">No service matches “${esc(W.search)}”.</div>`}</div>
+  <div class="panel"><div class="panel-h"><h3>Selected (${W.resources.length})</h3><span class="hint">IDs become logical IDs and part of resource names</span></div><div class="tbl-wrap"><table><thead><tr><th>ID</th><th>Service</th><th>Type</th><th></th></tr></thead><tbody>${sel||`<tr><td colspan="4" class="empty">Nothing selected yet.</td></tr>`}</tbody></table></div></div></div>`;
+}
+function wConnections(){
+  const ids=W.resources.map(r=>r.id);
+  const rows=W.connections.map((c,i)=>`<tr><td class="mono">${c.kind}</td><td><b>${esc(c.from)}</b> → <b>${esc(c.to)}</b></td><td class="muted">${esc(c.detail)}</td><td><button class="btn ghost" data-act="cDel" data-i="${i}">Remove</button></td></tr>`).join("");
+  return `<h2>Connections</h2><p class="sub">Connections are the only way components get access to each other. Each one generates exact-ARN permissions, tag conditions and event wiring. Components can never reach resources with different project or environment tags.</p>
+  <div class="tbl-wrap"><table><thead><tr><th>Kind</th><th>From → To</th><th>Details</th><th></th></tr></thead><tbody>${rows||`<tr><td colspan="4" class="empty">No connections yet.</td></tr>`}</tbody></table></div>
+  <div class="row"><select id="cKind"><option>iam.access</option><option>event.notify</option><option>event.source</option><option>network.access</option><option>secret.binding</option><option>api.route</option><option>workflow.task</option></select>
+    <select id="cFrom">${ids.map(i=>`<option>${esc(i)}</option>`).join("")}</select><span>→</span><select id="cTo">${ids.map(i=>`<option>${esc(i)}</option>`).join("")}</select>
+    <select id="cDetail"><option>read</option><option>write</option><option>readwrite</option></select>
+    <button class="btn" data-act="cAdd">Add connection</button>
+    <a class="btn ghost" href="#sharing">Connect to another project's resource</a></div>`;
+}
+function wEnvs(){
+  const acct=ACCOUNTS[W.pf];
+  const rows=ENVS.map(e=>{const on=W.envs.includes(e.id); const multi = W.mode!=="single" && (e.id==="stage"||e.id==="prod");
+    return `<tr><td><label class="row" style="gap:6px"><input type="checkbox" data-act="wEnv" data-e="${e.id}" ${on?"checked":""}> <b>${e.name}</b></label></td><td class="num">${acct[e.id]}</td><td class="mono">${multi?`${W.primary} · ${W.secondary}`:W.primary}</td><td>${e.trigger}</td><td>${e.approval?chip("warn","Reviewer approval required"):chip("idle","No approval")}</td></tr>`;}).join("");
+  return `<h2>Environments</h2><p class="sub">Accounts come from the account bindings for ${pfName(W.pf)}. You cannot choose an account directly.</p>
+  <div class="tbl-wrap"><table><thead><tr><th>Environment</th><th>AWS account</th><th>Regions</th><th>Deploys</th><th>Approval</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+function wPreview(errs){
+  const yaml = `# template.yaml (excerpt, generated)
+Parameters:
+  ProjectName:      { Type: String, AllowedPattern: "^[a-z][a-z0-9]*(-[a-z0-9]+)*$" }
+  EnvironmentName:  { Type: String }
+  ResilienceMode:   { Type: String, AllowedValues: [single, dr, ha] }
+  RegionRole:       { Type: String, AllowedValues: [primary, secondary] }
+  ActivationState:  { Type: String, AllowedValues: [active, standby] }
+Conditions:
+  IsActive:  !Equals [!Ref ActivationState, active]
+  IsPrimary: !Equals [!Ref RegionRole, primary]
+Resources:
+${W.resources.map(r=>`  ${r.id.replace(/(^|-)([a-z])/g,(m,a,b)=>b.toUpperCase())}${r.t.split(".")[0]==="s3"?"Bucket":r.t.startsWith("lambda")?"Function":r.t.startsWith("dynamodb")?"Table":"Resource"}:
+    Type: ${({"s3.bucket":"AWS::S3::Bucket","lambda.function":"AWS::Lambda::Function","dynamodb.table":"AWS::DynamoDB::GlobalTable","aurora.postgresql":"AWS::RDS::DBCluster","sqs.queue":"AWS::SQS::Queue","ecs.service":"AWS::ECS::Service","sns.topic":"AWS::SNS::Topic"})[r.t]||r.t}`).join("\n")}
+  # + IAM roles (exact ARNs, tag conditions, boundary), log groups,
+  #   same-tag resource policies, replication for ${W.mode==="single"?"(none)":W.secondary}`;
+  const cost = [["Sandbox",4],["DEV",9],["TEST",9],["QA/STAGE",W.mode==="single"?14:23],["PROD",W.mode==="single"?38:W.mode==="ha"?81:56]];
+  return `<h2>Preview</h2>
+  ${errs.length?`<div class="notice crit"><b>Fix before creating:</b><ul style="margin:6px 0 0 18px;padding:0">${errs.map(e=>`<li>${esc(e.m)} <button class="btn ghost" data-act="wStep" data-n="${e.s}">Go to ${WSTEPS[e.s-1]}</button></li>`).join("")}</ul></div>`:`<div class="notice ok">All checks passed: schema, connections, least-privilege and tag linter, cfn-lint, cfn-guard (all environments), service availability in ${W.primary}${W.mode!=="single"?" and "+W.secondary:""}.</div>`}
+  <div class="grid2">
+    <div class="field"><span class="label">Tags applied to every resource and role</span><div class="tags">
+      <span class="tag">org:portfolio=<b>${W.pf}</b></span><span class="tag">org:product=<b>${W.pr}</b></span><span class="tag">org:project=<b>${esc(W.name)}</b></span><span class="tag">org:environment=<b>{per env}</b></span><span class="tag">org:data-classification=<b>${W.cls}</b></span><span class="tag">org:resilience=<b>${W.mode}</b></span><span class="tag">org:managed-by=<b>cloudinfra</b></span></div>
+      <span class="label" style="margin-top:10px">Files in the new repository</span>
+      <div class="code">acme-platform/${esc(W.name)}-infra
+├── template.yaml
+├── infra.json
+├── config/
+│   ├── sandbox.json · dev.json · test.json
+│   └── stage.json · prod.json
+├── .github/workflows/deploy.yml
+└── README.md</div></div>
+    <div class="field"><span class="label">Generated template</span><div class="code">${esc(yaml)}</div></div>
+  </div>
+  <div class="field"><span class="label">Indicative monthly cost (AWS Price List, mock figures)</span>
+    <div class="tbl-wrap"><table><thead><tr>${cost.map(c=>`<th>${c[0]}</th>`).join("")}</tr></thead><tbody><tr>${cost.map(c=>`<td class="num">$${c[1]}</td>`).join("")}</tr></tbody></table></div></div>
+  ${!can("create")&&!can("admin")?`<div class="notice warn">Switch “Viewing as” to Developer or Platform admin to create the project.</div>`:""}`;
+}
+function vJob(){
+  const steps=["Create repository acme-platform/"+W.name+"-infra","Bootstrap tagged roles in 5 accounts"+(W.mode!=="single"?" (2 regions)":""),"Create GitHub environments and variables","Commit generated files (single commit)","Deploy Sandbox, DEV and TEST","Plan QA/STAGE: waiting for reviewer approval"];
+  const html=steps.map((s,i)=>`<div><span class="dot ${i<W.job.done?"done":i===W.job.done?"run":""}">${i<W.job.done?"✓":""}</span>${esc(s)}</div>`).join("");
+  return `<div class="head"><div><h1>Creating ${esc(W.name)}</h1><p class="sub">Job <span class="mono">job-7f31</span>. You can leave this page; progress continues in the background.</p></div></div>
+  <div class="panel"><div class="panel-b"><div class="prog">${html}</div>
+  ${W.job.done>=steps.length?`<div class="notice ok">Created. DEV and TEST are deployed; QA/STAGE is waiting for approval in the release console.</div><div class="row"><a class="btn pri" href="#releases">Open release console</a><button class="btn" data-act="wReset">Start another project</button></div>`:""}</div></div>`;
+}
+
+/* ---------------- Release console ---------------- */
+function vReleases(){
+  const p=PROJECTS.find(x=>x.id===state.project);
+  const stagesHtml=ENVS.map(e=>{const st=p.stages[e.id]; const col={deployed:"var(--ok)",awaiting:"var(--warn)",blocked:"var(--crit)",deploying:"var(--info)",idle:"var(--line-strong)",rejected:"var(--crit)"}[st.s];
+    const gl=["G1","G2","G3","G4","G5"].slice(0,Math.max(st.g.length,0)).map((g,i)=>`<span class="g ${st.g[i]==="p"?"p":st.g[i]==="f"?"f":"w"}">${g}</span>`).join("");
+    return `<div class="stage ${e.approval?"gated":""}"><span class="stripe" style="background:${col}"></span><div class="env">${e.name}${e.approval?`<span class="pill">approval</span>`:""}</div>${stateChip(st.s)}<div class="meta mono">${esc(st.v)}</div><div class="gates">${gl}</div></div>`;}).join("");
+  const inbox=APPROVALS.map(a=>`<tr class="click" data-act="openApproval" data-id="${a.id}"><td class="mono">${a.id}</td><td>${a.kind==="override"?chip("crit","Override"):chip("warn","Release")}</td><td><b>${a.project}</b> → ${ENVS.find(e=>e.id===a.env).name}</td><td>${a.requester}</td><td class="num">${a.age}</td><td>${a.risk==="high"?chip("crit","High risk"):a.risk==="medium"?chip("warn","Medium"):chip("ok","Low")}</td></tr>`).join("");
+  const detail = state.approval ? vApproval(APPROVALS.find(a=>a.id===state.approval)) : `<div class="panel"><div class="empty">Select an item from the inbox to see its evidence and decide.</div></div>`;
+  return `
+  <div class="head"><div><h1>Release console</h1><p class="sub">STAGE and PROD only change after the automated gate passes and a reviewer approves. The release executor then applies exactly the change set you reviewed.</p></div>
+    <label class="row" for="projSel"><span class="label">Project</span><select id="projSel" data-change="projSel">${PROJECTS.map(x=>`<option ${x.id===p.id?"selected":""}>${x.id}</option>`).join("")}</select></label></div>
+  <div class="panel"><div class="panel-h"><div><h3>${p.id} pipeline</h3><span class="hint">Commit <span class="mono">${p.commit}</span> · ${esc(p.msg)}</span></div>${modeChip(p.mode)}</div><div class="panel-b"><div class="pipe">${stagesHtml}</div>
+    <div class="hint">G1 pull request · G2 build · G3 DEV/TEST tests · G4 pre-STAGE gate · G5 pre-PROD gate</div></div></div>
+  <div class="split">
+    <div class="panel"><div class="panel-h"><h3>Approval inbox</h3><span class="hint">${APPROVALS.length} waiting</span></div><div class="tbl-wrap"><table><thead><tr><th>ID</th><th>Type</th><th>Release</th><th>Requested by</th><th>Waiting</th><th>Risk</th></tr></thead><tbody>${inbox||`<tr><td colspan="6" class="empty">Nothing waiting for you.</td></tr>`}</tbody></table></div></div>
+    <div>${detail}</div>
+  </div>`;
+}
+function vApproval(a){
+  if(!a) return "";
+  const env=ENVS.find(e=>e.id===a.env).name;
+  const isOverride=a.kind==="override";
+  const self = a.requester===me();
+  const allowed = isOverride ? can("override") : can("approve");
+  const why = self ? "You requested this release, so you cannot approve it." : !allowed ? (isOverride?"Only a platform admin can approve an override.":"Your role is not a reviewer for this product and environment.") : "";
+  const ch=a.changes.map(c=>`<tr class="risk-${c.risk[0]}"><td><b>${c.a}</b></td><td class="mono">${c.type}</td><td class="mono">${c.id}</td><td>${c.risk==="high"?chip("crit","High"):c.risk==="medium"?chip("warn","Medium"):chip("ok","Low")}</td></tr><tr><td></td><td colspan="3" class="muted" style="padding-top:0">${esc(c.note)}</td></tr>`).join("");
+  const ev=Object.entries(a.evidence).map(([k,v])=>`<dt>${({tests:"Tests",vulns:"Vulnerabilities",provenance:"Provenance",drift:"Drift",analyzer:"Access Analyzer",regions:"Regions",bake:"STAGE health",reason:"Reason",rollback:"Rollback plan"})[k]||k}</dt><dd>${esc(v)}</dd>`).join("");
+  return `<div class="panel"><div class="panel-h"><div><h3>${isOverride?"Override request":"Release"} ${a.id}</h3><span class="hint">${a.project} → ${env} · requested by ${a.requester}</span></div>${isOverride?chip("crit","Gate: high-risk change"):chip("ok","Gate passed")}</div>
+  <div class="panel-b">
+    ${isOverride?`<div class="notice crit">This change replaces a data store. It stays blocked until a platform admin approves this override. The normal reviewer approval is still required afterwards.</div>`:""}
+    <span class="label">Change set (${a.changes.length})</span>
+    <div class="tbl-wrap"><table><tbody>${ch}</tbody></table></div>
+    <span class="label">Evidence</span><dl class="kv">${ev}</dl>
+    <div class="field"><label for="apComment">Comment</label><textarea id="apComment" rows="2" placeholder="Visible in the release record and in GitHub"></textarea></div>
+    ${why?`<div class="notice warn">${esc(why)} Switch “Viewing as” to try another role.</div>`:""}
+    <div class="row"><button class="btn pri" data-act="approve" data-id="${a.id}" ${why?"disabled":""}>${isOverride?"Approve override":"Approve and release"}</button><button class="btn" data-act="reject" data-id="${a.id}" ${why?"disabled":""}>Reject</button><span class="spacer"></span><span class="hint">Approved changes are applied by the release executor</span></div>
+  </div></div>`;
+}
+
+/* ---------------- Sharing ---------------- */
+function vSharing(){
+  const tabs=[["catalog","Shareable resources"],["requests","Requests"],["offer","Offer a resource"]].map(([id,l])=>`<button class="${state.shareTab===id?"on":""}" data-act="shareTab" data-t="${id}">${l}</button>`).join("");
+  let body="";
+  if(state.shareTab==="catalog"){
+    body=`<div class="tbl-wrap"><table><thead><tr><th>Resource</th><th>Owner</th><th>Share tags</th><th>Classification</th><th>Env · region</th><th></th></tr></thead><tbody>${SHARES.map(s=>`<tr><td><b>${esc(s.name)}</b></td><td>${s.owner}<div class="hint">${pfName(s.pf)}</div></td><td><div class="tags"><span class="tag">org:share-scope=<b>${s.scope}</b></span><span class="tag">org:share-access=<b>${s.access}</b></span><span class="tag">org:share-approval=<b>${s.approval}</b></span></div></td><td>${s.cls}</td><td class="mono">${s.env} · ${s.region}</td><td><button class="btn" data-act="reqAccess" data-id="${s.id}">Request access</button></td></tr>`).join("")}</tbody></table></div>
+    <div class="notice">Access is possible when your project's tags match the share rule: same environment, inside the organization, and the same product or portfolio for those scopes. Every request still goes through the sharing approval workflow, unless the provider set <span class="mono">org:share-approval=auto</span>.</div>`;
+  } else if(state.shareTab==="requests"){
+    body=`<div class="tbl-wrap"><table><thead><tr><th>ID</th><th>Type</th><th>Resource</th><th>Consumer / scope</th><th>Approvers</th><th>Status</th><th></th></tr></thead><tbody>${SHARE_REQS.map(r=>{const mine=r.providerRole===role; return `<tr><td class="mono">${r.id}</td><td>${r.type}</td><td>${esc(r.resource)}</td><td>${esc(r.consumer)}<div class="hint">${esc(r.access)}</div></td><td>${esc(r.approvers)}</td><td>${r.status==="pending"?chip("warn","Pending"):r.status==="active"?chip("ok","Active"):chip("crit","Rejected")}</td><td>${r.status==="pending"?`<button class="btn pri" data-act="shareApprove" data-id="${r.id}" ${mine?"":"disabled"} title="${mine?"":"Only the provider owner can approve"}">Approve</button>`:r.status==="active"?`<button class="btn" data-act="shareRevoke" data-id="${r.id}">Revoke</button>`:""}</td></tr>`;}).join("")}</tbody></table></div>
+    <div class="hint">Approving opens infrastructure PRs on both sides. STAGE/PROD deploys of those PRs still need release approval, which shows this sharing approval as evidence.</div>`;
+  } else {
+    body=`<div class="grid3">
+      <div class="field"><label for="ofRes">Resource</label><select id="ofRes"><option>invoice-ingest--uploads (S3)</option><option>invoice-ingest--invoices (DynamoDB)</option></select></div>
+      <div class="field"><label for="ofScope">Share scope</label><select id="ofScope" data-change="ofScope"><option value="product">product · Invoicing</option><option value="portfolio">portfolio · Payments</option><option value="organization">organization</option></select></div>
+      <div class="field"><label for="ofAccess">Access</label><select id="ofAccess" data-change="ofScope"><option>read</option><option>readwrite</option><option>publish</option><option>consume</option></select></div>
+    </div>
+    <div class="grid3"><div class="field"><label for="ofAppr">Consumer requests</label><select id="ofAppr"><option value="required">Need my approval (default)</option><option value="auto">Auto-approve within this scope</option></select></div>
+      <div class="field"><label>Approvers for this offer</label><div id="ofApprovers" class="muted" style="padding-top:6px">Provider product owner</div></div><div></div></div>
+    <div class="row"><button class="btn pri" data-act="offer">Submit share offer</button><span class="hint">Confidential data can be shared up to product scope. Restricted data only by agreement.</span></div>`;
+  }
+  return `<div class="head"><div><h1>Sharing</h1><p class="sub">Use resources owned by other projects, in this or another AWS account. Tags define what can be shared; the approval workflow decides who gets it.</p></div></div>
+  <div class="panel"><div class="tabs" role="tablist">${tabs}</div><div class="panel-b">${body}</div></div>`;
+}
+
+/* ---------------- Developer view ---------------- */
+function vDeveloper(){
+  const p=PROJECTS.find(x=>x.id===state.project);
+  const region = state.devRegion==="secondary" && p.secondary ? p.secondary : p.primary;
+  const acct=ACCOUNTS[p.pf][state.devEnv];
+  const active = !(state.devRegion==="secondary" && p.mode==="dr");
+  const contract={contractVersion:"1",project:p.id,environment:state.devEnv,accountId:acct,region,regionRole:state.devRegion,activationState:active?"active":"standby",
+    compute:{processor:{type:"lambda.function",runtime:"python3.13",functionName:`${p.id}--processor`,aliasArn:`arn:aws:lambda:${region}:${acct}:function:${p.id}--processor:live`,boundRepo:p.apps[0].repo}},
+    resources:{uploads:{type:"s3.bucket",name:`${p.id}--uploads-${acct}-${region}`}},
+    runtimeEnv:{processor:{UPLOADS_BUCKET_NAME:`${p.id}--uploads-${acct}-${region}`}},
+    external:{datalake_curated:{arn:"arn:aws:s3:::datalake-core--curated-666666666666-eu-west-1",access:"read",via:"share-by-tags"}}};
+  return `<div class="head"><div><h1>Developer view</h1><p class="sub">What your application code can rely on. The contract is published to SSM Parameter Store in every environment and region after each infrastructure deploy.</p></div>
+   <div class="row"><select id="devProj" data-change="devProj">${PROJECTS.map(x=>`<option ${x.id===p.id?"selected":""}>${x.id}</option>`).join("")}</select>
+   <select id="devEnv" data-change="devEnv">${ENVS.map(e=>`<option value="${e.id}" ${e.id===state.devEnv?"selected":""}>${e.name}</option>`).join("")}</select>
+   ${p.mode!=="single"?`<select id="devRegion" data-change="devRegion"><option value="primary" ${state.devRegion==="primary"?"selected":""}>${p.primary} (primary)</option><option value="secondary" ${state.devRegion==="secondary"?"selected":""}>${p.secondary} (secondary)</option></select>`:""}</div></div>
+  <div class="split">
+    <div class="panel"><div class="panel-h"><h3>Contract · /platform/projects/${p.id}/contract</h3><button class="btn" data-act="copyContract">Copy</button></div><div class="panel-b"><div class="code" id="contractJson">${esc(JSON.stringify(contract,null,2))}</div></div></div>
+    <div style="display:flex;flex-direction:column;gap:16px">
+      <div class="panel"><div class="panel-h"><h3>Linked application repos</h3><button class="btn" data-act="toastOnly" data-msg="Mock: would open the Create application repo flow">Create application repo</button></div><div class="tbl-wrap"><table><thead><tr><th>Repo</th><th>Language</th><th>Slot</th></tr></thead><tbody>${p.apps.map(a=>`<tr><td class="mono">${a.repo}</td><td>${a.lang}</td><td>${a.slot} · ${a.type}</td></tr>`).join("")}</tbody></table></div></div>
+      <div class="panel"><div class="panel-h"><h3>Need more infrastructure?</h3></div><div class="panel-b"><p class="muted" style="margin:0">Request a new table, queue or permission. The declared contract updates immediately so you can keep coding; the platform team reviews the PR.</p><div><button class="btn pri" data-act="toastOnly" data-msg="Mock: change request CR-219 created; declared contract updated; PR opened on ${p.id}-infra">Change infrastructure</button></div></div></div>
+      <div class="notice ${active?"ok":""}">${active?"This region is active.":"This region is in DR standby: code is deployed but triggers are off until failover."}</div>
+    </div>
+  </div>`;
+}
+
+/* ---------------- Resilience ---------------- */
+let FAILOVER = null;
+function vResilience(){
+  const list=PROJECTS.filter(p=>p.mode!=="single");
+  const cards=list.map(p=>{
+    const failed = FAILOVER && FAILOVER.project===p.id && FAILOVER.step==="done";
+    const pri = failed ? "standby" : "active"; const sec = p.mode==="ha" ? "active" : failed ? "active" : "standby";
+    return `<div class="panel"><div class="panel-h"><div><h3>${p.id}</h3><span class="hint">${pfName(p.pf)} → ${prodName(p.pr)} · PROD</span></div>${modeChip(p.mode)}</div>
+    <div class="panel-b"><div class="grid2">
+      <div class="region ${pri}"><div class="row"><b class="mono">${p.primary}</b><span class="spacer"></span>${pri==="active"?chip("ok","Active"):chip("info","Standby")}</div><dl class="kv"><dt>Role</dt><dd>Primary</dd><dt>Version</dt><dd class="mono">${p.stages.prod.v}</dd></dl></div>
+      <div class="region ${sec}"><div class="row"><b class="mono">${p.secondary}</b><span class="spacer"></span>${sec==="active"?chip("ok","Active"):chip("info","Standby")}</div><dl class="kv"><dt>Role</dt><dd>Secondary</dd><dt>Replication lag</dt><dd class="num">${p.mode==="ha"?"0.8 s":"2.4 s"}</dd></dl></div>
+    </div>
+    <dl class="kv"><dt>Readiness</dt><dd>${chip("ok","Secondary matches primary")}</dd><dt>Last STAGE DR drill</dt><dd>9 days ago · RTO 21 min (target 60) · RPO 3 s</dd><dt>Strategy</dt><dd>${p.strategy}</dd></dl>
+    ${p.mode==="dr"?vFailover(p):`<div class="hint">HA pair: no failover action needed. Health checks remove an unhealthy region automatically.</div>`}
+    </div></div>`;}).join("");
+  return `<div class="head"><div><h1>Resilience</h1><p class="sub">DR and HA status for PROD. Failover is an approved operation; nothing here changes code.</p></div></div><div class="grid2">${cards}</div>`;
+}
+function vFailover(p){
+  if(FAILOVER && FAILOVER.project===p.id){
+    if(FAILOVER.step==="second") return `<div class="notice warn">Failover requested by ${esc(FAILOVER.by)}. Waiting for a second approver (break-glass).</div><div class="row"><button class="btn danger" data-act="foSecond" ${FAILOVER.by===me()?"disabled":""}>Approve as second approver</button><button class="btn" data-act="foCancel">Cancel</button>${FAILOVER.by===me()?`<span class="hint">Switch “Viewing as” to another person to approve.</span>`:""}</div>`;
+    if(FAILOVER.step==="run") return `<div class="prog">${["Promote databases in "+p.secondary,"Activate "+p.secondary+" (scale up, enable event sources)","Switch Route 53 ARC routing control","Health checks and smoke tests"].map((s,i)=>`<div><span class="dot ${i<FAILOVER.n?"done":i===FAILOVER.n?"run":""}">${i<FAILOVER.n?"✓":""}</span>${s}</div>`).join("")}</div>`;
+    if(FAILOVER.step==="done") return `<div class="notice ok">Failed over to ${p.secondary}. Measured RTO 18 min. Failback is scheduled as a planned, approved release.</div><button class="btn" data-act="foReset">Reset mock</button>`;
+  }
+  return `<div class="row"><button class="btn danger" data-act="foStart" data-id="${p.id}">Fail over to ${p.secondary}</button><span class="hint">Needs two approvers</span></div>`;
+}
+
+/* ---------------- Admin ---------------- */
+function vAdmin(){
+  const tabs=[["environments","Environments"],["accounts","Account bindings"],["regions","Regions"],["registry","Registry"],["gates","Gate thresholds"]].map(([id,l])=>`<button class="${state.adminTab===id?"on":""}" data-act="adminTab" data-t="${id}">${l}</button>`).join("");
+  let body="";
+  if(state.adminTab==="environments") body=`<div class="tbl-wrap"><table><thead><tr><th>Order</th><th>Env ID</th><th>Display name</th><th>Tier</th><th>Deploy trigger</th><th>Approval</th></tr></thead><tbody>${ENVS.map(e=>`<tr><td class="num">${e.order}</td><td class="mono">${e.id}</td><td><input type="text" id="envn-${e.id}" value="${e.name}" style="width:120px"></td><td>${e.tier}</td><td>${e.trigger}</td><td>${e.approval?`${chip("warn","Required")} <span class="hint">locked</span>`:chip("idle","None")}</td></tr>`).join("")}</tbody></table></div>
+    <div class="row"><button class="btn" data-act="toastOnly" data-msg="Mock: new environment draft created">Add environment</button><button class="btn pri" data-act="toastOnly" data-msg="Mock: change submitted. Prod-tier changes need a second platform admin.">Save changes</button><span class="hint">Approval is locked on for QA/STAGE and every prod-tier environment.</span></div>`;
+  if(state.adminTab==="accounts") body=`<div class="tbl-wrap"><table><thead><tr><th>Scope</th>${ENVS.map(e=>`<th>${e.name}</th>`).join("")}<th>Status</th></tr></thead><tbody>${Object.entries(ACCOUNTS).map(([pf,a])=>`<tr><td><b>${pfName(pf)}</b><div class="hint">portfolio · all enabled regions</div></td>${ENVS.map(e=>`<td class="num">${a[e.id]}</td>`).join("")}<td>${chip("ok","Onboarded")}</td></tr>`).join("")}</tbody></table></div>
+    <div class="hint">Each account can belong to one environment only. Saving runs onboarding checks: in the organization, correct OU, bootstrap present, provisioner role reachable.</div>`;
+  if(state.adminTab==="regions") body=`<div class="tbl-wrap"><table><thead><tr><th>Region</th><th>Name</th><th>Enabled</th><th>Onboarding</th></tr></thead><tbody>${REGIONS.map((r,i)=>`<tr><td class="mono">${r.id}</td><td>${r.name}</td><td><input type="checkbox" data-act="regToggle" data-i="${i}" ${r.on?"checked":""} aria-label="Enable ${r.id}"></td><td>${r.on?chip("ok","Bootstrap · artifacts · SCP"):chip("idle","Not enabled")}</td></tr>`).join("")}</tbody></table></div>
+    <div class="row"><span class="label">Default pair</span><span class="mono">us-east-1 / us-east-2</span><span class="hint">Enabling a region updates the SCP region allow-list after a second admin approves.</span></div>`;
+  if(state.adminTab==="registry") body=REGISTRY.map(pf=>`<div class="field"><span class="label">${pf.name} · <span class="mono">${pf.id}</span></span><div class="tbl-wrap"><table><thead><tr><th>Product / Platform</th><th>ID</th><th>Kind</th><th>Cost center</th><th>Classification ceiling</th></tr></thead><tbody>${pf.products.map(p=>`<tr><td>${p.name}</td><td class="mono">${p.id}</td><td>${p.kind}</td><td class="mono">${p.cc}</td><td>${p.ceiling}</td></tr>`).join("")}</tbody></table></div></div>`).join("")+`<div class="row"><button class="btn" data-act="toastOnly" data-msg="Mock: CSV import preview">Import CSV</button></div>`;
+  if(state.adminTab==="gates") body=`<div class="grid3">
+    <div class="field"><label for="gCov">Minimum test coverage</label><input type="text" id="gCov" value="80%"></div>
+    <div class="field"><label for="gVuln">Block vulnerabilities at</label><select id="gVuln"><option>critical and high</option><option>critical only</option></select></div>
+    <div class="field"><label for="gBake">STAGE bake time before PROD</label><input type="text" id="gBake" value="24 h"></div>
+    <div class="field"><label for="gDrill">DR drill recency for PROD</label><input type="text" id="gDrill" value="30 days"></div>
+    <div class="field"><label for="gWin">PROD change window</label><input type="text" id="gWin" value="Mon–Thu 09:00–16:00 ET"></div>
+    <div class="field"><label for="gCr">Change record for PROD</label><select id="gCr"><option>Required</option><option>Optional</option></select></div></div>
+    <div class="row"><button class="btn pri" data-act="toastOnly" data-msg="Mock: thresholds saved (gates themselves cannot be disabled)">Save thresholds</button></div>`;
+  const locked=!can("admin");
+  return `<div class="head"><div><h1>Admin</h1><p class="sub">Registry, environments, accounts, regions and gate thresholds. Changes are versioned and audited; prod-tier changes need a second platform admin.</p></div></div>
+  ${locked?`<div class="notice warn">You are viewing as ${me()}. Admin screens are read-only for this role.</div>`:""}
+  <div class="panel"><div class="tabs">${tabs}</div><div class="panel-b">${body}</div></div>`;
+}
+
+/* ---------------- Events ---------------- */
+document.addEventListener("click", e=>{
+  const t=e.target.closest("[data-act]"); if(!t) return; const a=t.dataset.act;
+  if(t.tagName==="INPUT" && t.type==="checkbox"){} else if(t.tagName!=="A") e.preventDefault?.();
+  const go=()=>render();
+  switch(a){
+    case "openProject": state.project=t.dataset.id; state.approval=null; location.hash="releases"; break;
+    case "wStep": W.step=+t.dataset.n; go(); break;
+    case "wNext": W.step=Math.min(6,W.step+1); go(); break;
+    case "wPrev": W.step=Math.max(1,W.step-1); go(); break;
+    case "wMode": W.mode=t.dataset.m; go(); break;
+    case "wAdd": { const base=t.dataset.t.split(/[.:]/).pop().replace(/[^a-z]/gi,"").toLowerCase().slice(0,10)||"res"; let id=base,i=2; while(W.resources.some(r=>r.id===id)) id=base+i++; W.resources.push({id,t:t.dataset.t}); toast(`Added ${svcName(t.dataset.t)} as “${id}”`); go(); break; }
+    case "wDel": W.resources.splice(+t.dataset.i,1); go(); break;
+    case "cAdd": W.connections.push({kind:$("#cKind").value, from:$("#cFrom").value, to:$("#cTo").value, detail:$("#cDetail").value}); go(); break;
+    case "cDel": W.connections.splice(+t.dataset.i,1); go(); break;
+    case "wEnv": { const id=t.dataset.e; W.envs = t.checked ? [...new Set([...W.envs,id])] : W.envs.filter(x=>x!==id); go(); break; }
+    case "wCreate": W.job={done:0}; go(); tick(); break;
+    case "wReset": W.job=null; W.step=1; W.name="new-project"; go(); break;
+    case "openApproval": state.approval=t.dataset.id; go(); break;
+    case "approve": {
+      const ap=APPROVALS.find(x=>x.id===t.dataset.id);
+      if(ap.kind==="override"){ ap.kind="release"; ap.gate="passed"; ap.risk="medium"; ap.requester="Casey Moore"; const p=PROJECTS.find(x=>x.id===ap.project); p.stages[ap.env].s="awaiting"; p.stages[ap.env].g="pppp"; toast("Override recorded. The release now waits for normal reviewer approval."); go(); break; }
+      APPROVALS=APPROVALS.filter(x=>x.id!==ap.id); state.approval=null;
+      const p=PROJECTS.find(x=>x.id===ap.project); p.stages[ap.env].s="deploying";
+      toast(`Approved ${ap.id}. The release executor is applying the reviewed change set to ${ENVS.find(e=>e.id===ap.env).name}.`); go();
+      setTimeout(()=>{p.stages[ap.env].s="deployed"; if(route()==="releases"||route()==="projects") render();}, 2600); break; }
+    case "reject": { const ap=APPROVALS.find(x=>x.id===t.dataset.id); APPROVALS=APPROVALS.filter(x=>x.id!==ap.id); state.approval=null; PROJECTS.find(x=>x.id===ap.project).stages[ap.env].s="rejected"; toast(`Rejected ${ap.id}. The environment was not changed.`); go(); break; }
+    case "shareTab": state.shareTab=t.dataset.t; go(); break;
+    case "reqAccess": { const s=SHARES.find(x=>x.id===t.dataset.id); const auto=s.approval==="auto"; SHARE_REQS.unshift({id:"shr-"+(90+SHARE_REQS.length), type:"Access request", resource:s.name, consumer:state.project+" · prod", access:s.access, approvers:auto?"Auto-approved (provider notified)":"Provider owner ("+s.owner+")", status:auto?"active":"pending", requester:me(), providerRole:s.pr==="pl-datalake"?"dl":"rev"}); state.shareTab="requests"; toast(auto?"Auto-approved within the share rule. Consumer PR opened.":"Access request sent to the provider owner."); go(); break; }
+    case "shareApprove": { const r=SHARE_REQS.find(x=>x.id===t.dataset.id); r.status="active"; toast(`Approved ${r.id}. Infrastructure PRs opened on both sides.`); go(); break; }
+    case "shareRevoke": { const r=SHARE_REQS.find(x=>x.id===t.dataset.id); r.status="rejected"; r.approvers="Revoked by "+me(); toast(`Revoked ${r.id}. PRs opened to remove access on both sides.`); go(); break; }
+    case "offer": SHARE_REQS.unshift({id:"shr-"+(90+SHARE_REQS.length), type:"Share offer", resource:$("#ofRes").value, consumer:"scope: "+$("#ofScope").value+" · "+$("#ofAccess").value, access:$("#ofAccess").value, approvers:$("#ofApprovers").textContent, status:"pending", requester:me(), providerRole:"rev"}); state.shareTab="requests"; toast("Share offer submitted for approval."); go(); break;
+    case "copyContract": { const txt=$("#contractJson").textContent; navigator.clipboard?.writeText(txt).then(()=>toast("Contract copied")).catch(()=>{const r=document.createRange(); r.selectNodeContents($("#contractJson")); const s=getSelection(); s.removeAllRanges(); s.addRange(r); toast("Selected. Press Ctrl/Cmd+C to copy.");}); break; }
+    case "toastOnly": toast(t.dataset.msg); break;
+    case "adminTab": state.adminTab=t.dataset.t; go(); break;
+    case "regToggle": REGIONS[+t.dataset.i].on=t.checked; toast(t.checked?`Mock: onboarding ${REGIONS[+t.dataset.i].id} (needs second admin for SCP update)`:`Mock: ${REGIONS[+t.dataset.i].id} disabled for new projects`); go(); break;
+    case "foStart": FAILOVER={project:t.dataset.id, step:"second", by:me()}; go(); break;
+    case "foCancel": FAILOVER=null; go(); break;
+    case "foSecond": FAILOVER.step="run"; FAILOVER.n=0; go(); runFailover(); break;
+    case "foReset": FAILOVER=null; go(); break;
+  }
+});
+document.addEventListener("change", e=>{
+  const t=e.target; const c=t.dataset.change; if(!c) return;
+  if(c==="wPf"){ W.pf=t.value; W.pr=REGISTRY.find(p=>p.id===W.pf).products[0].id; }
+  if(c==="wPr") W.pr=t.value; if(c==="wCls") W.cls=t.value;
+  if(c==="wPrim") W.primary=t.value; if(c==="wSec") W.secondary=t.value; if(c==="wStrat") W.strategy=t.value;
+  if(c==="projSel"){ state.project=t.value; state.approval=null; }
+  if(c==="devProj"){ state.project=t.value; state.devRegion="primary"; } if(c==="devEnv") state.devEnv=t.value; if(c==="devRegion") state.devRegion=t.value;
+  if(c==="ofScope"){ const wide=$("#ofScope").value!=="product"||$("#ofAccess").value!=="read"; $("#ofApprovers").textContent= wide?"Provider product owner + security reviewer":"Provider product owner"; return; }
+  render();
+});
+document.addEventListener("input", e=>{
+  const t=e.target; const k=t.dataset.input; if(!k) return;
+  if(k==="wName"){ W.name=t.value.trim(); }
+  if(k==="rid"){ W.resources[+t.dataset.i].id=t.value.trim(); return; }
+  if(k==="wSearch"){ W.search=t.value; }
+  const pos=t.selectionStart; render(); const n=document.getElementById(t.id); if(n){ n.focus(); try{n.setSelectionRange(pos,pos);}catch(_){} }
+});
+function tick(){ if(!W.job) return; if(W.job.done<6){ setTimeout(()=>{ if(!W.job) return; W.job.done++; if(route()==="new") render(); tick(); }, matchMedia("(prefers-reduced-motion: reduce)").matches?300:900);} else { PROJECTS.unshift({id:W.name,pf:W.pf,pr:W.pr,mode:W.mode,primary:W.primary,secondary:W.mode==="single"?"":W.secondary,strategy:W.mode==="dr"?(W.strategy==="warm"?"Warm standby":"Pilot light"):"—",commit:"0c1d2e3",msg:"Initial generated infrastructure",stages:{sandbox:{s:"deployed",v:"0c1d2e3",g:"ppp"},dev:{s:"deployed",v:"0c1d2e3",g:"ppp"},test:{s:"deployed",v:"0c1d2e3",g:"ppp"},stage:{s:"awaiting",v:"0c1d2e3",g:"pppp"},prod:{s:"idle",v:"—",g:""}},apps:[{repo:"(none yet)",lang:"—",slot:"—",type:"—"}]}); APPROVALS.push({id:"rel-"+(1044+APPROVALS.length),kind:"release",project:W.name,env:"stage",requester:"Jordan Lee",age:"just now",gate:"passed",risk:"low",changes:W.resources.map(r=>({a:"Add",type:svcName(r.t),id:r.id,risk:"low",note:"New resource"})),evidence:{tests:"Generated checks passed",provenance:"Signed",drift:"New stack",analyzer:"No external access"}}); renderNav(); } }
+function runFailover(){ const st=()=>{ if(!FAILOVER||FAILOVER.step!=="run") return; if(FAILOVER.n<4){ FAILOVER.n++; if(route()==="resilience") render(); setTimeout(st, 800);} else { FAILOVER.step="done"; if(route()==="resilience") render(); } }; setTimeout(st,800); }
+
+/* role selector */
+const rs=$("#roleSel"); rs.innerHTML=Object.entries(ROLES).map(([k,r])=>`<option value="${k}" ${k===role?"selected":""}>${r.name} · ${r.title}</option>`).join("");
+rs.addEventListener("change",()=>{ role=rs.value; toast(`Now viewing as ${me()}`); render(); });
+render();
+</script>
