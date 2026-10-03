@@ -5,6 +5,7 @@
 **Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template, starter code and a GitHub Actions pipeline, creates a new GitHub repository, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources.
 
 **Changes in v2:** added the org registry and tagging strategy (§4); permissions based on tags (§4.5–4.8); multi-account, five-environment model (§5); promotion pipeline (§8). Payload, provisioning, security and scaling sections are updated to match.
+**Changes in v2.3:** STAGE and PROD require GitHub reviewer approval before deployment, using a plan → approve → apply-reviewed-change-set flow that cannot be turned off (§8.3). Added a layered quality-gate strategy for STAGE and PROD (§8.4). Added the release console: promotion and approval workflow in the platform UI, with approvals submitted to GitHub as the reviewer (§8.5).
 **Changes in v2.2:** the hierarchy is now three levels, Portfolio → Product/Platform → Project. The team level and the `org:team` tag are removed.
 **Changes in v2.1:** environment names, their order and their AWS account numbers can now be configured by platform admins in the application (§5.5). Nothing about environments is hardcoded.
 
@@ -186,6 +187,11 @@ sequenceDiagram
 | `POST /v1/projects:preview` | Validate + synthesize, no side effects. Returns files, resolved tags and target accounts per environment. |
 | `POST /v1/projects` | Start provisioning (`Idempotency-Key` required) → 202 `{jobId}`. |
 | `GET /v1/jobs/{jobId}` / `…/events` | Job + per-environment status (JSON / SSE). |
+| `GET /v1/projects/{id}/releases` | Release console: pipeline view and history per environment (§8.5). |
+| `GET /v1/approvals?mine=true` | Reviewer's approval inbox. |
+| `POST /v1/approvals/{id}:approve` / `:reject` | Approve/reject in the UI; the platform submits it to GitHub as the reviewer. |
+| `POST /v1/projects/{id}/environments/{env}:promote` | Start promotion when the environment is in `on-request` mode. |
+| `POST /v1/overrides` / `POST /v1/overrides/{id}:decide` | Request / decide a high-risk change override. |
 | `POST /v1/github/webhooks` | GitHub App webhooks. |
 
 ---
@@ -488,7 +494,7 @@ These are the **default profiles** for the five seeded environments. All of them
 |---|---|---|---|---|---|
 | Purpose | Experiments, feature branches | Integration on `main` | Automated test suites | Production-like, UAT | Live |
 | Deploy trigger | Manual dispatch from **any branch** | Auto on push to `main` | Auto after DEV succeeds | After TEST + **approval** | After STAGE + **approval** |
-| GitHub env protection | None | Branch: `main` | Branch: `main` | `main`, required reviewers (QA) | `main`/release tags, required reviewers (product owner + change mgmt), wait timer |
+| GitHub env protection | None | Branch: `main` | Branch: `main` | `main`, **required GitHub reviewers** (QA), prevent self-review | `main`/release tags, **required GitHub reviewers** (product owner + change mgmt), prevent self-review, optional wait timer |
 | Data classification allowed | ≤ internal | ≤ confidential (synthetic data) | ≤ confidential | as product ceiling | as product ceiling |
 | `retainOnDelete` default | false | false | false | true | true (+ stack policy blocks replace/delete) |
 | Log retention | 7 d | 14 d | 14 d | 90 d | ≥ 365 d |
@@ -520,7 +526,8 @@ Environments and their AWS account numbers are **data in the application, not co
 | `tier` | `sandbox` \| `nonprod` \| `prod` | Selects default guardrails and which OU an account must be in. |
 | `requiredGate` | `true` | If true, any later environment requires this one to be enabled (e.g. no prod without stage). |
 | `deployTrigger` | `manual-any-branch` \| `auto-on-main` \| `after-previous` \| `after-previous-with-approval` | Becomes the job wiring in the generated `deploy.yml`. |
-| `protectionProfile` | branch rules, reviewer source, wait timer | Applied to the GitHub environment (§7.2). |
+| `requiresApproval` | `true` | GitHub required-reviewer approval before deployment. **Locked to `true` for STAGE and all `prod`-tier environments** (§8.3). |
+| `protectionProfile` | branch rules, reviewer source, prevent self-review, wait timer | Applied to the GitHub environment (§7.2). |
 | `guardrailProfile` | classification ceiling, retention minimums, retain defaults, TTL, stack policy | Feeds validation, cfn-guard rules and `config/{env}.json` defaults (§5.3 table = the default profiles). |
 | `status` | `active` \| `retired` | Retired environments are hidden for new projects; existing projects keep working until migrated. |
 
@@ -583,6 +590,7 @@ Every value the pipeline needs is a **GitHub Actions variable** (`vars.*`), writ
 | `CFN_EXEC_ROLE_ARN` | **Environment** | `arn:aws:iam::555555555555:role/cloudinfra/invoice-ingest-cfn-exec` | Project bootstrap output |
 | `ARTIFACT_BUCKET` | **Environment** | `cloudinfra-artifacts-999999999999-us-east-1` | Shared Services bucket for the binding's region |
 
+- **Plan environments** (`stage-plan`, `prod-plan`) have their own copy of these environment variables, where `AWS_ROLE_ARN` points to the **plan role** (§8.3). The workflow uses the same variable name everywhere; GitHub supplies the right value per environment.
 - **Environment-level variables** are visible only to jobs that run in that GitHub environment. So the DEV job never sees the PROD account number or role.
 - GitHub's precedence is environment → repository → organization. The platform writes each variable at exactly one level, so precedence never decides a value by accident.
 - **Who can edit them:** the product's GitHub access team (from the registry) gets the `maintain` role on the repo, not `admin`, so it cannot change variables or environment protection. Only the platform (GitHub App) and org admins can. This is a convenience control, not the security boundary.
@@ -592,7 +600,7 @@ Every value the pipeline needs is a **GitHub Actions variable** (`vars.*`), writ
   - The pipeline also checks that `aws sts get-caller-identity` returns `vars.AWS_ACCOUNT_ID` and that `vars.ENVIRONMENT_NAME` equals the job's GitHub environment, and stops if not.
 
   A tampered variable can make a deploy fail; it cannot make it touch another project's or another environment's resources.
-- **Long-lived credentials mode (§8.4)** is the only exception: access keys are credentials and are stored as GitHub **environment secrets**, never as variables.
+- **Long-lived credentials mode (§8.7)** is the only exception: access keys are credentials and are stored as GitHub **environment secrets**, never as variables.
 
 ---
 
@@ -703,14 +711,14 @@ flowchart LR
 | Administration | write | Create/delete repos, custom properties |
 | Contents | write | Commit |
 | **Workflows** | write | Required to commit anything under `.github/workflows/` |
-| Secrets | write | Only for long-lived credentials mode (§8.4); not needed with OIDC |
+| Secrets | write | Only for long-lived credentials mode (§8.7); not needed with OIDC |
 | Variables | write | Actions variables |
 | Environments | write | Create one GitHub environment per configured environment |
 | Actions | read | Run status |
-| Deployments | read | Run status |
+| Deployments | write | Run status; **submit reviewer approvals from the release console** (as the reviewer, via user-to-server token, §8.5) |
 | Members | read | Resolve reviewer teams |
 
-Webhooks: `workflow_run`, `deployment_status`. GitHub Apps can create repos in **organizations**; personal-account repos are out of scope for v1.
+Webhooks: `workflow_run`, `deployment`, `deployment_status`, `deployment_review`, `deployment_protection_rule`. GitHub Apps can create repos in **organizations**; personal-account repos are out of scope for v1.
 
 ### 7.2 Provisioning steps (each step is safe to retry)
 
@@ -718,7 +726,7 @@ Webhooks: `workflow_run`, `deployment_status`. GitHub Apps can create repos in *
 |---|---|---|---|---|
 | 1 | Create repo | `POST /orgs/{org}/repos` (`auto_init: true`). Set **custom properties** `portfolio`, `product`, `project`; grant the product's GitHub access team (from the registry) the `maintain` role. | Name exists → check the ownership marker (custom property `provision-request`); resume if ours, otherwise fail with a name conflict | Delete the repo (only if this job created it) |
 | 2 | Bootstrap AWS **per enabled environment** (in parallel) | AssumeRole `CloudInfraProvisioner` in each target account → create/update `cloudinfra-bootstrap-{project}` (tagged roles, OIDC trust for `repo:{owner}/{repo}:environment:{env}`) | CloudFormation `ClientRequestToken`; create-or-update | Delete the bootstrap stack in each account where it was created |
-| 3 | GitHub environments | `PUT /repos/{o}/{r}/environments/{env}` for each enabled environment, with protection rules from that environment's protection profile (§5.5) (branch policies; reviewers = registry's reviewer teams; prod wait timer) | `PUT` can safely be repeated | Removed when the repo is deleted |
+| 3 | GitHub environments | `PUT /repos/{o}/{r}/environments/{env}` for each enabled environment, with protection rules from that environment's protection profile (§5.5) (branch policies; for STAGE and PROD: required reviewers from the registry, prevent self-review, plus a separate `{env}-plan` environment without reviewers, §8.3) | `PUT` can safely be repeated | Removed when the repo is deleted |
 | 4 | GitHub variables | Repository variables (project + ownership tags) and **environment variables per enabled environment** (`ENVIRONMENT_NAME`, `AWS_ACCOUNT_ID`, `AWS_REGION`, `AWS_ROLE_ARN`, `CFN_EXEC_ROLE_ARN`, `ARTIFACT_BUCKET`). Full list in §5.5.5. No secrets in OIDC mode. | Create-or-update (`POST`, then `PATCH` on 409) | Removed when the repo is deleted |
 | 5 | **Atomic commit** | Git Data API: create tree (all files) → create commit → fast-forward `refs/heads/main` (`force: false`) | Skip if `main` already has the job's commit trailer | **None.** The repo is kept from here on |
 | 6 | Track promotion | `deployment_status` / `workflow_run` webhooks per environment; reconciler as a backup | Matched by `head_sha` + environment | — |
@@ -765,24 +773,223 @@ flowchart LR
   M["push to main"] --> V2["validate"] --> BLD["build once<br/>zip src/* → artifact bucket<br/>key = tree hash"]
   BLD --> DEV["deploy: dev<br/>+ smoke tests"]
   DEV --> TEST["deploy: test<br/>+ integration tests"]
-  TEST --> CSS["changeset preview: stage"] --> AS{"QA approval"} --> STG["deploy: stage<br/>+ UAT checks"]
-  STG --> CSP["changeset preview: prod"] --> AP{"Owner + change approval"} --> PRD["deploy: prod<br/>+ post-deploy checks"]
+  TEST --> CSS["plan: stage<br/>(create change set only)"] --> AS{"GitHub reviewer approval<br/>(required)"} --> STG["deploy: stage<br/>execute reviewed change set<br/>+ UAT checks"]
+  STG --> CSP["plan: prod<br/>(create change set only)"] --> AP{"GitHub reviewer approval<br/>(required)"} --> PRD["deploy: prod<br/>execute reviewed change set<br/>+ post-deploy checks"]
 ```
 
 - **Build once:** one zip per function per commit, uploaded to the regional artifact bucket at a key based on content. Every environment deploys that exact key. No rebuilds between environments.
-- **Changeset preview before approval:** for stage and prod, a change set is created first and its summary is written to the job summary, with replacements and deletions highlighted. Reviewers approve with the exact change in front of them.
+- **Change set before approval:** for STAGE and PROD, a plan job creates the change set and writes its summary (replacements and deletions highlighted) to the job summary. Reviewers approve with the exact change in front of them, and only that change set is executed (§8.3).
 - **Sandbox** deploys can come from any branch via manual dispatch. Stacks get `org:expires-on` and are removed by the sandbox cleanup job.
 
-### 8.3 `deploy.yml` — design (not code yet)
+### 8.3 Approval gates: STAGE and PROD require GitHub reviewer approval before deployment
+
+**Rule:** nothing is deployed to STAGE or PROD until a GitHub reviewer approves. The approval happens **before** the deploy job starts. Until then the job has no OIDC token and no AWS access, so nothing in the account can change.
+
+**How it works: plan, approve, then apply the reviewed change set**
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant P as plan-stage job<br/>(GitHub env: stage-plan, no reviewers)
+  participant AWS as STAGE account
+  actor R as Reviewer (from registry)
+  participant D as deploy-stage job<br/>(GitHub env: stage, required reviewers)
+  P->>AWS: OIDC → StagePlanRole: CreateChangeSet (name = cs-{sha}-{run})
+  AWS-->>P: change set summary (adds / modifies / replacements / deletes)
+  P->>P: write summary to job summary, pass change set name as job output
+  Note over D: job waits: "Review deployments" in GitHub
+  R->>D: Approve (or Reject), with the change set summary in front of them
+  D->>AWS: OIDC → GitHubDeployRole: ExecuteChangeSet(cs-{sha}-{run}) only
+  AWS-->>D: UPDATE_COMPLETE / rollback + events
+```
+
+| Item | Design |
+|---|---|
+| GitHub environments | Two per gated stage: `stage-plan` / `stage` and `prod-plan` / `prod`. Only `stage` and `prod` have **required reviewers**. The plan environments have a branch rule (`main`) but no reviewers. |
+| Plan role (`{project}-plan`, per gated account) | Trusted only for `sub = repo:{owner}/{repo}:environment:{env}-plan`. Can create, describe and delete change sets on its own stack (same tag rules as §4.5) and read the artifact. **Cannot execute change sets** or touch resources. |
+| Deploy role in gated accounts | For STAGE and PROD it may **only execute an existing change set** (plus describe). It cannot create a new change set, so what runs is exactly what was reviewed. If the stack changed after the plan, execution fails and the pipeline re-plans; reviewers then approve the new plan. |
+| Reviewers | Set on each environment from the registry: the product's reviewer GitHub team(s) per environment (default: QA reviewers for STAGE; product owner group + change management for PROD). Up to 6 users/teams per environment; one approval releases the job. |
+| Prevent self-review | Enabled on `stage` and `prod`: the person who triggered the run cannot approve it. |
+| Branch rule | `stage` and `prod` deploy only from `main` (PROD optionally also from release tags). |
+| Wait timer | Optional on `prod` (e.g. 15 min after approval), for a final cancel window. |
+| Timeouts | A pending approval expires after 30 days (GitHub limit). The job is marked "Awaiting approval" in the platform UI until then; no AWS change happens. Rejection stops the promotion and leaves the environment untouched. |
+| Audit | GitHub records who approved/rejected, when, and the comment. The platform stores it with the job (via `deployment_status` / `deployment_review` webhooks) next to the change set ID and the CloudTrail `ExecuteChangeSet` event. |
+
+**The gate cannot be turned off**
+- In the environment configuration (§5.5.1), `requiresApproval` is **locked to `true` for STAGE and for every `prod`-tier environment**. Admins can change *who* reviews, but cannot remove the gate. Any new environment of tier `prod` gets the gate automatically.
+- The product's GitHub team has the `maintain` role, not `admin`, so it cannot edit environment protection rules.
+- The reconciler checks every repo's `stage` and `prod` environments nightly. Missing reviewers, disabled prevent-self-review or a changed branch rule is **restored automatically and alerted**.
+- AWS backs it up: the gated deploy role can only execute change sets. Even a workflow edited to skip the plan job cannot deploy new changes to STAGE or PROD.
+
+**GitHub plan requirement:** required reviewers on **private or internal** repositories need GitHub Enterprise Cloud (public repos have them on all plans). Please confirm your plan (D15).
+
+### 8.4 Quality gates for STAGE and PROD (recommended strategy)
+
+**Recommendation:** build the quality gate as **layered, evidence-based gates**, with the final decision made by a **central gate service in the platform** that is plugged into GitHub as a **custom deployment protection rule** on the `stage` and `prod` environments. Human reviewer approval (§8.3) is the last layer, not the only one.
+
+Why this approach:
+- **The gate's rules live in the platform, not in each repo's YAML.** A team cannot weaken them by editing the workflow, and changing a rule for all repos is one change in one place.
+- **Decisions are based on evidence tied to the exact commit and artifact.** "TEST passed" means TEST passed for *this* SHA and *this* artifact digest, not just the latest run.
+- **Reviewers get the full evidence in one summary**, so approval is an informed decision rather than a click.
+- **AWS still has the final say.** The gated deploy role can only execute a reviewed change set (§8.3).
+
+#### 8.4.1 The gate layers
+
+```mermaid
+flowchart LR
+  G1["G1 · Pull request<br/>required checks + code review"] --> G2["G2 · Build<br/>SBOM · vuln scan · attestation"]
+  G2 --> G3["G3 · DEV / TEST<br/>smoke + integration tests"]
+  G3 --> G4["G4 · Pre-STAGE automated gate<br/>change set risk · drift · policy checks"]
+  G4 --> H1{"Reviewer approval<br/>STAGE"}
+  H1 --> S["STAGE deploy<br/>+ UAT · alarms"]
+  S --> G5["G5 · Pre-PROD automated gate<br/>bake time · STAGE health · same artifact ·<br/>change window · change ticket"]
+  G5 --> H2{"Reviewer approval<br/>PROD"}
+  H2 --> P["PROD deploy<br/>alarm-based rollback"]
+  P --> G6["G6 · Post-deploy verification"]
+```
+
+| Gate | When | Checks | Blocks on | Enforced by |
+|---|---|---|---|---|
+| **G1 · Pull request** | Before merge to `main` | cfn-lint; cfn-guard (all environment rule sets, so a PROD violation is caught early); IaC security scan (e.g. Checkov); unit tests + coverage threshold; SAST (CodeQL / bandit); dependency scan (Dependabot / pip-audit); secret scanning with push protection; 1 code review from the product's team (CODEOWNERS) | Any failure | GitHub **ruleset** on `main` (required status checks + required review), set by the platform at repo creation and checked by the reconciler |
+| **G2 · Build** | Once per commit on `main` | SBOM (e.g. Syft); vulnerability scan of the bundle (e.g. Grype); **artifact attestation** (GitHub artifact attestations / Sigstore) binding the zip digest to the commit and workflow | Critical/high vulnerabilities without an approved exception; missing attestation | Build job; digest + results recorded as evidence |
+| **G3 · DEV / TEST** | After each deploy | DEV: smoke tests. TEST: integration/contract tests against the deployed stack; results published as check runs | Any failed suite | `needs:` in the workflow + evidence record |
+| **G4 · Pre-STAGE** | In `plan-stage`, before approval | Evidence check: G1–G3 passed **for this SHA and digest**. Attestation verified. **Change set risk analysis** (below). **Drift detection** on the STAGE stack. **IAM Access Analyzer custom policy checks**: no new access compared with the currently deployed template (`CheckNoNewAccess`) and no forbidden actions (`CheckAccessNotGranted`) | Any failed check; high-risk change without an explicit override | Gate service (deployment protection rule) |
+| **Reviewer (STAGE)** | After G4 passes | Human approval with the evidence summary | Rejection / no approval | GitHub required reviewers (§8.3) |
+| **G5 · Pre-PROD** | In `plan-prod`, before approval | Everything in G4 for the PROD stack, plus: **same artifact digest that ran in STAGE**; STAGE **bake time** met (e.g. ≥ 24 h, set per environment); STAGE CloudWatch alarms **green** during the bake; UAT sign-off recorded; **change window** open / no freeze; optional **ITSM change ticket** approved | Any failed check | Gate service (deployment protection rule) |
+| **Reviewer (PROD)** | After G5 passes | Human approval with the evidence summary | Rejection / no approval | GitHub required reviewers (§8.3) |
+| **G6 · Post-deploy** | During and after the PROD deploy | CloudFormation **rollback triggers** (`RollbackConfiguration` with CloudWatch alarms and a monitoring window) roll the stack back automatically if alarms fire; post-deploy health checks | Alarm during the monitoring window → automatic rollback | CloudFormation + pipeline |
+
+#### 8.4.2 Change set risk analysis (G4/G5)
+
+The plan job sends the change set to the gate service, which classifies every change:
+
+| Risk | Examples | Default outcome |
+|---|---|---|
+| **High** | Replacement or deletion of a stateful resource (S3 bucket, DynamoDB table); deletion of a log group in PROD; removing `DeletionPolicy: Retain`; disabling encryption or versioning | **Blocked**, unless the change carries an explicit, separately approved override (e.g. a `allow-destructive-change` label approved by a platform admin). The override is recorded. |
+| **Medium** | Any IAM policy or role change; new S3 notification or Lambda permission; runtime change | Allowed, but **highlighted** at the top of the reviewer summary |
+| **Low** | Code-only update; memory/timeout change; tag change | Allowed |
+
+#### 8.4.3 Where the evidence lives
+
+- The gate service keeps a **release record** per commit SHA: artifact digest and attestation, test and scan results per environment, change set IDs and risk classification, drift result, approvals (who, when, comment), and deploy outcome.
+- Workflows post results to the platform with the job's OIDC token, so the platform can verify which repo, environment and run sent them.
+- The same record feeds the reviewer summary, the platform UI and audit (§12).
+
+#### 8.4.4 How the gate plugs into GitHub
+
+- The platform's GitHub App is registered as a **custom deployment protection rule** on every `stage` and `prod` environment, set at repo creation and checked by the reconciler.
+- When a `deploy-stage` / `deploy-prod` job is about to start, GitHub sends a `deployment_protection_rule` event. The gate service evaluates G4/G5 and answers approve or reject, with a link to the evidence.
+- The job starts only when **both** the gate service and a human reviewer approve. If the gate rejects, reviewers are never asked.
+- **GitHub plan requirement:** custom deployment protection rules, like required reviewers, need GitHub Enterprise Cloud for private/internal repos (D15).
+
+#### 8.4.5 Gate settings are configurable per environment
+
+These thresholds are part of the environment's `guardrailProfile` (§5.5.1) and are edited by platform admins:
+- coverage minimum;
+- allowed vulnerability severity;
+- bake time;
+- change windows / freeze calendar;
+- whether an ITSM ticket is required;
+- which risk levels need an override.
+
+The **gates themselves cannot be disabled for STAGE or prod-tier environments**; only their thresholds can be tuned.
+
+#### 8.4.6 Later improvement (not v1)
+For PROD Lambda deployments, add **gradual traffic shifting** (Lambda alias + CodeDeploy canary, e.g. 10% for 10 minutes, then 100%) with alarm-based automatic rollback. This limits the impact of a bad release to a small share of traffic.
+
+### 8.5 Release console: the approval workflow in the platform UI
+
+**Recommendation:** the platform UI provides the whole promotion and approval workflow, and **GitHub remains the record of approvals**. When a reviewer clicks *Approve* in the platform, the platform calls GitHub's *review pending deployments* API **as that reviewer**, using their own GitHub identity. So:
+- it is a real GitHub reviewer approval: the required-reviewer rule, prevent-self-review and GitHub's audit log all still apply;
+- reviewers never need to leave the platform;
+- approving directly in GitHub still works, and the platform reflects it within seconds via webhooks.
+
+#### 8.5.1 Screens
+
+| Screen | Who | What it shows / does |
+|---|---|---|
+| **Project pipeline view** | Everyone entitled to the product | One column per environment in configured order. Each column shows: state, commit SHA, artifact digest, who triggered, when, gate results (G1–G6) as green/red chips, and links to the GitHub run and the CloudFormation stack. |
+| **My approvals (inbox)** | Reviewers | All pending STAGE/PROD approvals across the products where the user is a reviewer, oldest first, with waiting time. |
+| **Approval detail** | Reviewers | The evidence summary from the release record (§8.4.3), on one page: <br/>• change set diff grouped by risk, with high-risk items on top<br/>• test and scan results<br/>• drift result<br/>• for PROD: STAGE bake time and alarm health, and confirmation that the artifact is the same one that ran in STAGE<br/>• change ticket link<br/>Plus a comment box and **Approve** / **Reject** buttons. *Approve* stays disabled until the automated gate (G4/G5) has passed. |
+| **Override requests** | Requester → platform admin | Request an override for a high-risk change (§8.4.2) with a reason; a platform admin approves or rejects it in the UI. The override applies only to that change set. |
+| **Release history** | Everyone entitled; auditors | Every promotion per environment: who requested, which gates passed, who approved/rejected and why, outcome, rollback events. Exportable. |
+
+#### 8.5.2 Promotion state machine (per commit, per gated environment)
+
+```mermaid
+stateDiagram-v2
+  [*] --> Waiting: previous environment succeeded
+  Waiting --> Planning: plan job started
+  Planning --> GateChecking: change set created
+  GateChecking --> GateFailed: G4/G5 failed
+  GateChecking --> OverrideRequested: high-risk change
+  OverrideRequested --> GateChecking: admin approved override
+  OverrideRequested --> Rejected: admin rejected override
+  GateChecking --> AwaitingApproval: automated gate passed
+  AwaitingApproval --> Approved: reviewer approved (UI or GitHub)
+  AwaitingApproval --> Rejected: reviewer rejected
+  AwaitingApproval --> Expired: 30 days, no decision
+  AwaitingApproval --> Superseded: newer commit planned for this environment
+  Approved --> Deploying: deploy job executes reviewed change set
+  Deploying --> Deployed
+  Deploying --> RolledBack: deploy failed / alarm rollback
+  GateFailed --> [*]
+  Rejected --> [*]
+  Expired --> [*]
+  Superseded --> [*]
+  Deployed --> [*]
+  RolledBack --> [*]
+```
+
+- **Superseded:** if a newer commit reaches the same gate, the older pending approval is closed automatically, so reviewers only see the latest candidate.
+- The state is driven by GitHub webhooks (`workflow_run`, `deployment`, `deployment_status`, `deployment_review`, `deployment_protection_rule`) and the gate service, stored in the job/release tables (§3.4).
+
+#### 8.5.3 How an approval in the UI reaches GitHub
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor R as Reviewer
+  participant UI as Release console
+  participant API as Platform API
+  participant GS as Gate service
+  participant GH as GitHub
+  GH->>GS: deployment_protection_rule (deploy-prod waiting)
+  GS->>GS: evaluate G5 → pass
+  GS->>GH: approve protection rule (automated part)
+  GS-->>UI: inbox item "invoice-ingest → PROD awaiting approval"
+  R->>UI: open evidence, comment, Approve
+  UI->>API: POST /v1/approvals/{id}:approve
+  API->>API: check: reviewer group for product+env, not the requester, gate passed, still latest
+  API->>GH: POST /repos/{o}/{r}/actions/runs/{run}/pending_deployments<br/>(state=approved, environment=prod, comment) using the reviewer's GitHub user token
+  GH-->>API: 200, deploy-prod job starts
+  GH-->>API: deployment_review webhook → release record updated
+```
+
+- **Reviewer identity:** each reviewer links their GitHub account once (GitHub App user authorization, OAuth). The platform stores the refresh token encrypted. It uses the token only to submit approvals, and only for runs in that reviewer's own products.
+- **Double check on our side:** before calling GitHub, the platform checks that the user is in the product's reviewer group for that environment, is not the person who triggered the run, and that the automated gate passed. GitHub then enforces its own rules again.
+- **Notifications:** new pending approvals, gate failures, rejections and rollbacks are sent to Slack/Teams/email with a deep link to the approval detail page. Reminders go out after a configurable wait (e.g. 4 h).
+- **Promotion mode** (configurable per environment, §5.5.1):
+  - `auto`: STAGE plan starts automatically after TEST succeeds.
+  - `on-request`: a user clicks **Promote to STAGE/PROD** in the UI, which starts the plan job via `workflow_dispatch`.
+
+  Either way, the approval is still required.
+
+#### 8.5.4 Separation of duties
+- Requester ≠ approver (platform check + GitHub prevent self-review).
+- PROD can require **two approvals from different groups** (e.g. product owner and change management). The platform collects both in the UI and submits the GitHub approval only when both are in. This requires that only the platform's approver identities be listed as GitHub reviewers; the alternative is GitHub's own single-approval model.
+- Platform admins can approve overrides but cannot approve their own requests.
+
+### 8.6 `deploy.yml` — design (not code yet)
 
 | Aspect | Design |
 |---|---|
 | Triggers | `push` to `main`; `pull_request` (validate only); `workflow_dispatch` with an environment input (sandbox, or re-run any stage) |
 | Permissions | `id-token: write`, `contents: read` |
-| Structure | A reusable workflow `deploy-env.yml` (inputs: environment) holds all deploy steps and is identical in every repo. The caller `deploy.yml` is **generated from the environment configuration**: one job per enabled environment, chained in the configured order. If admins change the environment list later, the platform opens a "sync pipeline" PR in affected repos instead of changing them silently. |
+| Structure | A reusable workflow `deploy-env.yml` (inputs: environment) holds all deploy steps and is identical in every repo. The caller `deploy.yml` is **generated from the environment configuration**: one job per enabled environment, chained in the configured order; gated environments (STAGE, PROD) get a `plan-{env}` job followed by a `deploy-{env}` job, with the quality gate (§8.4) and reviewer approval (§8.3) between them. If admins change the environment list later, the platform opens a "sync pipeline" PR in affected repos instead of changing them silently. |
 | Concurrency | One group per environment (`deploy-{env}`), `cancel-in-progress: false` |
 | Supply chain | Actions pinned to commit SHAs; Dependabot |
-| Per-environment job steps | 1. OIDC credentials (`role-to-assume: vars.AWS_ROLE_ARN`, `aws-region: vars.AWS_REGION`, scoped to that GitHub environment)<br/>2. **Guard:** caller account must equal `vars.AWS_ACCOUNT_ID` and `vars.ENVIRONMENT_NAME` must equal the job's environment<br/>3. **Pre-flight stack-state check** (table below)<br/>3. `aws cloudformation deploy` with `--role-arn $CFN_EXEC_ROLE_ARN`, `--parameter-overrides` from `config/{env}.json` + code prefix, `--tags` = the full `org:*` set built from GitHub variables (`vars.ORG_*`, `vars.PROJECT_NAME`, `vars.ENVIRONMENT_NAME`), `--no-fail-on-empty-changeset`<br/>5. Post-deploy checks; outputs to job summary<br/>6. On failure: failed stack events (resource, type, reason) to job summary, exit non-zero |
+| Per-environment job steps | 1. OIDC credentials (`role-to-assume: vars.AWS_ROLE_ARN`, `aws-region: vars.AWS_REGION`, scoped to that GitHub environment)<br/>2. **Guard:** caller account must equal `vars.AWS_ACCOUNT_ID` and `vars.ENVIRONMENT_NAME` must equal the job's environment<br/>3. **Pre-flight stack-state check** (table below)<br/>4. `aws cloudformation deploy` with `--role-arn $CFN_EXEC_ROLE_ARN`, `--parameter-overrides` from `config/{env}.json` + code prefix, `--tags` = the full `org:*` set built from GitHub variables (`vars.ORG_*`, `vars.PROJECT_NAME`, `vars.ENVIRONMENT_NAME`), `--no-fail-on-empty-changeset` (**DEV/TEST/sandbox only**; STAGE/PROD use the plan → approve → execute flow in §8.3)<br/>5. Post-deploy checks; outputs to job summary<br/>6. On failure: failed stack events (resource, type, reason) to job summary, exit non-zero |
 
 Tags passed with `--tags` come from GitHub variables set by the platform (§5.5.5). **Even if someone changes them, IAM denies any value that doesn't match the deploy role's tags (§4.4).**
 
@@ -794,7 +1001,7 @@ Tags passed with `--tags` come from GitHub variables set by the platform (§5.5.
 | `*_IN_PROGRESS` | wait with timeout |
 | `UPDATE_ROLLBACK_FAILED` / `DELETE_FAILED` | stop with a runbook link. Never automated. |
 
-### 8.4 Long-lived credentials mode (supported, not recommended)
+### 8.7 Long-lived credentials mode (supported, not recommended)
 Only where an account cannot have an OIDC provider:
 - A per-project, per-environment IAM user with the same shared policy, **tagged identically**.
 - Keys stored as **environment secrets** (the only secrets in the design; everything else stays a variable); ≤ 90-day rotation enforced by a platform job; warning shown in the UI.
@@ -809,7 +1016,7 @@ Only where an account cannot have an OIDC provider:
 | A repo forges tags to impersonate another product | Role tags are platform-owned and SCP-protected; request tags must equal principal tags (§4.4) |
 | Generated IAM grants too much | Exact-ARN policies; least-privilege linter; shared tag-scoped boundary; exec role can only create roles with the boundary attached |
 | A DEV/sandbox pipeline reaches PROD | Separate accounts; OIDC `sub` per environment; environment-scoped variables (a DEV job cannot see PROD's account or role); caller-account guard in the pipeline; environment-lock SCP |
-| Unapproved change reaches PROD | GitHub environment protection (reviewers, `main`/tags only, wait timer) + changeset preview before approval |
+| Unapproved change reaches STAGE or PROD | GitHub required reviewers before the deploy job starts (no AWS access until approved); prevent self-review; gated deploy role can only execute the reviewed change set; reconciler restores removed protection rules |
 | Sensitive data in sandbox | Classification gate SCP + sandbox data rules |
 | Removing the boundary or tags after creation | SCP denies `DeleteRolePermissionsBoundary` and `org:*` tag changes except by platform roles |
 | Confused deputy | `SourceAccount` on the Lambda permission, `aws:SourceAccount` on the CFN trust, `aws:PrincipalOrgID` + ExternalId on the provisioner role |
@@ -832,7 +1039,7 @@ Synthesis is cheap. The real limits are **GitHub API quotas per installation**, 
 
 | Layer | Strategy |
 |---|---|
-| UI | Static on CloudFront; registry responses cached per user with a short TTL |
+| UI | Static on CloudFront (includes the release console); registry responses cached per user with a short TTL |
 | API | Stateless containers, autoscaled |
 | Registry | DynamoDB; read-heavy, cached; CMDB sync is event-driven |
 | Orchestration | Step Functions Standard (durable, holding many jobs open costs no compute); per-environment bootstrap runs as a `Map` state with a concurrency cap |
@@ -975,12 +1182,16 @@ CloudInfraAutomation/
 | D6 | Account granularity | **B: per portfolio per environment**, with C available per product |
 | D7 | Registry source of truth | CMDB (which one?) synced into the platform registry, or the platform registry as the master |
 | D8 | Sandbox model | Shared sandbox account per portfolio with 14-day TTL, or per-product sandbox accounts? |
-| D9 | Approvers | STAGE: QA team; PROD: product owner + change management. Is there an ITSM (e.g. ServiceNow change) integration requirement? |
+| D9 | Approvers | **Decided:** STAGE and PROD require GitHub reviewer approval before deployment. Open: which groups review each (default QA for STAGE; product owner + change management for PROD), and is an ITSM (e.g. ServiceNow change) link required? |
 | D10 | Regions | Single region in v1, or multi-region from the start? |
 | D11 | Onboarded today? | Do Control Tower / OUs per environment already exist, or does `org/` need to create the OU structure too? |
 | D12 | LLM | Exclude from v1, or NL → draft payload only? |
 | D13 | Who can configure environments and accounts | **Platform admins only, with a second-person approval** for changes to production-tier environments. Normal users see environments read-only. (If you meant every user should configure them, note that whoever binds an account decides where code deploys.) |
 | D14 | Binding scope | Bind accounts per **portfolio** by default, with a per-product override (matches D6), or per product only? |
+| D15 | GitHub plan | Required reviewers on private/internal repos need **GitHub Enterprise Cloud**. Which plan do you have? |
+| D16 | Quality-gate thresholds | Coverage minimum (e.g. 80%), vulnerability policy (block critical/high), STAGE bake time before PROD (e.g. 24 h), change windows / freeze calendar, ITSM ticket required for PROD? |
+| D17 | PROD approvals | One GitHub approval (simplest), or two approvals from different groups collected in the release console (§8.5.4)? |
+| D18 | Notifications | Slack, Microsoft Teams, email, or several? |
 
 ---
 
@@ -991,9 +1202,10 @@ CloudInfraAutomation/
 | **P0 — Standards** | `TAGGING-STANDARD.md`, registry schema, tag-support matrix for S3/Lambda/DynamoDB/Logs/IAM | Signed off by security / cloud governance |
 | **P1 — Org guardrails** | SCPs, Tag Policies, account-bootstrap StackSet with shared ABAC policies | In a sandbox: project A's roles are **denied** on project B's resources and on forged tags; allowed on their own (automated allow/deny test suite) |
 | **P2 — Engine** | Payload schema, synthesis (S3, Lambda, DynamoDB, binders), linters, per-environment parameter files, golden tests | Lambda + S3 template passes lint/guard for all 5 environments; regeneration gives identical output |
-| **P3 — Pipeline** | `project-bootstrap.yaml`, `deploy.yml` + `deploy-env.yml` | Manual repo promotes sandbox → prod with approvals; second push = empty changesets; failure in TEST stops promotion and the next push recovers |
+| **P3 — Pipeline** | `project-bootstrap.yaml`, `deploy.yml` + `deploy-env.yml`, G1–G3 gates, plan → approve → execute for STAGE/PROD | Manual repo promotes sandbox → prod with reviewer approvals; STAGE/PROD cannot deploy without approval; second push = empty changesets; failure in TEST stops promotion and the next push recovers |
 | **P4 — Provisioning** | GitHub App client, multi-account bootstrapper, saga, CLI | One command creates a repo that bootstraps 5 accounts and deploys DEV; failures injected at each step undo cleanly |
-| **P5 — API + UI** | Registry API, **environment & account admin screens**, cascading dropdowns, preview, status per environment | Click-to-DEV in the browser; entitlement filtering verified; an admin can add/reorder an environment and bind an account, and onboarding checks block an invalid account |
+| **P5 — API + UI** | Registry API, **environment & account admin screens**, **release console (pipeline view, approval inbox, approval detail)**, cascading dropdowns, preview, status per environment | Click-to-DEV in the browser; entitlement filtering verified; an admin can add/reorder an environment and bind an account, and onboarding checks block an invalid account |
+| **P5b — Quality gate service** | Release record, deployment protection rule app, change set risk analysis, Access Analyzer checks, G4/G5 | A high-risk change set is blocked; PROD is refused if the artifact differs from STAGE or bake time is not met |
 | **P6 — Production control plane** | Step Functions, webhooks, reconciler, quotas, observability, Config compliance | 100 concurrent jobs on one installation complete without failing on rate limits; tag compliance dashboard live |
 
 **Next step:** review this document, answer §15, and approve a phase to start. No code will be written until then.
