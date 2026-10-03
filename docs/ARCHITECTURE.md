@@ -2,9 +2,10 @@
 
 **Status:** Draft v2 for review. No code is written until this design is approved.
 **Date:** 2026-10-03
-**Scope:** A web feature where a user selects their **Portfolio → Product/Platform → Team** and the AWS services they need. The platform then generates a CloudFormation template, starter code and a GitHub Actions pipeline, creates a new GitHub repository, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources.
+**Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template, starter code and a GitHub Actions pipeline, creates a new GitHub repository, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources.
 
 **Changes in v2:** added the org registry and tagging strategy (§4); permissions based on tags (§4.5–4.8); multi-account, five-environment model (§5); promotion pipeline (§8). Payload, provisioning, security and scaling sections are updated to match.
+**Changes in v2.2:** the hierarchy is now three levels, Portfolio → Product/Platform → Project. The team level and the `org:team` tag are removed.
 **Changes in v2.1:** environment names, their order and their AWS account numbers can now be configured by platform admins in the application (§5.5). Nothing about environments is hardcoded.
 
 ---
@@ -33,17 +34,17 @@
 ## 1. Goals, non-goals and design principles
 
 ### Goals
-- A user picks their Portfolio → Product/Platform → Team from dropdowns, selects services (for example, a Python Lambda triggered by an S3 bucket), and gets a working repository deployed in one click.
-- **Tags decide what a project may touch.** Every resource is tagged with its portfolio, product, team, project and environment. The IAM roles a project uses can only create resources with *their own* tags and can only change resources that already carry *their own* tags.
+- A user picks their Portfolio → Product/Platform from dropdowns, names the project, selects services (for example, a Python Lambda triggered by an S3 bucket), and gets a working repository deployed in one click.
+- **Tags decide what a project may touch.** Every resource is tagged with its portfolio, product, project and environment. The IAM roles a project uses can only create resources with *their own* tags and can only change resources that already carry *their own* tags.
 - **Configurable environments, one account each:** environments (default: Sandbox, DEV, TEST, QA/STAGE, PROD) and their unique AWS account numbers are managed in the application by platform admins. A project is promoted through them in the configured order by a gated pipeline, using the same built artifact each time.
 - Generated infrastructure is **least-privilege by construction**: no `*` actions or `*` resources in any IAM role the app template creates.
 - Each push safely updates the existing stack, nothing is replaced unless intended, and failures are cleaned up or clearly reported.
-- Supports many portfolios, products and teams at once without hitting GitHub or AWS API limits.
+- Supports many portfolios, products and projects at once without hitting GitHub or AWS API limits.
 
 ### Non-goals (v1)
 - A general-purpose infrastructure designer. v1 offers a fixed catalog of services that can be connected to each other.
 - Creating new AWS accounts. The account landing zone (AWS Organizations / Control Tower) already exists; the platform only *uses* its accounts.
-- Editing the Portfolio/Product/Team lists in this UI. They come from the org registry (§4.2), whose source of truth is a CMDB or a platform admin screen.
+- Editing the Portfolio/Product lists in this UI. They come from the org registry (§4.2), whose source of truth is a CMDB or a platform admin screen.
 
 ### Design principles
 | Principle | What it means here |
@@ -65,13 +66,13 @@
 ```mermaid
 flowchart LR
   subgraph Client["Client"]
-    UI["Web UI (React)<br/>Portfolio → Product/Platform → Team dropdowns<br/>service catalog · connections · preview"]
+    UI["Web UI (React)<br/>Portfolio → Product/Platform dropdowns<br/>service catalog · connections · preview"]
   end
 
   subgraph Platform["Platform account (Infrastructure OU)"]
     direction TB
     API["Project API<br/>(stateless, behind ALB/API GW + SSO)"]
-    REG[("Org registry + environment config<br/>portfolios · products · teams ·<br/>environments · account bindings · entitlements")]
+    REG[("Org registry + environment config<br/>portfolios · products ·<br/>environments · account bindings · entitlements")]
     SYN["Synthesis engine<br/>catalog → template + code + workflow"]
     VAL["Validation gate<br/>schema · cfn-lint · cfn-guard ·<br/>IAM & tag linter"]
     SFN["Orchestrator<br/>(Step Functions, undo-on-failure)"]
@@ -136,8 +137,8 @@ sequenceDiagram
   participant GA as GitHub Actions
 
   UI->>API: GET /v1/org-registry (filtered by user's entitlements)
-  API->>REG: portfolios → products → teams the user may use
-  U->>UI: Pick Portfolio, Product/Platform, Team; select Lambda + S3; connect S3 → Lambda
+  API->>REG: portfolios → products the user may use
+  U->>UI: Pick Portfolio, Product/Platform; name project; select Lambda + S3; connect S3 → Lambda
   UI->>API: POST /v1/projects:preview
   API->>REG: check selection + resolve account per environment
   API-->>UI: files + resolved tags + target accounts per environment
@@ -163,7 +164,7 @@ sequenceDiagram
 |---|---|---|
 | **Web UI** | Cascading ownership dropdowns, service catalog, connection editor, preview (files, tags, target accounts), job status per environment. | Static on CDN |
 | **Project API** | Authentication, entitlement checks, validation, preview, job creation, idempotency. Keeps no state between requests. | Horizontal containers |
-| **Org registry** | Source of the Portfolio → Product/Platform → Team tree, cost centers, entitlements, allowed tag values. | DynamoDB + cache; synced from CMDB |
+| **Org registry** | Source of the Portfolio → Product/Platform tree, projects, cost centers, entitlements, allowed tag values. | DynamoDB + cache; synced from CMDB |
 | **Environment config** | Admin-managed list of environments (name, order, tier, protection and guardrail profiles) and **account bindings** (environment + portfolio/product + region → AWS account ID). Validates and onboards accounts before they can be used (§5.5). | DynamoDB, versioned, audited |
 | **Synthesis engine** | Payload → template, starter code, workflow, per-environment parameter files. Pure function with no I/O. | Runs in-process |
 | **Validation gate** | Schema, connection rules, cfn-lint, cfn-guard (rules differ per environment), IAM least-privilege + tag linter. | Runs in-process |
@@ -176,7 +177,7 @@ sequenceDiagram
 
 | Method & path | Purpose |
 |---|---|
-| `GET /v1/org-registry` | Portfolio → Product/Platform → Team tree, **filtered to what the caller is entitled to**. Drives the dropdowns. |
+| `GET /v1/org-registry` | Portfolio → Product/Platform tree, **filtered to what the caller is entitled to**. Drives the dropdowns. |
 | `GET /v1/catalog` | Services that can be selected, their settings and valid connections. |
 | `GET /v1/environments` | Active environments in promotion order (read-only for normal users). |
 | `GET/POST/PUT /v1/admin/environments` | **Admin:** create, rename (display name), reorder, set profiles, deactivate environments. |
@@ -192,7 +193,7 @@ sequenceDiagram
 ## 3. Request payload and data model
 
 ### 3.1 Design choices
-- **Ownership by ID, not by name:** the UI sends registry IDs (`pf-…`, `pr-…`, `tm-…`). The server checks them against the registry *and* the user's entitlements. **The UI is never trusted for ownership.**
+- **Ownership by ID, not by name:** the UI sends registry IDs (`pf-…`, `pr-…`). The server checks them against the registry *and* the user's entitlements. **The UI is never trusted for ownership.**
 - **No account IDs in the payload.** The server works out the target account for each environment from the admin-configured account bindings (§5.5). Users cannot point a deploy at an account they don't own.
 - **Graph-shaped:** `resources` (nodes) and `connections` (edges). Permissions and event wiring come from the edges, so the user never writes IAM.
 - **Stable IDs supplied by the user** become logical IDs and part of physical names; stable IDs are what make updates safe.
@@ -212,7 +213,6 @@ sequenceDiagram
   "ownership": {
     "portfolioId": "pf-payments",
     "productId": "pr-invoicing",
-    "teamId": "tm-ap-automation",
     "dataClassification": "confidential"
   },
   "environments": {
@@ -244,7 +244,6 @@ What the server adds before synthesis (shown in the preview, read-only):
   "resolvedTags": {
     "org:portfolio": "pf-payments",
     "org:product": "pr-invoicing",
-    "org:team": "tm-ap-automation",
     "org:project": "invoice-ingest",
     "org:cost-center": "CC-4410",
     "org:data-classification": "confidential",
@@ -266,7 +265,7 @@ What the server adds before synthesis (shown in the preview, read-only):
 
 | Field | Rule | Reason |
 |---|---|---|
-| `ownership.*Id` | Must exist in the registry; product must belong to the portfolio; team must belong to the product; user must be entitled to the product | Stops users from claiming someone else's product. |
+| `ownership.*Id` | Must exist in the registry; product must belong to the portfolio; user must be entitled to the product | Stops users from claiming someone else's product. |
 | `ownership.dataClassification` | ≤ the product's classification ceiling; `restricted` data not allowed in `sandbox` | Classification gates are enforced in SCPs too (§4.7). |
 | `environments.enabled` | Subset of the **active configured** environments that have an onboarded account binding for this product; must include every environment the configuration marks as a required gate before a later one (e.g. `prod` requires `stage`); order comes from the configuration, not the payload | Promotion integrity. |
 | `project.name` | `^[a-z][a-z0-9]*(-[a-z0-9]+)*$`, 3–30 chars, no `--`, **unique within the GitHub org and across the registry** | `org:project` must identify exactly one project. `--` is reserved as the name separator. |
@@ -284,11 +283,10 @@ What the server adds before synthesis (shown in the preview, read-only):
 | Entity | PK | SK | Key attributes |
 |---|---|---|---|
 | Portfolio | `REG#PORTFOLIO` | `PF#{id}` | displayName, status, owner group |
-| Product/Platform | `REG#PF#{portfolioId}` | `PR#{id}` | displayName, kind (`product`\|`platform`), costCenter, classification ceiling, allowed envs, entitled IdP groups, GitHub reviewer teams per env |
+| Product/Platform | `REG#PF#{portfolioId}` | `PR#{id}` | displayName, kind (`product`\|`platform`), costCenter, classification ceiling, allowed envs, entitled IdP groups, GitHub access team (repo maintain role), GitHub reviewer teams per env |
 | Environment | `CFG#ENV` | `ENV#{envId}` | displayName, order, tier, OU, required-gate flag, protection profile, guardrail profile, status, version |
 | Account binding | `CFG#BIND#{envId}` | `{scope}#{scopeId}#{region}` | accountId, status (`pending`/`onboarded`/`failed`/`retired`), last validation result, version |
 | Account index (uniqueness) | `CFG#ACCT#{accountId}` | `META` | envId. Written in the same transaction as the binding, so **one account ID can belong to only one environment** |
-| Team | `REG#PR#{productId}` | `TM#{id}` | displayName, IdP group, GitHub team slug, on-call alias |
 | Project | `PROJECT#{name}` | `META` | ownership IDs, repo ID, enabled envs, bootstrap stack IDs per env, catalog version |
 | Job | `JOB#{jobId}` | `META` / `STEP#{n}#{name}#{env}` | state, per-step / per-env status, errors, undo state |
 | Idempotency | `IDEMP#{requestId}` | `META` | jobId, payloadHash |
@@ -301,23 +299,21 @@ Job states: `ACCEPTED → REPO_CREATED → AWS_BOOTSTRAPPED(per env) → ACTIONS
 
 ### 4.1 Hierarchy and how each level is used
 
+Three levels: **Portfolio → Product/Platform → Project**. Who may act for a product (repo access, approvers, human AWS access) comes from IdP/GitHub groups attached to the product in the registry; it is not a level in the hierarchy and not a tag.
+
 ```mermaid
 flowchart TD
   PF["Portfolio<br/>pf-payments"] --> PR1["Product<br/>pr-invoicing"]
   PF --> PR2["Platform<br/>pl-payments-core"]
-  PR1 --> T1["Team<br/>tm-ap-automation"]
-  PR1 --> T2["Team<br/>tm-invoice-ui"]
-  T1 --> P1["Project / repo<br/>invoice-ingest"]
-  T1 --> P2["Project / repo<br/>invoice-ocr"]
-  PR2 --> T3["Team<br/>tm-ledger"]
-  T3 --> P3["Project / repo<br/>ledger-api"]
+  PR1 --> P1["Project / repo<br/>invoice-ingest"]
+  PR1 --> P2["Project / repo<br/>invoice-ocr"]
+  PR2 --> P3["Project / repo<br/>ledger-api"]
 ```
 
 | Level | Used for | Used in IAM permissions? |
 |---|---|---|
 | **Portfolio** | Cost roll-up, portfolio-level guardrails, account routing (§5.2) | Guardrail SCPs only (e.g. "this account only accepts portfolio X") |
 | **Product / Platform** | Cost, entitlements (who may create projects), optional sharing between projects in the same product | Yes, for opt-in sharing within a product (§4.6) |
-| **Team** | Ownership, on-call, GitHub reviewers, human access | **No** for workload roles. Teams get reorganized often; tying machine permissions to team tags would break deployments on every reorg. Optionally used for *human* access (§4.8). |
 | **Project** | **The main isolation boundary.** One repo = one project = one set of roles per environment | **Yes, always** |
 | **Environment** | Which account / stage | Yes: must equal the account's environment |
 
@@ -328,7 +324,7 @@ flowchart TD
 - **Cascading dropdowns:**
   - **Portfolio:** only portfolios where the user has at least one entitled product.
   - **Product/Platform:** filtered by the chosen portfolio *and* the user's IdP groups. Shows a badge for kind (Product or Platform).
-  - **Team:** filtered by the chosen product.
+  - **Project:** a new name typed by the user (validated for format and uniqueness, §3.3), not a dropdown.
 - **Read-only fields shown after selection:** cost center, classification ceiling, and target account per environment (from the account bindings). The user sees exactly where the project will deploy.
 - **Server-side re-check** on preview and on create (registry + entitlement). This guards against a stale UI and against crafted requests.
 - **IDs are immutable; display names can change.** Tag values are IDs (`pr-invoicing`), so renaming "Invoicing" to "AP Invoicing" changes nothing in AWS.
@@ -342,7 +338,6 @@ The key prefix `org:` is a placeholder; choose your company prefix (D3). All val
 |---|---|---|---|---|
 | `org:portfolio` | `pf-payments` | Platform (from registry) | Yes | Cost, guardrails |
 | `org:product` | `pr-invoicing` | Platform | Yes | Cost, sharing within a product |
-| `org:team` | `tm-ap-automation` | Platform | Yes | Ownership, alerts routing |
 | `org:project` | `invoice-ingest` | Platform | Yes | **Primary permission key** |
 | `org:environment` | `dev` | Platform (per account) | Yes | Must match the account's environment |
 | `org:cost-center` | `CC-4410` | Platform (from product) | Yes | Billing (activated as a cost allocation tag) |
@@ -357,7 +352,7 @@ The key prefix `org:` is a placeholder; choose your company prefix (D3). All val
 |---|---|---|
 | IAM roles the platform creates per project per env (deploy role, CFN execution role) | All `org:*` keys | **These role tags are the source of truth.** Inside IAM policies they are read as `aws:PrincipalTag/...`. |
 | CloudFormation stack tags | Same values, passed by the pipeline | Propagated by CloudFormation to every resource that supports tags. AWS only accepts them if they **match the role's own tags** (§4.5). |
-| GitHub repo custom properties | portfolio, product, team, project | Discovery, rulesets, audit. Informational, not a security control. |
+| GitHub repo custom properties | portfolio, product, project | Discovery, rulesets, audit. Informational, not a security control. |
 | `infra.json` in the repo | Ownership IDs | Regeneration. **Not trusted** for permissions. |
 
 ### 4.4 Why a repo cannot forge tags
@@ -397,7 +392,7 @@ The role's tags can be changed only by the platform's provisioner role, and an S
         "aws:RequestTag/org:product":     "${aws:PrincipalTag/org:product}",
         "aws:RequestTag/org:environment": "${aws:PrincipalTag/org:environment}"
       },
-      "ForAllValues:StringEquals": { "aws:TagKeys": ["org:portfolio","org:product","org:team","org:project","org:environment","org:cost-center","org:data-classification","org:managed-by","org:share-scope"] }
+      "ForAllValues:StringEquals": { "aws:TagKeys": ["org:portfolio","org:product","org:project","org:environment","org:cost-center","org:data-classification","org:managed-by","org:share-scope"] }
     }
   },
   {
@@ -441,12 +436,12 @@ SCPs apply to every principal in the account, including humans and other tools. 
 | **Environment lock** | Each environment OU | Deny create if `aws:RequestTag/org:environment` ≠ that OU's environment (e.g. only `prod` in the Prod OU). |
 | **Classification gate** | Sandbox OU | Deny create if `aws:RequestTag/org:data-classification` is `confidential` or `restricted`. |
 | **Region allow-list** | All workload OUs | Only approved regions. |
-| **Tag Policies** | Root | Allowed keys + **allowed values** for `org:portfolio`/`org:product`/`org:team`, **generated from the registry and synced automatically**; enforce letter case; enforce on resource types that support it. |
+| **Tag Policies** | Root | Allowed keys + **allowed values** for `org:portfolio`/`org:product`, **generated from the registry and synced automatically**; enforce letter case; enforce on resource types that support it. |
 
 Note: Tag Policies standardize values and report non-compliance; they enforce only for supported resource types. **SCP + IAM conditions are the actual enforcement**; Tag Policies are the consistency and reporting layer.
 
 ### 4.8 Human access uses the same tags
-In IAM Identity Center, **attributes for access control** map IdP attributes (product, team) to session tags. Permission sets in shared environment accounts then use the same `aws:ResourceTag/org:product = ${aws:PrincipalTag/org:product}` pattern. Engineers can view and debug their product's resources in DEV/TEST and get read-only access in PROD, with no per-team policies.
+In IAM Identity Center, **attributes for access control** map an IdP attribute (product) to a session tag. Permission sets in shared environment accounts then use the same `aws:ResourceTag/org:product = ${aws:PrincipalTag/org:product}` pattern. Engineers can view and debug their product's resources in DEV/TEST and get read-only access in PROD, with no per-product policies.
 
 ### 4.9 Compliance and drift
 - AWS Config rules (`required-tags` + a custom rule) flag `org:*` tag values that don't match the registry, per account, collected in the audit account.
@@ -498,7 +493,7 @@ These are the **default profiles** for the five seeded environments. All of them
 | `retainOnDelete` default | false | false | false | true | true (+ stack policy blocks replace/delete) |
 | Log retention | 7 d | 14 d | 14 d | 90 d | ≥ 365 d |
 | Cleanup | `org:expires-on` TTL (e.g. 14 days) + nightly cleanup job | — | — | — | Deletion denied by SCP except break-glass |
-| Budget | Per-team budget alarm + hard SCP limits on expensive services | Budget alarm | Budget alarm | Budget alarm | Alarms + anomaly detection |
+| Budget | Per-project budget alarm + hard SCP limits on expensive services | Budget alarm | Budget alarm | Budget alarm | Alarms + anomaly detection |
 | Alarms | — | basic | basic | full | full + paging |
 
 ### 5.4 Bootstrap at scale
@@ -578,7 +573,6 @@ Every value the pipeline needs is a **GitHub Actions variable** (`vars.*`), writ
 | `PROJECT_NAME` | Repository | `invoice-ingest` | Project |
 | `ORG_PORTFOLIO` | Repository | `pf-payments` | Ownership (registry ID) |
 | `ORG_PRODUCT` | Repository | `pr-invoicing` | Ownership |
-| `ORG_TEAM` | Repository | `tm-ap-automation` | Ownership |
 | `ORG_COST_CENTER` | Repository | `CC-4410` | Registry (product) |
 | `ORG_DATA_CLASSIFICATION` | Repository | `confidential` | Ownership |
 | `ENVIRONMENT_ORDER` | Repository | `sandbox,dev,test,stage,prod` | Environment config (informational; the generated `deploy.yml` holds the actual job chain) |
@@ -591,7 +585,7 @@ Every value the pipeline needs is a **GitHub Actions variable** (`vars.*`), writ
 
 - **Environment-level variables** are visible only to jobs that run in that GitHub environment. So the DEV job never sees the PROD account number or role.
 - GitHub's precedence is environment → repository → organization. The platform writes each variable at exactly one level, so precedence never decides a value by accident.
-- **Who can edit them:** the owning team gets the `maintain` role on the repo, not `admin`, so it cannot change variables or environment protection. Only the platform (GitHub App) and org admins can. This is a convenience control, not the security boundary.
+- **Who can edit them:** the product's GitHub access team (from the registry) gets the `maintain` role on the repo, not `admin`, so it cannot change variables or environment protection. Only the platform (GitHub App) and org admins can. This is a convenience control, not the security boundary.
 - **The security boundary is still AWS.** If someone did change `AWS_ACCOUNT_ID` or a tag variable:
   - OIDC trust in each account only accepts this repo + this environment.
   - IAM only accepts stack tags equal to the deploy role's own tags (§4.4).
@@ -722,7 +716,7 @@ Webhooks: `workflow_run`, `deployment_status`. GitHub Apps can create repos in *
 
 | # | Step | How | Retry / idempotency approach | Undo (before the commit) |
 |---|---|---|---|---|
-| 1 | Create repo | `POST /orgs/{org}/repos` (`auto_init: true`). Set **custom properties** `portfolio`, `product`, `team`, `project`; grant the owning team's GitHub team write access. | Name exists → check the ownership marker (custom property `provision-request`); resume if ours, otherwise fail with a name conflict | Delete the repo (only if this job created it) |
+| 1 | Create repo | `POST /orgs/{org}/repos` (`auto_init: true`). Set **custom properties** `portfolio`, `product`, `project`; grant the product's GitHub access team (from the registry) the `maintain` role. | Name exists → check the ownership marker (custom property `provision-request`); resume if ours, otherwise fail with a name conflict | Delete the repo (only if this job created it) |
 | 2 | Bootstrap AWS **per enabled environment** (in parallel) | AssumeRole `CloudInfraProvisioner` in each target account → create/update `cloudinfra-bootstrap-{project}` (tagged roles, OIDC trust for `repo:{owner}/{repo}:environment:{env}`) | CloudFormation `ClientRequestToken`; create-or-update | Delete the bootstrap stack in each account where it was created |
 | 3 | GitHub environments | `PUT /repos/{o}/{r}/environments/{env}` for each enabled environment, with protection rules from that environment's protection profile (§5.5) (branch policies; reviewers = registry's reviewer teams; prod wait timer) | `PUT` can safely be repeated | Removed when the repo is deleted |
 | 4 | GitHub variables | Repository variables (project + ownership tags) and **environment variables per enabled environment** (`ENVIRONMENT_NAME`, `AWS_ACCOUNT_ID`, `AWS_REGION`, `AWS_ROLE_ARN`, `CFN_EXEC_ROLE_ARN`, `ARTIFACT_BUCKET`). Full list in §5.5.5. No secrets in OIDC mode. | Create-or-update (`POST`, then `PATCH` on 409) | Removed when the repo is deleted |
@@ -855,7 +849,7 @@ Synthesis is cheap. The real limits are **GitHub API quotas per installation**, 
 
 ### 10.4 Catalog and registry growth
 - **New service** = block + binders + tag-support matrix entry + additions to the shared policies (rolled out via StackSets) + golden tests. No UI-protocol or orchestrator changes.
-- **New portfolio/product/team** = registry entry (CMDB sync). Tag Policy allowed values update automatically. No IAM changes.
+- **New portfolio/product** = registry entry (CMDB sync). Tag Policy allowed values update automatically. No IAM changes.
 - **New account** = joins an OU, is bootstrapped automatically, then an admin binds it to an environment in the application.
 - **New environment** (e.g. adding `perf` between TEST and STAGE) = admin creates it in the application, binds accounts, and approves. New projects pick it up at once; existing projects get a sync-pipeline PR.
 
@@ -977,10 +971,10 @@ CloudInfraAutomation/
 | D2 | GitHub identity | **GitHub App** (organizations only in v1) |
 | D3 | Tag key prefix | Your company prefix, e.g. `acme:`. Placeholder in this document: `org:` |
 | D4 | Main isolation level | **Project** (default) with opt-in read sharing within a product |
-| D5 | Team tag in permissions? | **No** for workload roles (reorg-safe); yes for human access via Identity Center |
+| D5 | Hierarchy | **Decided:** three levels, Portfolio → Product/Platform → Project. No team level or team tag. |
 | D6 | Account granularity | **B: per portfolio per environment**, with C available per product |
 | D7 | Registry source of truth | CMDB (which one?) synced into the platform registry, or the platform registry as the master |
-| D8 | Sandbox model | Shared sandbox account per portfolio with 14-day TTL, or per-team sandbox accounts? |
+| D8 | Sandbox model | Shared sandbox account per portfolio with 14-day TTL, or per-product sandbox accounts? |
 | D9 | Approvers | STAGE: QA team; PROD: product owner + change management. Is there an ITSM (e.g. ServiceNow change) integration requirement? |
 | D10 | Regions | Single region in v1, or multi-region from the start? |
 | D11 | Onboarded today? | Do Control Tower / OUs per environment already exist, or does `org/` need to create the OU structure too? |
