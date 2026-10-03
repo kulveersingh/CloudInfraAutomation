@@ -1,10 +1,11 @@
 # CloudInfraAutomation — Architecture
 
-**Status:** Draft v2 for review. No code is written until this design is approved.
+**Status:** Draft v2.4 for review. No code is written until this design is approved.
 **Date:** 2026-10-03
-**Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template, starter code and a GitHub Actions pipeline, creates a new GitHub repository, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources.
+**Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9).
 
 **Changes in v2:** added the org registry and tagging strategy (§4); permissions based on tags (§4.5–4.8); multi-account, five-environment model (§5); promotion pipeline (§8). Payload, provisioning, security and scaling sections are updated to match.
+**Changes in v2.4:** added developer consumption (§9): infrastructure contract published per environment, application repos linked to compute slots, golden-path build/deploy workflows per language and compute type (Lambda, ECS, EKS, Step Functions), and least-privilege application deploy roles. Sections 9–16 renumbered to 10–17.
 **Changes in v2.3:** STAGE and PROD require GitHub reviewer approval before deployment, using a plan → approve → apply-reviewed-change-set flow that cannot be turned off (§8.3). Added a layered quality-gate strategy for STAGE and PROD (§8.4). Added the release console: promotion and approval workflow in the platform UI, with approvals submitted to GitHub as the reviewer (§8.5).
 **Changes in v2.2:** the hierarchy is now three levels, Portfolio → Product/Platform → Project. The team level and the `org:team` tag are removed.
 **Changes in v2.1:** environment names, their order and their AWS account numbers can now be configured by platform admins in the application (§5.5). Nothing about environments is hardcoded.
@@ -21,14 +22,15 @@
 6. [CloudFormation generation engine](#6-cloudformation-generation-engine)
 7. [GitHub repository provisioning](#7-github-repository-provisioning)
 8. [Deployment pipeline (GitHub Actions + OIDC, configurable environments)](#8-deployment-pipeline-github-actions--oidc-configurable-environments)
-9. [Security model](#9-security-model)
-10. [Scalability and multi-tenancy](#10-scalability-and-multi-tenancy)
-11. [Error handling, idempotency and rollback](#11-error-handling-idempotency-and-rollback)
-12. [Observability](#12-observability)
-13. [Where an LLM fits (and where it must not)](#13-where-an-llm-fits-and-where-it-must-not)
-14. [Proposed repository layout](#14-proposed-repository-layout)
-15. [Decisions needed from you](#15-decisions-needed-from-you)
-16. [Implementation phases](#16-implementation-phases)
+9. [Developer consumption: application repositories](#9-developer-consumption-application-repositories)
+10. [Security model](#10-security-model)
+11. [Scalability and multi-tenancy](#11-scalability-and-multi-tenancy)
+12. [Error handling, idempotency and rollback](#12-error-handling-idempotency-and-rollback)
+13. [Observability](#13-observability)
+14. [Where an LLM fits (and where it must not)](#14-where-an-llm-fits-and-where-it-must-not)
+15. [Proposed repository layout](#15-proposed-repository-layout)
+16. [Decisions needed from you](#16-decisions-needed-from-you)
+17. [Implementation phases](#17-implementation-phases)
 
 ---
 
@@ -616,7 +618,7 @@ flowchart LR
   E --> L["Least-privilege + tag linter<br/>cfn-lint · cfn-guard"]
   L --> Y["template.yaml (one for all envs)"]
   P --> PF["config/{env}.json<br/>(parameters per environment)"]
-  B --> C["src/{id}/lambda_function.py"]
+  B --> C["single-repo starter mode only:<br/>src/{id}/lambda_function.py<br/>(otherwise code lives in app repos, §9)"]
   Y & PF & C --> F["File bundle + deploy.yml + infra.json + README"]
 ```
 
@@ -670,7 +672,7 @@ flowchart LR
   - One execution role per function, with the shared boundary attached; exact-ARN inline policy (logs to its own log group + binder statements).
   - An explicit log group with retention per environment; JSON logging.
   - `arm64`.
-  - Code from the regional artifact bucket at `{project}/{tree-hash}/{id}.zip`.
+  - Code: in the recommended split model (§9) the function is created with a platform bootstrap package and the **application repo** deploys the real code. In single-repo starter mode only, code comes from the regional artifact bucket at `{project}/{tree-hash}/{id}.zip`.
   - DLQ / on-failure destination recommended for S3 triggers.
 - **DynamoDB:** on-demand billing, point-in-time recovery, encryption, deletion protection in stage/prod.
 
@@ -680,7 +682,7 @@ flowchart LR
 |---|---|
 | `ProjectName` | GitHub environment variable |
 | `EnvironmentName` | GitHub environment variable (must equal the deploy role's `org:environment` tag) |
-| `CodeS3Bucket`, `CodeS3Prefix` | Regional artifact bucket; `{project}/{tree-hash-of-src}` |
+| `CodeS3Bucket`, `CodeS3Prefix` | Bootstrap package location (split model, §9) or `{project}/{tree-hash-of-src}` (single-repo starter mode) |
 | Per-resource settings (memory, retention, concurrency, retain) | `config/{env}.json` |
 
 ### 6.6 Validation gate
@@ -739,7 +741,7 @@ Webhooks: `workflow_run`, `deployment`, `deployment_status`, `deployment_review`
 
 ### 7.3 Rate limits and API etiquette
 - Honor `x-ratelimit-remaining` / `reset` and `retry-after`. Otherwise use exponential backoff with full jitter (1 s base, 60 s cap, 6 attempts).
-- Content-creating calls are serialized per installation, at least 1 s apart (token bucket, §10.3).
+- Content-creating calls are serialized per installation, at least 1 s apart (token bucket, §11.3).
 - Webhooks instead of polling; conditional requests (`304`s are not counted against the limit).
 - A project with 5 environments needs roughly 25–30 write calls. At 1 write/s per installation, that is about 30 s of GitHub time per project, which is why provisioning is async and queued.
 
@@ -770,7 +772,7 @@ flowchart LR
 flowchart LR
   PR["Pull request"] --> V["validate<br/>lint · guard · unit tests<br/>(no AWS access)"]
   FB["Any branch<br/>(manual dispatch)"] --> SBX["deploy: sandbox"]
-  M["push to main"] --> V2["validate"] --> BLD["build once<br/>zip src/* → artifact bucket<br/>key = tree hash"]
+  M["push to main"] --> V2["validate"] --> BLD["build once<br/>(starter mode: zip src/*;<br/>split model: no code build)"]
   BLD --> DEV["deploy: dev<br/>+ smoke tests"]
   DEV --> TEST["deploy: test<br/>+ integration tests"]
   TEST --> CSS["plan: stage<br/>(create change set only)"] --> AS{"GitHub reviewer approval<br/>(required)"} --> STG["deploy: stage<br/>execute reviewed change set<br/>+ UAT checks"]
@@ -873,7 +875,7 @@ The plan job sends the change set to the gate service, which classifies every ch
 
 - The gate service keeps a **release record** per commit SHA: artifact digest and attestation, test and scan results per environment, change set IDs and risk classification, drift result, approvals (who, when, comment), and deploy outcome.
 - Workflows post results to the platform with the job's OIDC token, so the platform can verify which repo, environment and run sent them.
-- The same record feeds the reviewer summary, the platform UI and audit (§12).
+- The same record feeds the reviewer summary, the platform UI and audit (§13).
 
 #### 8.4.4 How the gate plugs into GitHub
 
@@ -1008,7 +1010,245 @@ Only where an account cannot have an OIDC provider:
 
 ---
 
-## 9. Security model
+## 9. Developer consumption: application repositories
+
+### 9.1 The problem and the recommended model
+
+The repos the platform generates (§7) are **infrastructure repos**: they define the AWS resources, the IAM roles and the event wiring for one project. Developers write their actual code (Python, Java, Go, Rust, Node.js, …) in **application repos**, and deploy it to ECS, Lambda, EKS or Step Functions *on top of* that infrastructure. Two things are needed:
+1. a reliable way for application repos to **find** the infrastructure (names, ARNs, roles, endpoints) in every environment;
+2. a safe way for them to **deploy onto** it, without being able to create IAM, change network or data resources, or touch other projects.
+
+**Recommendation: "infrastructure contract + golden-path pipelines".**
+- Each infrastructure repo **publishes a versioned, machine-readable contract** per environment: what it provides and how to reach it.
+- Application repos **declare which project and which compute slots** they deploy to, in one small file.
+- Application repos deploy through **reusable, platform-owned GitHub workflows** (one per language and compute type). These read the contract at deploy time, so no ARNs or account details are copied into application repos.
+- Application deploy roles use the **same tag-based permission model** (§4), but can only update the runnable artifacts of their bound slots. They can never create IAM roles or change data, network or trigger resources.
+
+```mermaid
+flowchart LR
+  subgraph Infra["Infrastructure repo (platform-generated)<br/>invoice-ingest-infra"]
+    T["template.yaml · infra.json"]
+  end
+  subgraph Acct["Each environment account"]
+    STK["Infra stack<br/>buckets · tables · queues · roles ·<br/>Lambda shell · ECS service · namespace · SFN role"]
+    SSM[("SSM Parameter Store<br/>/platform/projects/invoice-ingest/contract")]
+    APPSTK["App resources<br/>code versions · task definitions ·<br/>pods · state machine definitions"]
+  end
+  subgraph Apps["Application repos (developer-owned)"]
+    A1["invoice-processor (Python)<br/>→ Lambda slot 'processor'"]
+    A2["invoice-api (Java)<br/>→ ECS slot 'api'"]
+    A3["invoice-worker (Go)<br/>→ EKS slot 'worker'"]
+    A4["invoice-flow (ASL + Rust tasks)<br/>→ Step Functions slot 'flow'"]
+  end
+  PW["platform-workflows repo<br/>reusable build + deploy workflows (versioned)"]
+  PORTAL["Platform UI / developer portal<br/>contract viewer · linked repos · how-tos"]
+
+  T -->|"deploy (infra pipeline)"| STK --> SSM
+  A1 & A2 & A3 & A4 -->|"uses: platform-workflows@v1"| PW
+  PW -->|"read contract"| SSM
+  PW -->|"deploy artifact (app deploy role)"| APPSTK
+  SSM -. "published copy" .-> PORTAL
+```
+
+### 9.2 Who owns what: infrastructure vs application
+
+The rule: **the infrastructure repo owns anything with identity, network, data or triggers. The application repo owns the runnable artifact and its runtime settings.**
+
+| Compute type | Infrastructure repo owns (via the platform UI) | Application repo owns | How the app deploys |
+|---|---|---|---|
+| **Lambda** | Function "shell" (name, execution role, triggers such as S3 notifications, permissions, log group, concurrency, VPC config, binding env vars), a `live` alias, code-signing config in gated environments | Code, build, versions, which version `live` points to; app-level settings in AppConfig/SSM under the app path | Upload artifact → `UpdateFunctionCode` → `PublishVersion` → move `live` alias (later: CodeDeploy canary) |
+| **ECS (Fargate)** | Cluster (per project, as clusters cost nothing), ECR repository, task role and task execution role, security groups, ALB target group/listener rule, log group, the ECS service (created with a platform placeholder image) | Dockerfile, image, task definition revisions (image digest, CPU/memory, env vars, health check) | Build image → push to ECR → register task definition (roles taken from the contract) → update service; ECS deployment circuit breaker with rollback |
+| **EKS** | *Shared* cluster per portfolio per environment, run by the platform team (a cluster per project is too costly). Per project: namespace, ResourceQuota/LimitRange, NetworkPolicy, ServiceAccount + **EKS Pod Identity** association to a project role, ECR repository | Container image, Helm chart / Kustomize manifests **limited to its namespace** | Recommended: **GitOps with Argo CD**. The pipeline pushes the image and updates the image digest in the environment overlay; Argo CD syncs the namespace. Alternative: `helm upgrade --atomic` with a namespace-scoped role. |
+| **Step Functions** | State machine execution role (allowed to call only the project's Lambdas/ECS tasks/resources), log group, X-Ray settings | The state machine definition (ASL) and any task code (which deploys to its own Lambda/ECS slots) | Small **app stack** (CloudFormation) containing the state machine, with `DefinitionSubstitutions` filled from the contract; the definition is validated before deploy |
+
+**Why this split:**
+- Developers can ship code many times a day without touching security-sensitive resources.
+- Every new permission, trigger or data store still goes through the platform UI → infrastructure repo PR → quality gates (§8.4) → approvals.
+- Drift checks on the infrastructure stack **ignore the fields owned by the application** (Lambda code and alias version, ECS service task definition) so these updates are not flagged as drift.
+
+**Infrastructure repo changes (supersedes the single-repo starter code):** in the recommended model, the infrastructure repo no longer contains application code. Lambda functions are created with a small **platform bootstrap package** for their runtime, and the infrastructure pipeline does not build code. A **"single-repo starter" mode** (code in `src/` inside the infrastructure repo, as in §6) is kept for sandbox prototypes only.
+
+### 9.3 Catalog additions for compute slots
+
+A **compute slot** is a catalog resource that application code is deployed into. Each slot is bound to exactly one application repo; one application repo may serve several slots (a monorepo).
+
+| Type | Key settings | Contract exposes |
+|---|---|---|
+| `lambda.function` | runtime family (`python`, `java`, `nodejs`, `go`, `rust`, `container`), arch, memory, timeout, triggers via connections | function name/ARN, `live` alias ARN, runtime, handler convention, artifact location, signing profile |
+| `ecs.service` | CPU/memory limits, desired count range, port, public/internal, health check path | cluster, service, task role ARN, execution role ARN, ECR URI, container name, log group, subnets/SGs (from the landing zone network via SSM), target group |
+| `eks.workload` | target shared cluster, quota, service account | cluster name, namespace, service account, ECR URI, Argo CD application name |
+| `stepfunctions.workflow` | type (standard/express), logging level | role ARN, log group ARN, substitution values for the project's resources |
+| `ecr.repository` | (created automatically for container slots) | repository URI; immutable tags + scan on push |
+
+Existing connection kinds still apply (e.g. `s3.notify` → `lambda.function`, `iam.access` from any slot's runtime role to a bucket/table). The existing `lambda.python` becomes `lambda.function` with `runtime: python`.
+
+### 9.4 The infrastructure contract
+
+**Published three ways after every successful infrastructure deploy, per environment:**
+
+| Where | For | Notes |
+|---|---|---|
+| **SSM Parameter Store** in the environment account: `/platform/projects/{project}/contract` (JSON, advanced tier) plus one parameter per value under `/platform/projects/{project}/...` | Deploy pipelines and running code | Written as `AWS::SSM::Parameter` resources by the infrastructure stack itself, so it is always in sync with what is deployed. Readable only by roles tagged with the same project (ABAC on the path). |
+| **Platform API / developer portal**: `GET /v1/projects/{id}/contract?env=dev` | Humans, tooling, local development | Copy recorded in the release record with the infra commit SHA |
+| **Infrastructure repo release** (GitHub Release asset `contract.{env}.json`, tagged with the infra version) | Review and diffing | Lets reviewers see contract changes between versions |
+
+**Why SSM, not CloudFormation exports:** exports lock the exporting stack. A value that is imported elsewhere cannot be changed or removed, which would block infrastructure changes. SSM parameters keep stacks loosely coupled.
+
+**Example contract (DEV):**
+
+```json
+{
+  "contractVersion": "1",
+  "project": "invoice-ingest",
+  "environment": "dev",
+  "accountId": "222222222222",
+  "region": "us-east-1",
+  "infraVersion": "1.4.0",
+  "infraCommit": "4f78c64",
+  "compute": {
+    "processor": {
+      "type": "lambda.function", "runtime": "python3.13", "architecture": "arm64",
+      "functionName": "invoice-ingest--processor",
+      "aliasArn": "arn:aws:lambda:us-east-1:222222222222:function:invoice-ingest--processor:live",
+      "artifactBucket": "cloudinfra-artifacts-999999999999-us-east-1",
+      "artifactPrefix": "apps/invoice-ingest/processor/",
+      "boundRepo": "acme-platform/invoice-processor"
+    },
+    "api": {
+      "type": "ecs.service",
+      "cluster": "invoice-ingest--cluster", "service": "invoice-ingest--api",
+      "containerName": "app",
+      "ecrRepositoryUri": "222222222222.dkr.ecr.us-east-1.amazonaws.com/invoice-ingest/api",
+      "taskRoleArn": "arn:aws:iam::222222222222:role/app/invoice-ingest/workload/…",
+      "executionRoleArn": "arn:aws:iam::222222222222:role/app/invoice-ingest/workload/…",
+      "logGroup": "/ecs/invoice-ingest--api",
+      "boundRepo": "acme-platform/invoice-api"
+    }
+  },
+  "resources": {
+    "uploads": { "type": "s3.bucket", "name": "invoice-ingest--uploads-222222222222-us-east-1" }
+  },
+  "runtimeEnv": {
+    "processor": { "UPLOADS_BUCKET_NAME": "invoice-ingest--uploads-222222222222-us-east-1" },
+    "api":       { "UPLOADS_BUCKET_NAME": "invoice-ingest--uploads-222222222222-us-east-1" }
+  }
+}
+```
+
+**Contract versioning and compatibility:**
+- `contractVersion` changes only for schema changes.
+- Each infra change is classified by the gate service as **additive** (new slot/resource/value) or **breaking** (removed or renamed slot/resource, changed runtime family, changed container name). Breaking changes require acknowledgment from the owners of the bound application repos before the infra PR can merge.
+- Application deploys check the contract in the target environment: every slot and binding the app needs must be present. Otherwise the deploy stops with *"DEV infrastructure does not yet provide `uploads` — promote infra first."* Infrastructure and applications are **promoted independently**, and the check keeps them compatible.
+
+### 9.5 Linking an application repo: `.platform/app.yaml`
+
+Every application repo has one small, language-neutral file that says what it deploys and where:
+
+```yaml
+apiVersion: platform/v1
+project: invoice-ingest            # the infrastructure project
+components:
+  - slot: processor                # compute slot in the infra contract
+    type: lambda.function
+    language: python               # python | java | go | rust | nodejs | container
+    path: services/processor
+    requires: [uploads]            # contract values this code needs
+  - slot: api
+    type: ecs.service
+    language: java
+    path: services/api
+    build: { tool: gradle }
+```
+
+- **Binding is recorded in the platform, not trusted from this file.** The platform links slot → repo when the app repo is created (or linked) in the UI. The app deploy role's OIDC trust is limited to that repo, so a file in another repo claiming `project: invoice-ingest` gets AccessDenied.
+- The file decides **how to build** and **which slots to deploy**. The contract decides **where**.
+
+### 9.6 Golden-path pipelines (`platform-workflows` repo)
+
+A central, versioned repo of **reusable GitHub workflows**. Application repos call them by tag; Dependabot pins and updates the commit SHAs. Builds are separate from deploys, so one artifact is built once and promoted through every environment, just like infrastructure (§8.2).
+
+**Build workflows (per language):**
+
+| Language | Lambda artifact | Container artifact (ECS/EKS) |
+|---|---|---|
+| Python | zip with dependencies (`pip install --target`, arm64 wheels) → `python3.x` runtime | Docker image |
+| Java | jar/zip via Maven/Gradle → `java21` runtime (SnapStart optional) | Docker image (e.g. Jib or Dockerfile) |
+| Go | `bootstrap` binary (`GOOS=linux GOARCH=arm64`) → `provided.al2023` | Distroless image |
+| Rust | `bootstrap` via `cargo lambda build --arm64` → `provided.al2023` | Distroless image |
+| Node.js | bundled zip (esbuild) → `nodejs22.x` | Docker image |
+
+Every build: unit tests → SAST/dependency scan → SBOM → vulnerability scan → **artifact attestation** → (Lambda) **AWS Signer code signing** → publish to the artifact bucket (zip) or ECR (image, by digest). This is the application version of gates G1–G2.
+
+**Deploy workflows (per compute type):** `deploy-lambda.yml`, `deploy-ecs.yml`, `deploy-eks.yml` (GitOps update), `deploy-sfn.yml`. Each one:
+1. Assumes the **app deploy role** for the environment via OIDC.
+2. Reads the contract from SSM and checks `requires`.
+3. Checks that the artifact's runtime family matches the slot (a Go binary cannot go to a Python slot).
+4. Deploys and waits until healthy.
+5. Rolls back on failure: Lambda alias back to the previous version, ECS circuit breaker, Argo CD rollback, SFN previous definition.
+6. Reports to the release record.
+
+Application repos get the **same environments, approvals and quality gates** as infrastructure repos:
+- GitHub environments sandbox → PROD;
+- required reviewers and the gate service for STAGE/PROD;
+- the release console (§8.5) shows application promotions next to infrastructure promotions.
+
+For application deploys, the "change set" the reviewer approves is a **deploy diff**: current vs new artifact digest, code/version hash, task definition diff and Kubernetes manifest diff.
+
+### 9.7 Security for application deploys
+
+**App deploy role** (per application repo, per environment, created by the platform):
+- **Trust:** OIDC `sub = repo:{owner}/{app-repo}:environment:{env}`.
+- **Tags:** same `org:*` tags as the project, so the same tag-based model applies (§4).
+- **Shared policy:** `cloudinfra-appdeploy-abac`, which allows only:
+
+| Allowed | Scope |
+|---|---|
+| `lambda:UpdateFunctionCode`, `PublishVersion`, `UpdateAlias`, `GetFunction` | Functions tagged with the same project **and** named after a slot bound to this repo |
+| `ecs:RegisterTaskDefinition` (with own tags), `ecs:UpdateService`, `ecs:Describe*` | Services/task families of bound slots |
+| `iam:PassRole` | Only roles under `/app/{project}/workload/`, only to `ecs-tasks.amazonaws.com` / `states.amazonaws.com`, as listed in the contract |
+| `ecr:*Image*` push/pull actions | Repositories tagged with the same project |
+| `ssm:GetParameter*` | `/platform/projects/${aws:PrincipalTag/org:project}/*` |
+| `cloudformation:*ChangeSet*` on app stacks `{project}-app-*` | **With the `cloudformation:ResourceTypes` condition** limited to an allow-list (e.g. `AWS::StepFunctions::StateMachine`, `AWS::Lambda::Version`, `AWS::CloudWatch::Dashboard`) |
+| `s3:PutObject` | `artifact-bucket/apps/{project}/*` |
+| `eks:DescribeCluster` | Shared cluster (for GitOps, nothing else; Kubernetes access goes through Argo CD) |
+
+**Never allowed:** `iam:Create*`/`Put*`/`Attach*`, any change to buckets/tables/queues/VPC/security groups/triggers, any resource of another project.
+
+**Extra safeguards:**
+- A **CloudFormation Guard Hook** in every account rejects IAM, network and data resource types in stacks named `*-app-*`.
+- **Artifact provenance in gated environments** (an AWS-side check in addition to GitHub approvals):
+  - Lambda functions in STAGE/PROD have a **code signing config** that accepts only code signed by the platform build.
+  - ECR repositories use immutable tags and deploys pin images by digest.
+  - EKS admission policy (e.g. Kyverno) admits only images with a valid signature/attestation.
+- **Runtime access:** running code uses the slot's runtime role (Lambda execution role, ECS task role, Pod Identity role, SFN role). These are created by the infrastructure stack with exact-ARN policies and the shared boundary (§4.5), so application code has exactly the access drawn as connections in the platform UI.
+
+### 9.8 How developers use it day to day
+
+| Need | How |
+|---|---|
+| Start a new service | Platform UI → project → **"Create application repo"**: choose slot(s), language and compute type. The platform creates the repo with a language template, `.platform/app.yaml`, a workflow that calls the golden path, environments, protection rules and variables, using the same provisioning steps as §7. Or link an existing repo. |
+| Find resource names/ARNs | Platform UI **contract viewer** per environment (copy buttons, diff between environments); `platform` CLI: `platform contract get invoice-ingest --env dev` |
+| Use resources in code | Read the environment variables the deploy injects (`UPLOADS_BUCKET_NAME`, …). This works the same way in every language, with no platform SDK. The language templates include small examples (boto3, AWS SDK for Java v2, AWS SDK for Go v2, AWS SDK for Rust). |
+| Get a new bucket/table/permission | Platform UI → **"Change infrastructure"** → the platform regenerates the template and opens a **PR on the infrastructure repo** → gates and approvals → infra promotes → the contract updates → the app can use it |
+| Run or test locally | IAM Identity Center access to sandbox/DEV, with tag-based access to the product's resources (§4.8); `platform env export --env dev` writes the contract values as local env vars |
+| Discover what exists | Platform UI project page (infra repo, bound app repos per slot, environments, versions). Each repo also gets a `catalog-info.yaml` so a **Backstage** portal can show the same view, if you use one. |
+
+**GitHub variables in application repos** (§5.5.5 rules apply). These are the only variables an application repo needs; everything else comes from the contract at deploy time:
+
+| Variable | Level |
+|---|---|
+| `PROJECT_NAME` | Repository |
+| `ENVIRONMENT_NAME` | Environment |
+| `AWS_ACCOUNT_ID` | Environment |
+| `AWS_REGION` | Environment |
+| `AWS_ROLE_ARN` (the app deploy role) | Environment |
+| `CONTRACT_PARAMETER` (`/platform/projects/{project}/contract`) | Repository |
+
+**Repo visibility:** infrastructure repos are **internal** (readable by everyone in the GitHub org, writable only through the platform), so developers can read the template and the contract. Application repos follow the product's normal policy.
+
+---
+
+## 10. Security model
 
 | Threat | Mitigation |
 |---|---|
@@ -1030,7 +1270,7 @@ Only where an account cannot have an OIDC provider:
 
 ---
 
-## 10. Scalability and multi-tenancy
+## 11. Scalability and multi-tenancy
 
 ### 10.1 Where the load is
 Synthesis is cheap. The real limits are **GitHub API quotas per installation**, **CloudFormation / IAM API throttling per account**, and wall-clock time (a five-environment promotion takes tens of minutes plus approval time). So the effort goes into async orchestration, throttling that respects quotas, and keeping policy count flat.
@@ -1062,7 +1302,7 @@ Synthesis is cheap. The real limits are **GitHub API quotas per installation**, 
 
 ---
 
-## 11. Error handling, idempotency and rollback
+## 12. Error handling, idempotency and rollback
 
 ### 11.1 Failure matrix
 
@@ -1109,7 +1349,7 @@ stateDiagram-v2
 
 ---
 
-## 12. Observability
+## 13. Observability
 
 | Signal | What |
 |---|---|
@@ -1122,7 +1362,7 @@ stateDiagram-v2
 
 ---
 
-## 13. Where an LLM fits (and where it must not)
+## 14. Where an LLM fits (and where it must not)
 
 | Use | Allowed? | Guardrails |
 |---|---|---|
@@ -1133,7 +1373,7 @@ stateDiagram-v2
 
 ---
 
-## 14. Proposed repository layout
+## 15. Proposed repository layout
 
 For your review. Nothing is created until you approve.
 
@@ -1156,6 +1396,8 @@ CloudInfraAutomation/
 │   └── stacksets/account-bootstrap.yaml ← OIDC, shared ABAC policies, provisioner role
 ├── bootstrap/
 │   └── project-bootstrap.yaml         ← tagged deploy role + exec role (per env)
+├── platform-workflows/               ← reusable build (per language) + deploy (per compute) workflows; published as its own repo
+├── app-templates/                   ← language templates for application repos (python, java, go, rust, nodejs)
 ├── generated-repo-skeleton/
 │   └── .github/workflows/{deploy.yml, deploy-env.yml}
 ├── infra/                             ← platform control plane IaC
@@ -1170,7 +1412,7 @@ CloudInfraAutomation/
 
 ---
 
-## 15. Decisions needed from you
+## 16. Decisions needed from you
 
 | # | Decision | Recommendation |
 |---|---|---|
@@ -1192,10 +1434,15 @@ CloudInfraAutomation/
 | D16 | Quality-gate thresholds | Coverage minimum (e.g. 80%), vulnerability policy (block critical/high), STAGE bake time before PROD (e.g. 24 h), change windows / freeze calendar, ITSM ticket required for PROD? |
 | D17 | PROD approvals | One GitHub approval (simplest), or two approvals from different groups collected in the release console (§8.5.4)? |
 | D18 | Notifications | Slack, Microsoft Teams, email, or several? |
+| D19 | Application repo granularity | One repo per compute slot (simplest permissions), or allow monorepos serving several slots? |
+| D20 | EKS deploy model | **Argo CD GitOps** (recommended) or pipeline-driven `helm upgrade`? Does a shared EKS cluster per portfolio per environment already exist, and who runs it? |
+| D21 | Languages in v1 | Python, Java, Go, Rust, Node.js all at once, or start with two (e.g. Python + Java)? |
+| D22 | Developer portal | Platform UI only, or also Backstage (`catalog-info.yaml` generated either way)? |
+| D23 | Networking for ECS/EKS | Shared VPC from the landing zone (subnets/SGs published to SSM by the network team)? |
 
 ---
 
-## 16. Implementation phases (after approval)
+## 17. Implementation phases (after approval)
 
 | Phase | Deliverable | Exit criteria |
 |---|---|---|
@@ -1206,6 +1453,7 @@ CloudInfraAutomation/
 | **P4 — Provisioning** | GitHub App client, multi-account bootstrapper, saga, CLI | One command creates a repo that bootstraps 5 accounts and deploys DEV; failures injected at each step undo cleanly |
 | **P5 — API + UI** | Registry API, **environment & account admin screens**, **release console (pipeline view, approval inbox, approval detail)**, cascading dropdowns, preview, status per environment | Click-to-DEV in the browser; entitlement filtering verified; an admin can add/reorder an environment and bind an account, and onboarding checks block an invalid account |
 | **P5b — Quality gate service** | Release record, deployment protection rule app, change set risk analysis, Access Analyzer checks, G4/G5 | A high-risk change set is blocked; PROD is refused if the artifact differs from STAGE or bake time is not met |
+| **P5c — Application golden paths** | Compute slot catalog types, contract publishing (SSM + API), `platform-workflows` (build per language, deploy per compute type), app deploy roles, "Create application repo" flow, contract viewer | A Python Lambda app and a Java ECS app deploy from their own repos to DEV and promote to PROD with approvals; an app repo cannot create IAM or touch another project; an app deploy stops cleanly when the contract lacks a required value |
 | **P6 — Production control plane** | Step Functions, webhooks, reconciler, quotas, observability, Config compliance | 100 concurrent jobs on one installation complete without failing on rate limits; tag compliance dashboard live |
 
-**Next step:** review this document, answer §15, and approve a phase to start. No code will be written until then.
+**Next step:** review this document, answer §16, and approve a phase to start. No code will be written until then.
