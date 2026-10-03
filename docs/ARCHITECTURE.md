@@ -1,10 +1,12 @@
 # CloudInfraAutomation — Architecture
 
-**Status:** Draft v2.8 for review. No code is written until this design is approved.
+**Status:** Draft v2.10 for review. No code is written until this design is approved.
 **Date:** 2026-10-03
-**Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9).
+**Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9). Every solution is **DR-capable**: it can run in one region, as DR (us-east-1 active, us-east-2 standby) or as an HA pair (both active) (§10).
 
 **Changes in v2:** added the org registry and tagging strategy (§4); permissions based on tags (§4.5–4.8); multi-account, five-environment model (§5); promotion pipeline (§8). Payload, provisioning, security and scaling sections are updated to match.
+**Changes in v2.10:** runtime isolation by tags (§4.10). Every component can only talk to resources with the same project and environment tag values, enforced by four layers generated into the template: the runtime role's policy, the permissions boundary, a same-tag resource policy on the target, and an SCP.
+**Changes in v2.9:** multi-region resilience (§10): every template is DR-capable. Projects choose single region, DR (deployed to us-east-1 and us-east-2, only us-east-1 active) or HA pair (both active). Adds per-service replication rules, a global stack, a two-region pipeline, failover/failback, DR drills and a multi-region control plane. Sections 10–17 renumbered to 11–18.
 **Changes in v2.8:** the catalog now covers every project-scoped AWS service, including all major databases, in every combination (§6.8). It is generated from AWS's own schemas and authorization data, with curated secure blocks for common services, generic connection kinds, database defaults (network, Secrets Manager credentials, RDS Proxy, snapshots), layered stacks, and pairwise + real-deploy testing.
 **Changes in v2.7:** runtime infrastructure is AWS services only; email notifications use Amazon SES (no SMTP option).
 **Changes in v2.6:** technology policy added: AWS + GitHub + open source only (§1). Commercial products removed or replaced (CMDB/ITSM, chat tools, paid GitHub security features). Approvals now work on any GitHub plan via platform-executed releases (§8.3.1); GitHub Enterprise features are optional.
@@ -27,14 +29,15 @@
 7. [GitHub repository provisioning](#7-github-repository-provisioning)
 8. [Deployment pipeline (GitHub Actions + OIDC, configurable environments)](#8-deployment-pipeline-github-actions--oidc-configurable-environments)
 9. [Developer consumption: application repositories](#9-developer-consumption-application-repositories)
-10. [Security model](#10-security-model)
-11. [Scalability and multi-tenancy](#11-scalability-and-multi-tenancy)
-12. [Error handling, idempotency and rollback](#12-error-handling-idempotency-and-rollback)
-13. [Observability](#13-observability)
-14. [Where an LLM fits (and where it must not)](#14-where-an-llm-fits-and-where-it-must-not)
-15. [Proposed repository layout](#15-proposed-repository-layout)
-16. [Decisions needed from you](#16-decisions-needed-from-you)
-17. [Implementation phases](#17-implementation-phases)
+10. [Multi-region resilience: DR and HA](#10-multi-region-resilience-dr-and-ha)
+11. [Security model](#11-security-model)
+12. [Scalability and multi-tenancy](#12-scalability-and-multi-tenancy)
+13. [Error handling, idempotency and rollback](#13-error-handling-idempotency-and-rollback)
+14. [Observability](#14-observability)
+15. [Where an LLM fits (and where it must not)](#15-where-an-llm-fits-and-where-it-must-not)
+16. [Proposed repository layout](#16-proposed-repository-layout)
+17. [Decisions needed from you](#17-decisions-needed-from-you)
+18. [Implementation phases](#18-implementation-phases)
 
 ---
 
@@ -56,7 +59,7 @@
 ### Design principles
 | Principle | What it means here |
 |---|---|
-| **Tags are the permission boundary, names are the backstop** | Permissions are written once, using tag conditions, and reused by every project. Resource names are still prefixed by project, as a second line of defense for AWS actions that don't support tag conditions. |
+| **Tags are the permission boundary, names are the backstop** | Permissions are written once, using tag conditions, and reused by every project. **At runtime, components can only talk to resources with the same project and environment tag values**, enforced on both the caller's role and the target's resource policy (§4.10). Resource names are still prefixed by project, as a second line of defense for AWS actions that don't support tag conditions. |
 | **The platform owns the tags, not the repo** | The tag values a project may use are fixed on its IAM roles by the platform. A user who edits the repo to claim another product's tags is denied by AWS. |
 | **Account per environment** | PROD is separated from everything else by an account boundary, not just by tags. |
 | **Build once, deploy many** | The same artifact (zip + template) moves DEV → TEST → STAGE → PROD. Only parameters change per environment. |
@@ -282,6 +285,13 @@ sequenceDiagram
     "enabled": ["sandbox", "dev", "test", "stage", "prod"],
     "region": "us-east-1"
   },
+  "resilience": {
+    "mode": "dr",
+    "primaryRegion": "us-east-1",
+    "secondaryRegion": "us-east-2",
+    "drStrategy": "pilot-light",
+    "targets": { "rtoMinutes": 60, "rpoMinutes": 5 }
+  },
   "resources": [
     { "id": "uploads", "type": "s3.bucket",
       "config": { "versioning": true, "expireNoncurrentDays": 30 } },
@@ -334,6 +344,7 @@ What the server adds before synthesis (shown in the preview, read-only):
 | `project.name` | `^[a-z][a-z0-9]*(-[a-z0-9]+)*$`, 3–30 chars, no `--`, **unique within the GitHub org and across the registry** | `org:project` must identify exactly one project. `--` is reserved as the name separator. |
 | `resources[].id` | `^[a-z][a-z0-9-]{0,19}$`, unique | Logical ID + physical name. |
 | `len(project.name) + len(id)` for S3 | ≤ 31 | Bucket name `{project}--{id}-{account}-{region}` must stay ≤ 63 chars. |
+| `resilience` | `mode` ∈ single/dr/ha, allowed by the environment's policy; regions from the allowed pairs (default us-east-1 / us-east-2); in HA every data store must support active/active (§10.3) | DR-capable from the start; impossible combinations are rejected early. |
 | `environmentOverrides` | Only settings the catalog marks as overridable, within per-environment ranges (e.g. prod log retention ≥ 90 days) | Environments differ in size, not in shape. |
 | Connections | Source/target must exist; the pair of types must be allowed; no overlapping S3 notifications; no write access to a bucket that also triggers the same function on an overlapping prefix | Correctness + stops S3 ↔ Lambda infinite loops. |
 
@@ -407,6 +418,8 @@ The key prefix `org:` is a placeholder; choose your company prefix (D3). All val
 | `org:data-classification` | `confidential` | User (≤ product ceiling) | Yes | SCP gates (e.g. not in sandbox) |
 | `org:managed-by` | `cloudinfra` | Platform | Yes | Marks resources only the platform pipeline may change |
 | `org:share-scope` | `product` | Binder (opt-in) | No | Allows read by other projects in the same product (§4.6) |
+| `org:resilience` | `dr` | Platform (project setting) | Yes | Reporting, cost, DR drill scheduling (§10) |
+| `org:region-role` | `primary` / `secondary` | Platform (per region) | Yes | Operations and failover tooling (§10) |
 | `org:expires-on` | `2026-11-01` | Platform (sandbox only) | Sandbox only | Automatic cleanup in sandbox |
 
 **Where the tags are recorded:**
@@ -455,7 +468,7 @@ The role's tags can be changed only by the platform's provisioner role, and an S
         "aws:RequestTag/org:product":     "${aws:PrincipalTag/org:product}",
         "aws:RequestTag/org:environment": "${aws:PrincipalTag/org:environment}"
       },
-      "ForAllValues:StringEquals": { "aws:TagKeys": ["org:portfolio","org:product","org:project","org:environment","org:cost-center","org:data-classification","org:managed-by","org:share-scope"] }
+      "ForAllValues:StringEquals": { "aws:TagKeys": ["org:portfolio","org:product","org:project","org:environment","org:cost-center","org:data-classification","org:managed-by","org:share-scope","org:resilience","org:region-role"] }
     }
   },
   {
@@ -510,6 +523,109 @@ In IAM Identity Center, **attributes for access control** map an IdP attribute (
 - AWS Config rules (`required-tags` + a custom rule) flag `org:*` tag values that don't match the registry, per account, collected in the audit account.
 - Resource Explorer / Tag Editor views per product.
 - Cost Explorer + CUR grouped by `org:portfolio` / `org:product` / `org:cost-center` (activated as cost allocation tags in the management account).
+
+---
+
+### 4.10 Runtime isolation: components talk only to resources with the same tags
+
+**Rule:** every component the platform creates (Lambda, ECS task, EKS pod, Step Functions state machine, Glue job, …) can read, write or invoke **only resources carrying the same `org:project` and `org:environment` tag values**. A Lambda in `invoice-ingest` / `dev` can use the `invoice-ingest` / `dev` S3 bucket because both are part of the same solution, and **nothing else**, even if someone pastes another bucket's ARN into the code or the template.
+
+This is generated into the CloudFormation template at creation time. Nobody writes it by hand, and it applies to every resource type in the catalog (§6.8).
+
+#### 4.10.1 How it is enforced (four layers)
+
+```mermaid
+flowchart LR
+  L["Lambda runtime role<br/>org:project=invoice-ingest<br/>org:environment=dev"] --> C1["① Identity policy<br/>exact ARN + aws:ResourceTag = my tags"]
+  C1 --> C2["② Permissions boundary<br/>same-project resources only"]
+  C2 --> C3["③ Bucket policy<br/>deny if aws:PrincipalTag ≠ bucket tags"]
+  C3 --> B["S3 bucket<br/>org:project=invoice-ingest<br/>org:environment=dev"]
+  X["Lambda of another project<br/>org:project=ledger-api"] -. "denied at ①, ② and ③" .-> C3
+```
+
+| Layer | Where | What it checks | Covers |
+|---|---|---|---|
+| **1. Identity policy of the runtime role** | Generated per component by the connection binders (§6.8.4) | Exact resource ARNs from the connections **plus** `aws:ResourceTag/org:project = ${aws:PrincipalTag/org:project}` and `aws:ResourceTag/org:environment = ${aws:PrincipalTag/org:environment}` on every action where AWS supports resource-tag conditions | Caller side |
+| **2. Shared permissions boundary** (`cloudinfra-app-boundary`, §4.5) | Attached to every runtime role (required by the CFN execution role) | Same tag conditions for supported actions; for actions without tag support, only names built from the principal's tag (`${aws:PrincipalTag/org:project}--*`) | Caller side, even if layer 1 had a bug |
+| **3. Resource policy on the target** | Generated on **every resource type that supports a resource policy**: S3 buckets, SQS queues, SNS topics, KMS keys, Secrets Manager secrets, DynamoDB tables, ECR repositories, EventBridge buses, OpenSearch domains, API Gateway (private), Lambda (invocation), and so on | **Deny** any principal whose `aws:PrincipalTag/org:project` or `aws:PrincipalTag/org:environment` is not exactly this resource's value. Works for **all actions** on the resource, including those that don't support resource-tag conditions (e.g. S3 object operations). | Target side, independent of the caller's policies |
+| **4. Organization guardrail (SCP)** | Workload OUs (§4.7) | For principals tagged `org:managed-by=cloudinfra`: deny supported actions when `aws:ResourceTag/org:project ≠ ${aws:PrincipalTag/org:project}` | Whole account, including roles created outside the platform pattern |
+
+Because the **runtime roles carry the same stack tags** as the resources (propagated by CloudFormation, and required on `iam:CreateRole` by the CFN execution role, §4.5), "same tags and values" is something AWS checks on every request. It does not depend on naming conventions.
+
+#### 4.10.2 Example: the generated S3 bucket policy (illustrative)
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyOtherProjects",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "s3:*",
+      "Resource": ["arn:aws:s3:::invoice-ingest--uploads-222222222222-us-east-1",
+                   "arn:aws:s3:::invoice-ingest--uploads-222222222222-us-east-1/*"],
+      "Condition": {
+        "StringNotEquals": { "aws:PrincipalTag/org:project": "invoice-ingest" },
+        "BoolIfExists":    { "aws:PrincipalIsAWSService": "false" },
+        "ArnNotLike":      { "aws:PrincipalArn": ["arn:aws:iam::222222222222:role/aws-service-role/*",
+                                                  "arn:aws:iam::222222222222:role/cloudinfra/break-glass-*"] }
+      }
+    },
+    {
+      "Sid": "DenyOtherEnvironments",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "s3:*",
+      "Resource": ["arn:aws:s3:::invoice-ingest--uploads-222222222222-us-east-1",
+                   "arn:aws:s3:::invoice-ingest--uploads-222222222222-us-east-1/*"],
+      "Condition": {
+        "StringNotEquals": { "aws:PrincipalTag/org:environment": "dev" },
+        "BoolIfExists":    { "aws:PrincipalIsAWSService": "false" },
+        "ArnNotLike":      { "aws:PrincipalArn": ["arn:aws:iam::222222222222:role/aws-service-role/*",
+                                                  "arn:aws:iam::222222222222:role/cloudinfra/break-glass-*"] }
+      }
+    },
+    { "Sid": "DenyInsecureTransport", "Effect": "Deny", "Principal": "*", "Action": "s3:*",
+      "Resource": ["arn:aws:s3:::invoice-ingest--uploads-222222222222-us-east-1",
+                   "arn:aws:s3:::invoice-ingest--uploads-222222222222-us-east-1/*"],
+      "Condition": { "Bool": { "aws:SecureTransport": "false" } } }
+  ]
+}
+```
+
+Design notes:
+- **Project and environment are separate Deny statements.** Several keys inside one `StringNotEquals` are combined with AND, which would deny only when *both* differ. Separate statements deny when *either* differs.
+- **A principal with no tag is denied:** a negated condition on a missing key evaluates to true.
+- **Exceptions are explicit and minimal:**
+  - AWS service-linked roles, e.g. AWS Config reading the bucket configuration;
+  - the audited break-glass role.
+
+  The CloudFormation execution role and the S3 replication role (§10) carry the project tags, so they pass without exceptions.
+- **AWS service principals** (e.g. S3 invoking Lambda, CloudFront reading S3) are not IAM roles and have no tags. They are allowed only through statements pinned to the **specific same-project source** with `aws:SourceArn` + `aws:SourceAccount` (the §6.3 pattern). The binder generates these only for connections drawn in the UI, so the source is always a resource with the same tags.
+
+#### 4.10.3 What this covers, and the honest edges
+
+| Situation | Behavior |
+|---|---|
+| Lambda → S3 / DynamoDB / SQS / SNS / Secrets / KMS of the same project + environment | Allowed (exact actions from the connection) |
+| Lambda → same resource type of **another project** (ARN pasted in code) | **Denied** by layers 1, 2 and 3 |
+| DEV component → STAGE resource of the same project | **Denied** (environment tag differs; also a different account) |
+| Opt-in sharing within a product (§4.6) | Resource policy gets one extra **Allow-path** exception: principals with the same `org:product` *and* the target tagged `org:share-scope=product`, **read-only actions only**, added only when such a connection exists |
+| Humans (Identity Center) | Data access follows the environment policy: e.g. read for the product's engineers in DEV/TEST via an explicit, read-only exception on `org:product`; no human data access in PROD except break-glass |
+| Network paths (DB, cache, OpenSearch in a VPC) | Security groups only allow ingress from the security groups of same-project components (`network.access`, §6.8.4). Databases also use IAM auth / per-project secrets, which are themselves tag-protected |
+| Service without resource policies **and** without tag-condition support | Layer 1 uses exact ARNs, layer 2 uses the principal-tag-derived name pattern, and the catalog marks the service "name-scoped"; such services need platform review before enablement (§6.8.2) |
+
+#### 4.10.4 Verification
+
+- **Synthesis-time linter:**
+  - every resource in a project carries identical `org:project` / `org:environment` values;
+  - every runtime role has the boundary and tag conditions;
+  - every resource that supports a resource policy has the project/environment deny statements.
+
+  A template missing any of these is rejected.
+- **CI cross-project tests (P1):** two projects are deployed in the platform test account. Tests assert that project A's Lambda **cannot** read, write or invoke project B's bucket, queue, table, secret or function, even with the exact ARN, and **can** use its own.
+- **IAM Access Analyzer** (external and internal access findings) runs in every account. Any access path to a project resource from a principal outside that project raises a finding to the platform.
 
 ---
 
@@ -642,7 +758,7 @@ Every value the pipeline needs is a **GitHub Actions variable** (`vars.*`), writ
 | `ENVIRONMENT_ORDER` | Repository | `sandbox,dev,test,stage,prod` | Environment config (informational; the generated `deploy.yml` holds the actual job chain) |
 | `ENVIRONMENT_NAME` | **Environment** | `prod` | `envId` |
 | `AWS_ACCOUNT_ID` | **Environment** | `555555555555` | Resolved account binding |
-| `AWS_REGION` | **Environment** | `us-east-1` | Binding region |
+| `AWS_REGION` | **Environment** | `us-east-1` | Binding region (multi-region projects use `AWS_PRIMARY_REGION` / `AWS_SECONDARY_REGION` instead, §10.5) |
 | `AWS_ROLE_ARN` | **Environment** | `arn:aws:iam::555555555555:role/cloudinfra/invoice-ingest-deploy` | Project bootstrap output |
 | `CFN_EXEC_ROLE_ARN` | **Environment** | `arn:aws:iam::555555555555:role/cloudinfra/invoice-ingest-cfn-exec` | Project bootstrap output |
 | `ARTIFACT_BUCKET` | **Environment** | `cloudinfra-artifacts-999999999999-us-east-1` | Shared Services bucket for the binding's region |
@@ -720,7 +836,7 @@ flowchart LR
 ### 6.4 Defaults built into each block
 - **S3:**
   - Public access blocked; ACLs off; encryption (SSE-S3, or SSE-KMS for `confidential`+).
-  - TLS-only bucket policy.
+  - Bucket policy: deny other projects and other environments by principal tag (§4.10.2), and deny non-TLS requests.
   - Versioning + lifecycle.
   - `DeletionPolicy: RetainExceptOnCreate` / `UpdateReplacePolicy: Retain` when retained (stage/prod by default).
 - **Lambda:**
@@ -746,7 +862,7 @@ flowchart LR
    - No `Allow` with `*` / `service:*` actions or `*` resources in generated roles.
    - No `iam:*`, `sts:AssumeRole` or `iam:PassRole` in app roles.
    - Every generated role has the boundary.
-3. **Tag linter:** every taggable resource will carry the required `org:*` keys (via propagation or explicit tags).
+3. **Tag linter:** every taggable resource will carry the required `org:*` keys (via propagation or explicit tags) with **identical** project/environment values. Every runtime role has the boundary and tag conditions, and every resource that supports a resource policy has the same-tag deny statements (§4.10).
 4. cfn-lint; **cfn-guard rules per environment** (e.g. prod: retain + alarms + retention ≥ 365 days).
 5. Golden-file tests for every catalog combination.
 
@@ -922,7 +1038,7 @@ Webhooks: `workflow_run`, `deployment`, `deployment_status`, `deployment_review`
 
 ### 7.3 Rate limits and API etiquette
 - Honor `x-ratelimit-remaining` / `reset` and `retry-after`. Otherwise use exponential backoff with full jitter (1 s base, 60 s cap, 6 attempts).
-- Content-creating calls are serialized per installation, at least 1 s apart (token bucket, §11.3).
+- Content-creating calls are serialized per installation, at least 1 s apart (token bucket, §12.3).
 - Webhooks instead of polling; conditional requests (`304`s are not counted against the limit).
 - A project with 5 environments needs roughly 25–30 write calls. At 1 write/s per installation, that is about 30 s of GitHub time per project, which is why provisioning is async and queued.
 
@@ -1061,7 +1177,7 @@ flowchart LR
 | **G3 · DEV / TEST** | After each deploy | DEV: smoke tests. TEST: integration/contract tests against the deployed stack; results published as check runs | Any failed suite | `needs:` in the workflow + evidence record |
 | **G4 · Pre-STAGE** | In `plan-stage`, before approval | Evidence check: G1–G3 passed **for this SHA and digest**. Attestation verified. **Change set risk analysis** (below). **Drift detection** on the STAGE stack. **IAM Access Analyzer custom policy checks**: no new access compared with the currently deployed template (`CheckNoNewAccess`) and no forbidden actions (`CheckAccessNotGranted`) | Any failed check; high-risk change without an explicit override | Gate service (Mode A: before the release executor; Mode B: also as a deployment protection rule) |
 | **Reviewer (STAGE)** | After G4 passes | Human approval with the evidence summary | Rejection / no approval | GitHub required reviewers (§8.3) |
-| **G5 · Pre-PROD** | In `plan-prod`, before approval | Everything in G4 for the PROD stack, plus: **same artifact digest that ran in STAGE**; STAGE **bake time** met (e.g. ≥ 24 h, set per environment); STAGE CloudWatch alarms **green** during the bake; UAT sign-off recorded; **change window** open / no freeze; optional **change record** approved (built-in; external ITSM only via webhook if an organization wants it) | Any failed check | Gate service (Mode A: before the release executor; Mode B: also as a deployment protection rule) |
+| **G5 · Pre-PROD** | In `plan-prod`, before approval | Everything in G4 for the PROD stack, plus: **same artifact digest that ran in STAGE**; STAGE **bake time** met (e.g. ≥ 24 h, set per environment); STAGE CloudWatch alarms **green** during the bake; UAT sign-off recorded; **change window** open / no freeze; optional **change record** approved (built-in; external ITSM only via webhook if an organization wants it); for DR/HA projects, a **successful STAGE DR drill** within the last 30 days and a healthy secondary region (§10.7) | Any failed check | Gate service (Mode A: before the release executor; Mode B: also as a deployment protection rule) |
 | **Reviewer (PROD)** | After G5 passes | Human approval with the evidence summary | Rejection / no approval | GitHub required reviewers (§8.3) |
 | **G6 · Post-deploy** | During and after the PROD deploy | CloudFormation **rollback triggers** (`RollbackConfiguration` with CloudWatch alarms and a monitoring window) roll the stack back automatically if alarms fire; post-deploy health checks | Alarm during the monitoring window → automatic rollback | CloudFormation + pipeline |
 
@@ -1079,7 +1195,7 @@ The plan job sends the change set to the gate service, which classifies every ch
 
 - The gate service keeps a **release record** per commit SHA: artifact digest and attestation, test and scan results per environment, change set IDs and risk classification, drift result, approvals (who, when, comment), and deploy outcome.
 - Workflows post results to the platform with the job's OIDC token, so the platform can verify which repo, environment and run sent them.
-- The same record feeds the reviewer summary, the platform UI and audit (§13).
+- The same record feeds the reviewer summary, the platform UI and audit (§14).
 
 #### 8.4.4 How the gate plugs into GitHub
 
@@ -1435,7 +1551,7 @@ For application deploys, the "change set" the reviewer approves is a **deploy di
   - Lambda functions in STAGE/PROD have a **code signing config** that accepts only code signed by the platform build.
   - ECR repositories use immutable tags and deploys pin images by digest.
   - EKS admission policy (e.g. Kyverno) admits only images with a valid signature/attestation.
-- **Runtime access:** running code uses the slot's runtime role (Lambda execution role, ECS task role, Pod Identity role, SFN role). These are created by the infrastructure stack with exact-ARN policies and the shared boundary (§4.5), so application code has exactly the access drawn as connections in the platform UI.
+- **Runtime access:** running code uses the slot's runtime role (Lambda execution role, ECS task role, Pod Identity role, SFN role). Like every component, it can reach only resources with the same project and environment tags (§4.10). These are created by the infrastructure stack with exact-ARN policies and the shared boundary (§4.5), so application code has exactly the access drawn as connections in the platform UI.
 
 ### 9.8 How developers use it day to day
 
@@ -1545,7 +1661,162 @@ The platform knows exactly which value each **deployed** app version requires, b
 
 ---
 
-## 10. Security model
+## 10. Multi-region resilience: DR and HA
+
+### 10.1 Resilience modes
+
+Every project chooses a **resilience mode** in the project wizard. Every template the platform generates is **multi-region capable from the start**, so a project can move from single-region to DR or HA later without redesign.
+
+| Mode | Regions deployed | Regions active | Typical RTO / RPO | When to use |
+|---|---|---|---|---|
+| **Single region** | Primary only | Primary | Hours (redeploy from code + backups) / backup age | Sandbox, DEV, non-critical tools |
+| **DR (active / standby)** | **Primary + secondary** | **Primary only.** Secondary is deployed, data replicates continuously, compute and event sources are inactive | Minutes to < 1 h / seconds to minutes (replication lag) | Business-critical workloads that can tolerate a short failover |
+| **HA pair (active / active)** | **Primary + secondary** | **Both** | Near zero / near zero (depends on data store) | Customer-facing, always-on workloads |
+
+**Default regions:** primary **us-east-1**, secondary **us-east-2**. Platform admins can change the defaults and the allowed region pairs in the environment configuration (§5.5); the region allow-list SCP (§4.7) must include both regions.
+
+**DR strategy (DR mode only):**
+
+| Strategy | Secondary compute while standby | RTO | Cost |
+|---|---|---|---|
+| **Pilot light** (default) | Scaled to zero / disabled | Longer (scale-up time) | Lowest |
+| **Warm standby** | Minimal capacity running, no traffic | Shorter | Moderate |
+
+### 10.2 What "deployed but inactive" means
+
+The same template is deployed to both regions. Three parameters, set by the pipeline per region, decide the behavior:
+
+| Parameter | Values | Set from |
+|---|---|---|
+| `ResilienceMode` | `single` \| `dr` \| `ha` | Project setting |
+| `RegionRole` | `primary` \| `secondary` | Which region the stack is in |
+| `ActivationState` | `active` \| `standby` | **DR:** primary `active`, secondary `standby`. **HA:** both `active`. Flipped only by a failover (§10.6). |
+
+The engine wraps every activation-sensitive setting in CloudFormation **conditions** (`IsActive`, `IsPrimary`, `IsHA`), so **standby is a configuration of the same resources, not different resources**. Activating a region changes parameters, not the template.
+
+```mermaid
+flowchart LR
+  subgraph DR["DR mode (active / standby)"]
+    direction TB
+    R53A["Route 53 failover record<br/>+ ARC routing control"] -->|"100%"| P1["us-east-1 · ACTIVE<br/>compute running · event sources on"]
+    R53A -. "0% until failover" .-> S1["us-east-2 · STANDBY<br/>deployed · data replicating ·<br/>compute 0 · event sources off"]
+    P1 -->|"replication"| S1
+  end
+  subgraph HA["HA pair (active / active)"]
+    direction TB
+    R53B["Route 53 latency / weighted<br/>+ health checks"] -->|"traffic"| P2["us-east-1 · ACTIVE"]
+    R53B -->|"traffic"| S2["us-east-2 · ACTIVE"]
+    P2 <-->|"bidirectional replication"| S2
+  end
+```
+
+### 10.3 Per-service behavior
+
+Every catalog entry (§6.8) declares a **multi-region capability**: `native-global`, `replicated`, `regional` or `not-supported`. The engine uses it to wire replication and standby behavior automatically, and the validation gate uses it to reject combinations that cannot meet the chosen mode.
+
+| Service | DR: secondary in standby | HA: both active | Replication / global mechanism |
+|---|---|---|---|
+| **Lambda** | Deployed; reserved concurrency 0 (pilot light) or minimal (warm); event source mappings `Enabled: false`; S3/EventBridge triggers not attached | Deployed and triggered in both regions | Code uploaded to both regional artifact buckets |
+| **ECS / Fargate** | Service deployed with desired count 0 (pilot light) or minimum (warm) | Desired count per region | ECR **replication** (push once, available in both regions) |
+| **EKS workloads** | Argo CD app synced with replicas 0 (or minimum) | Replicas per region | Shared cluster must exist in both regions; ECR replication |
+| **API Gateway / ALB** | Deployed; receives no traffic (Route 53 failover secondary) | Both in Route 53 latency/weighted set with health checks | Route 53 records + health checks in the global stack |
+| **SQS / SNS** | Deployed, idle | Each region processes its own messages | Producers send to the active region(s) |
+| **EventBridge** | Rules and schedules `DISABLED` | Enabled in both; optional **global endpoints** for event ingestion | Rules in both regions |
+| **Step Functions** | Deployed; schedules/triggers disabled | Enabled in both | — |
+| **S3** | Replica bucket receives **cross-region replication** | **Two-way replication** with replica-modification sync | Bucket names already include the region (§6.2) |
+| **DynamoDB** | **Global table** replica in the secondary (data current, unused) | Global table, writes in both regions (last-writer-wins: app must be idempotent) | `AWS::DynamoDB::GlobalTable` |
+| **Aurora (PostgreSQL / MySQL)** | **Aurora Global Database**; secondary cluster (headless in pilot light, one reader in warm standby) | Global Database; single writer in primary, **write forwarding** from the secondary; reads local | `AWS::RDS::GlobalCluster` + regional clusters |
+| **RDS (non-Aurora)** | Cross-region read replica, promoted on failover | **Not supported** (single writer, no forwarding): validation offers Aurora or DynamoDB instead | Cross-region replica |
+| **ElastiCache (Valkey / Redis OSS)** | Global Datastore secondary | Global Datastore (writes to primary) or independent regional caches | Global Datastore |
+| **DocumentDB / Neptune** | Global cluster secondary | Single writer: reads local, writes to primary | Global clusters |
+| **OpenSearch** | Cross-cluster replication follower | Two domains, app writes to both or replicates | Cross-cluster replication |
+| **Secrets Manager** | Secret **replicated** to secondary | Replicated | Multi-region secrets |
+| **KMS** | **Multi-Region keys** for anything replicated, so replicas decrypt locally | Multi-Region keys | `MultiRegion: true` |
+| **SSM contract** (§9.4) | Written in both regions, with `regionRole` and `activationState` | Both | Each regional stack writes its own |
+| **CloudFront / WAF / Route 53** | Global services: deployed once, in the global stack | Same | Origin groups for origin failover |
+| **Cognito user pools** | **Limited**: no native replication; flagged in the preview with a documented pattern (or excluded from DR/HA projects) | Same | — |
+
+**Validation examples:**
+- *HA with RDS PostgreSQL* → rejected: "RDS PostgreSQL can be active in only one region. Use Aurora PostgreSQL Global Database (write forwarding) or DynamoDB global tables."
+- *DR with a service marked `not-supported`* → warning with the expected RTO, and the service is redeployed from code during recovery.
+
+### 10.4 Stack layout across regions
+
+| Stack | Deployed in | Contains |
+|---|---|---|
+| `{project}-global` | **Primary region only** | Global or once-only resources: Route 53 records and health checks, ARC routing controls, CloudFront, WAF, `AWS::DynamoDB::GlobalTable`, `AWS::RDS::GlobalCluster`, Multi-Region KMS primary keys |
+| `{project}-data`, `{project}-integration`, `{project}-compute`, `{project}-edge` (§6.8.5) | **Both regions** (same template, `RegionRole`/`ActivationState` parameters) | Regional resources and replicas |
+
+- **IAM is global.** The project's deploy, plan and CFN execution roles (§4.5) are created once per account and used for both regions; the app execution roles created by regional stacks get CloudFormation-generated names, so the two regions never collide.
+- Both regions of one environment use the **same AWS account** by default. A separate DR account per environment is an option (D31); the account bindings (§5.5.2) already carry a region per binding.
+- **During a primary-region outage, the global stack cannot be changed** (its CloudFormation control plane is in the primary region). That is why failover never depends on it: data-plane controls (ARC, Global Database failover) are used instead, and the global stack is reconciled after recovery.
+
+### 10.5 Pipeline: deploying to both regions
+
+```mermaid
+flowchart LR
+  B["build once<br/>artifacts → both regional buckets ·<br/>image → ECR (replicated)"] --> G["deploy {project}-global<br/>(primary region)"]
+  G --> P["deploy regional stacks<br/>us-east-1 · ActivationState=active"]
+  P --> S["deploy regional stacks<br/>us-east-2 · DR: standby / HA: active"]
+  S --> V["verify<br/>replication healthy · readiness checks"]
+```
+
+- **Order per environment:** global stack → primary region → secondary region → readiness checks (replication lag, Route 53 ARC readiness, health checks).
+- **STAGE / PROD:** the plan job creates change sets for **every stack in both regions**. Reviewers approve **one release** covering all of them (§8.3), and the release executor applies them in the order above.
+- **Failure handling:** if the secondary region fails to deploy, the primary keeps running the new version. The release is marked "secondary out of sync" and **blocks the next promotion** until fixed, because a DR region on an old version is not a valid DR target.
+- **Application repos (§9)** follow the same pattern: artifacts are published to both regions, and code is deployed to both. In DR standby, the code is updated but stays inactive, so the standby always runs the same version as the primary.
+- **Per-environment policy** (environment configuration §5.5.1), defaults:
+
+| Environment | Default resilience |
+|---|---|
+| Sandbox, DEV | Single region always (cost) |
+| TEST | Single region (DR/HA optional) |
+| QA/STAGE | **Mirrors PROD's mode**, so failover can be tested before PROD |
+| PROD | As selected by the project |
+
+**New GitHub variables (§5.5.5 rules apply):**
+
+| Variable | Level | Example |
+|---|---|---|
+| `RESILIENCE_MODE` | Environment | `dr` |
+| `AWS_PRIMARY_REGION` | Environment | `us-east-1` (replaces `AWS_REGION`) |
+| `AWS_SECONDARY_REGION` | Environment | `us-east-2` (empty for single-region) |
+| `ARTIFACT_BUCKET_PRIMARY` / `ARTIFACT_BUCKET_SECONDARY` | Environment | regional Shared Services buckets |
+| `ACTIVATION_STATE_SECONDARY` | Environment | `standby` (DR) / `active` (HA); changed only by failover |
+
+### 10.6 Failover and failback (DR mode)
+
+Failover is a **platform operation** started from the release console, not a code change.
+
+| Step | Action | Depends on primary region? |
+|---|---|---|
+| 1. Declare | Incident lead clicks **Fail over to us-east-2** in the release console; **two approvers** (break-glass fast path, separate from release approvals) | No |
+| 2. Data | **Aurora Global Database**: managed failover (planned) or detach-and-promote (unplanned). **RDS** replica promoted. DynamoDB global tables, S3, secrets: already current | No |
+| 3. Compute | Release executor sets `ActivationState=active` on the **secondary regional stacks only** (scale up, enable event sources and rules) | No |
+| 4. Traffic | Flip **Route 53 Application Recovery Controller** routing control to us-east-2 (data plane, highly available) | No |
+| 5. Verify | Health checks, smoke tests, contract in us-east-2 shows `activationState=active` | No |
+| 6. Record | Release record + GitHub variable `ACTIVATION_STATE_*` updated, so the next pipeline run keeps the new state | No |
+
+**Failback** reverses the steps once the primary is healthy: re-establish replication toward us-east-1, sync, a planned switchover, flip traffic back, and set us-east-2 to standby. It is scheduled, approved like a PROD release, and never automatic.
+
+**HA mode:** no failover action is needed. Route 53 health checks remove an unhealthy region automatically. Single-writer data stores (Aurora) follow their managed failover; the platform shows the writer location in the release console.
+
+### 10.7 Continuous DR assurance
+
+- **Readiness checks:** Route 53 ARC readiness checks confirm the secondary matches the primary (capacity settings, versions, replication). Drift is shown in the release console and blocks promotion.
+- **DR drills:** a scheduled failover and failback in **QA/STAGE** (default monthly) for every DR/HA project, run by the platform with the steps above.
+- **Gate G5 addition (§8.4):** a PROD release of a DR/HA project requires a **successful STAGE DR drill within the last N days** (default 30) and a healthy secondary in PROD.
+- **Measured, not assumed:** each drill records the achieved RTO/RPO against the targets set in the wizard, shown per project.
+
+### 10.8 Platform control plane is multi-region too
+
+Failover must work when us-east-1 is down, so the platform itself runs active/standby across the same region pair:
+- DynamoDB **global tables** for registry, jobs and release records;
+- Step Functions, API and release executor deployed in both regions;
+- the UI and API behind Route 53 failover;
+- `CloudInfraProvisioner` / `PlatformReleaseExecutor` roles are global IAM, assumable from either region.
+
+## 11. Security model
 
 | Threat | Mitigation |
 |---|---|
@@ -1567,7 +1838,7 @@ The platform knows exactly which value each **deployed** app version requires, b
 
 ---
 
-## 11. Scalability and multi-tenancy
+## 12. Scalability and multi-tenancy
 
 ### 10.1 Where the load is
 Synthesis is cheap. The real limits are **GitHub API quotas per installation**, **CloudFormation / IAM API throttling per account**, and wall-clock time (a five-environment promotion takes tens of minutes plus approval time). So the effort goes into async orchestration, throttling that respects quotas, and keeping policy count flat.
@@ -1599,7 +1870,7 @@ Synthesis is cheap. The real limits are **GitHub API quotas per installation**, 
 
 ---
 
-## 12. Error handling, idempotency and rollback
+## 13. Error handling, idempotency and rollback
 
 ### 11.1 Failure matrix
 
@@ -1646,7 +1917,7 @@ stateDiagram-v2
 
 ---
 
-## 13. Observability
+## 14. Observability
 
 | Signal | What |
 |---|---|
@@ -1659,7 +1930,7 @@ stateDiagram-v2
 
 ---
 
-## 14. Where an LLM fits (and where it must not)
+## 15. Where an LLM fits (and where it must not)
 
 | Use | Allowed? | Guardrails |
 |---|---|---|
@@ -1670,7 +1941,7 @@ stateDiagram-v2
 
 ---
 
-## 15. Proposed repository layout
+## 16. Proposed repository layout
 
 For your review. Nothing is created until you approve.
 
@@ -1709,7 +1980,7 @@ CloudInfraAutomation/
 
 ---
 
-## 16. Decisions needed from you
+## 17. Decisions needed from you
 
 | # | Decision | Recommendation |
 |---|---|---|
@@ -1741,16 +2012,20 @@ CloudInfraAutomation/
 | D26 | Open-source license policy | Allow Apache-2.0, MIT, BSD, MPL-2.0 and LGPL (as libraries); exclude AGPL and source-available licenses unless approved? |
 | D27 | Tier 1 services at launch | Confirm the proposed curated list (§6.8.2), or start smaller (e.g. compute + integration + Aurora/RDS PostgreSQL + DynamoDB) and grow? |
 | D28 | Commercial DB engines | Exclude RDS for Oracle / SQL Server (default, per open-source policy), or allow them? |
+| D30 | Default region pair | **us-east-1 (primary) / us-east-2 (secondary)** as default; any other allowed pairs? |
+| D31 | DR account model | Same account for both regions of an environment (default), or a separate DR account per environment? |
+| D32 | DR defaults | Pilot light (default) or warm standby for DR projects? QA/STAGE mirrors PROD's mode (default)? DR drill frequency (default monthly) and G5 recency (default 30 days)? |
+| D33 | Cognito and other non-replicating services | Exclude from DR/HA projects, or allow with a documented recovery pattern? |
 | D29 | Network ownership | Does the landing zone provide shared VPCs with database/private subnets per environment account, or must the platform create project VPCs? |
 
 ---
 
-## 17. Implementation phases (after approval)
+## 18. Implementation phases (after approval)
 
 | Phase | Deliverable | Exit criteria |
 |---|---|---|
 | **P0 — Standards** | `TAGGING-STANDARD.md`, registry schema, tag-support matrix for S3/Lambda/DynamoDB/Logs/IAM | Signed off by security / cloud governance |
-| **P1 — Org guardrails** | SCPs, Tag Policies, account-bootstrap StackSet with shared ABAC policies | In a sandbox: project A's roles are **denied** on project B's resources and on forged tags; allowed on their own (automated allow/deny test suite) |
+| **P1 — Org guardrails** | SCPs, Tag Policies, account-bootstrap StackSet with shared ABAC policies, same-tag resource policy patterns (§4.10) | In a sandbox: project A's runtime roles cannot reach project B's S3/SQS/DynamoDB/secrets/functions even with exact ARNs (§4.10.4); project A's roles are **denied** on project B's resources and on forged tags; allowed on their own (automated allow/deny test suite) |
 | **P2 — Engine** | Payload schema, synthesis (S3, Lambda, DynamoDB, binders), linters, per-environment parameter files, golden tests | Lambda + S3 template passes lint/guard for all 5 environments; regeneration gives identical output |
 | **P3 — Pipeline** | `project-bootstrap.yaml`, `deploy.yml` + `deploy-env.yml`, G1–G3 gates, plan → approve → execute for STAGE/PROD | Manual repo promotes sandbox → prod with reviewer approvals; STAGE/PROD cannot deploy without approval; second push = empty changesets; failure in TEST stops promotion and the next push recovers |
 | **P4 — Provisioning** | GitHub App client, multi-account bootstrapper, saga, CLI | One command creates a repo that bootstraps 5 accounts and deploys DEV; failures injected at each step undo cleanly |
@@ -1758,6 +2033,7 @@ CloudInfraAutomation/
 | **P5b — Quality gate service** | Release record, deployment protection rule app, change set risk analysis, Access Analyzer checks, G4/G5 | A high-risk change set is blocked; PROD is refused if the artifact differs from STAGE or bake time is not met |
 | **P5c — Application golden paths** | Compute slot catalog types, contract publishing (SSM + API), `platform-workflows` (build per language, deploy per compute type), app deploy roles, "Create application repo" flow, contract viewer | A Python Lambda app and a Java ECS app deploy from their own repos to DEV and promote to PROD with approvals; an app repo cannot create IAM or touch another project; an app deploy stops cleanly when the contract lacks a required value |
 | **P5d — Full service catalog** | Catalog sync job (CFN schemas + Service Authorization Reference), Tier 2 generator, generic connection kinds, database blocks (Aurora/RDS/DynamoDB first), layered stacks, pairwise CI, nightly deploy tests, reference patterns | Any enabled resource type can be composed and passes all gates; pairwise suite green; every database engine deploy-tested weekly |
+| **P5e — Multi-region DR/HA** | Resilience modes in wizard and payload, conditions in generated templates, global stack, per-service replication wiring, two-region pipeline, failover/failback operations, ARC readiness, DR drills, multi-region control plane | A DR project deploys to us-east-1 (active) and us-east-2 (standby); a STAGE drill fails over and back within target RTO/RPO; an HA project serves traffic from both regions |
 | **P6 — Production control plane** | Step Functions, webhooks, reconciler, quotas, observability, Config compliance | 100 concurrent jobs on one installation complete without failing on rate limits; tag compliance dashboard live |
 
-**Next step:** review this document, answer §16, and approve a phase to start. No code will be written until then.
+**Next step:** review this document, answer §17, and approve a phase to start. No code will be written until then.
