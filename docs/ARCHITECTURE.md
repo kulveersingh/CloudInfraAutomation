@@ -1,10 +1,11 @@
 # CloudInfraAutomation — Architecture
 
-**Status:** Draft v2.15 for review. No code is written until this design is approved.
+**Status:** Draft v2.16 for review. No code is written until this design is approved.
 **Date:** 2026-10-03
 **Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9). Every solution is **DR-capable**: it can run in one region, as DR (primary active, secondary standby) or as an HA pair (both active), with **any region pair chosen in the UI** (default us-east-1 / us-east-2) (§10).
 
 **Changes in v2:** added the org registry and tagging strategy (§4); permissions based on tags (§4.5–4.8); multi-account, five-environment model (§5); promotion pipeline (§8). Payload, provisioning, security and scaling sections are updated to match.
+**Changes in v2.16:** cost centers are admin-configurable for the whole organization (§4.2.1): an org default, then per portfolio, per product and optional project overrides, with inheritance, validation, audit and automatic re-tagging.
 **Changes in v2.15:** Appendix A (§19): a complete set of approval and workflow diagrams (landscape, release in default mode, release decision flow, override, sharing routing, access request, infrastructure change request, configuration change, DR failover, recertification, application release) plus an approval summary table.
 **Changes in v2.14:** all sharing is granted through a sharing approval workflow (§4.11.6). Covers share offers, access requests, agreements, renewal and revocation, with risk-based routing, optional auto-approval within an approved tag offer, recertification and audit.
 **Changes in v2.13:** sharing by tags (§4.11.1). Providers set `org:share-scope` (product / portfolio / organization) and `org:share-access` on a resource, and any consumer in any account whose tags match (same environment, inside the organization) can connect self-service. Agreements remain for everything tags cannot express.
@@ -365,8 +366,9 @@ What the server adds before synthesis (shown in the preview, read-only):
 
 | Entity | PK | SK | Key attributes |
 |---|---|---|---|
-| Portfolio | `REG#PORTFOLIO` | `PF#{id}` | displayName, status, owner group |
-| Product/Platform | `REG#PF#{portfolioId}` | `PR#{id}` | displayName, kind (`product`\|`platform`), costCenter, classification ceiling, allowed envs, entitled IdP groups, GitHub access team (repo maintain role), GitHub reviewer teams per env |
+| Organization settings | `CFG#ORG` | `META` | **default cost center**, cost center format rule, version |
+| Portfolio | `REG#PORTFOLIO` | `PF#{id}` | displayName, status, owner group, **costCenter** (optional; inherits the org default) |
+| Product/Platform | `REG#PF#{portfolioId}` | `PR#{id}` | displayName, kind (`product`\|`platform`), costCenter (optional; inherits the portfolio's), classification ceiling, allowed envs, entitled IdP groups, GitHub access team (repo maintain role), GitHub reviewer teams per env |
 | Environment | `CFG#ENV` | `ENV#{envId}` | displayName, order, tier, OU, required-gate flag, protection profile, guardrail profile, status, version |
 | Account binding | `CFG#BIND#{envId}` | `{scope}#{scopeId}#{region}` | accountId, status (`pending`/`onboarded`/`failed`/`retired`), last validation result, version |
 | Account index (uniqueness) | `CFG#ACCT#{accountId}` | `META` | envId. Written in the same transaction as the binding, so **one account ID can belong to only one environment** |
@@ -409,10 +411,28 @@ flowchart TD
   - **Product/Platform:** filtered by the chosen portfolio *and* the user's IdP groups. Shows a badge for kind (Product or Platform).
   - **Project:** a new name typed by the user (validated for format and uniqueness, §3.3), not a dropdown.
   - **Resilience:** single region / DR / HA pair; then **Primary region** and **Secondary region** dropdowns listing every region the platform has enabled, pre-filled with us-east-1 / us-east-2 (§10.9).
-- **Read-only fields shown after selection:** cost center, classification ceiling, and target account per environment (from the account bindings). The user sees exactly where the project will deploy.
+- **Read-only fields shown after selection:** cost center (resolved, with where it comes from, §4.2.1), classification ceiling, and target account per environment (from the account bindings). The user sees exactly where the project will deploy.
 - **Server-side re-check** on preview and on create (registry + entitlement). This guards against a stale UI and against crafted requests.
 - **IDs are immutable; display names can change.** Tag values are IDs (`pr-invoicing`), so renaming "Invoicing" to "AP Invoicing" changes nothing in AWS.
 - **Lifecycle:** retiring a product blocks new projects, flags existing ones and does not delete anything.
+
+#### 4.2.1 Cost centers (admin-configurable for the whole organization)
+
+Platform admins maintain cost centers in the admin screen (**Admin → Cost centers**). Nothing is hardcoded and nothing comes from an external finance system unless imported.
+
+| Level | Set by | Rule |
+|---|---|---|
+| **Organization default** | Platform admin | Required. Used when nothing more specific is set |
+| **Portfolio** | Platform admin | Optional. Overrides the org default for everything in the portfolio |
+| **Product / Platform** | Platform admin | Optional. Overrides the portfolio value for that product |
+| **Project override** | Requested in the project; approved by a platform admin (finance) | Optional, for exceptions (e.g. a project funded by another budget) |
+
+- **Resolution:** the effective cost center is project override → product → portfolio → org default. The UI always shows the resolved value and **where it comes from** (e.g. "CC-4400 · inherited from Payments").
+- **Validation:** a format rule set in organization settings (default `^CC-[0-9]{4}$`). Values can also be bulk-imported by CSV/REST, with the same validation.
+- **Propagation:** changing a cost center opens **tag-update PRs** on every affected infrastructure repo. Normal deploys update the stack tags, and CloudFormation re-tags the resources. Nothing is re-tagged by hand. The admin screen shows how many projects a change affects before saving.
+- **Governance:** every change is versioned and audited (who, when, old → new). Tag Policies (§4.7) get the list of valid cost centers automatically. `org:cost-center` is activated as a cost allocation tag, so Cost Explorer and the CUR report spend per cost center.
+- **Permissions:** cost centers are billing metadata, not a security boundary. They are never used in IAM conditions (§4.5), so changing one never affects access.
+
 
 ### 4.3 Tag schema
 
@@ -424,7 +444,7 @@ The key prefix `org:` is a placeholder; choose your company prefix (D3). All val
 | `org:product` | `pr-invoicing` | Platform | Yes | Cost, sharing within a product |
 | `org:project` | `invoice-ingest` | Platform | Yes | **Primary permission key** |
 | `org:environment` | `dev` | Platform (per account) | Yes | Must match the account's environment |
-| `org:cost-center` | `CC-4410` | Platform (from product) | Yes | Billing (activated as a cost allocation tag) |
+| `org:cost-center` | `CC-4410` | Platform (resolved from the cost center hierarchy, §4.2.1) | Yes | Billing (activated as a cost allocation tag) |
 | `org:data-classification` | `confidential` | User (≤ product ceiling) | Yes | SCP gates (e.g. not in sandbox) |
 | `org:managed-by` | `cloudinfra` | Platform | Yes | Marks resources only the platform pipeline may change |
 | `org:share-scope` | `none` / `product` / `portfolio` / `organization` | Provider (UI, via infra PR) | No (default `none`) | **Sharing by tags**: who outside the project may use the resource, across accounts (§4.11.1) |

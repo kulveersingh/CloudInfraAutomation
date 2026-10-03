@@ -202,16 +202,25 @@ const ROLES = {
 };
 let role = "rev";
 
+const ORG = {defaultCC:"CC-1000", format:"^CC-[0-9]{4}$"};
 const REGISTRY = [
-  {id:"pf-payments", name:"Payments", products:[
+  {id:"pf-payments", name:"Payments", cc:"CC-4400", products:[
     {id:"pr-invoicing", name:"Invoicing", kind:"product", cc:"CC-4410", ceiling:"confidential"},
-    {id:"pl-payments-core", name:"Payments Core", kind:"platform", cc:"CC-4400", ceiling:"restricted"}]},
-  {id:"pf-retail", name:"Retail", products:[
+    {id:"pl-payments-core", name:"Payments Core", kind:"platform", cc:"", ceiling:"restricted"}]},
+  {id:"pf-retail", name:"Retail", cc:"CC-5100", products:[
     {id:"pr-storefront", name:"Storefront", kind:"product", cc:"CC-5120", ceiling:"internal"},
-    {id:"pr-loyalty", name:"Loyalty", kind:"product", cc:"CC-5130", ceiling:"confidential"}]},
-  {id:"pf-data", name:"Data & Analytics", products:[
+    {id:"pr-loyalty", name:"Loyalty", kind:"product", cc:"", ceiling:"confidential"}]},
+  {id:"pf-data", name:"Data & Analytics", cc:"", products:[
     {id:"pl-datalake", name:"Data Lake Platform", kind:"platform", cc:"CC-7000", ceiling:"confidential"}]},
 ];
+let CC_OVERRIDES = [{project:"storefront-search", cc:"CC-5199", reason:"Funded by the 2026 search initiative budget", status:"Approved by Alex Kim"}];
+function resolveCC(pfId, prId, projectId){
+  const o = projectId && CC_OVERRIDES.find(x=>x.project===projectId); if(o) return {cc:o.cc, src:"project override"};
+  const pf = REGISTRY.find(p=>p.id===pfId); const pr = pf?.products.find(p=>p.id===prId);
+  if(pr?.cc) return {cc:pr.cc, src:"set on product "+pr.name};
+  if(pf?.cc) return {cc:pf.cc, src:"inherited from portfolio "+pf.name};
+  return {cc:ORG.defaultCC, src:"organization default"};
+}
 const ENVS = [
   {id:"sandbox", name:"Sandbox", tier:"sandbox", order:1, approval:false, trigger:"Manual, any branch"},
   {id:"dev", name:"DEV", tier:"nonprod", order:2, approval:false, trigger:"Auto on main"},
@@ -415,7 +424,7 @@ function wOwnership(){
   </div>
   <div class="grid3">
     <div class="field"><label for="wCls">Data classification</label><select id="wCls" data-change="wCls">${["public","internal","confidential","restricted"].map(c=>`<option ${c===W.cls?"selected":""}>${c}</option>`).join("")}</select><span class="hint">Product ceiling: ${prod.ceiling}</span></div>
-    <div class="field"><label>Cost center</label><div class="mono" style="padding-top:6px">${prod.cc}</div><span class="hint">From the registry, read-only</span></div>
+    <div class="field"><label>Cost center</label><div class="mono" style="padding-top:6px">${resolveCC(W.pf, prod.id).cc}</div><span class="hint">${resolveCC(W.pf, prod.id).src} · set by admins in Admin → Cost centers</span></div>
     <div class="field"><label>Tag values</label><div class="tags" style="padding-top:4px"><span class="tag">org:portfolio=<b>${W.pf}</b></span><span class="tag">org:product=<b>${prod.id}</b></span><span class="tag">org:project=<b>${esc(W.name)}</b></span></div></div>
   </div>`;
 }
@@ -482,7 +491,7 @@ ${W.resources.map(r=>`  ${r.id.replace(/(^|-)([a-z])/g,(m,a,b)=>b.toUpperCase())
   ${errs.length?`<div class="notice crit"><b>Fix before creating:</b><ul style="margin:6px 0 0 18px;padding:0">${errs.map(e=>`<li>${esc(e.m)} <button class="btn ghost" data-act="wStep" data-n="${e.s}">Go to ${WSTEPS[e.s-1]}</button></li>`).join("")}</ul></div>`:`<div class="notice ok">All checks passed: schema, connections, least-privilege and tag linter, cfn-lint, cfn-guard (all environments), service availability in ${W.primary}${W.mode!=="single"?" and "+W.secondary:""}.</div>`}
   <div class="grid2">
     <div class="field"><span class="label">Tags applied to every resource and role</span><div class="tags">
-      <span class="tag">org:portfolio=<b>${W.pf}</b></span><span class="tag">org:product=<b>${W.pr}</b></span><span class="tag">org:project=<b>${esc(W.name)}</b></span><span class="tag">org:environment=<b>{per env}</b></span><span class="tag">org:data-classification=<b>${W.cls}</b></span><span class="tag">org:resilience=<b>${W.mode}</b></span><span class="tag">org:managed-by=<b>cloudinfra</b></span></div>
+      <span class="tag">org:portfolio=<b>${W.pf}</b></span><span class="tag">org:product=<b>${W.pr}</b></span><span class="tag">org:project=<b>${esc(W.name)}</b></span><span class="tag">org:environment=<b>{per env}</b></span><span class="tag">org:cost-center=<b>${resolveCC(W.pf, W.pr).cc}</b></span><span class="tag">org:data-classification=<b>${W.cls}</b></span><span class="tag">org:resilience=<b>${W.mode}</b></span><span class="tag">org:managed-by=<b>cloudinfra</b></span></div>
       <span class="label" style="margin-top:10px">Files in the new repository</span>
       <div class="code">acme-platform/${esc(W.name)}-infra
 ├── template.yaml
@@ -622,7 +631,7 @@ function vFailover(p){
 
 /* ---------------- Admin ---------------- */
 function vAdmin(){
-  const tabs=[["environments","Environments"],["accounts","Account bindings"],["regions","Regions"],["registry","Registry"],["gates","Gate thresholds"]].map(([id,l])=>`<button class="${state.adminTab===id?"on":""}" data-act="adminTab" data-t="${id}">${l}</button>`).join("");
+  const tabs=[["environments","Environments"],["accounts","Account bindings"],["regions","Regions"],["registry","Registry"],["costcenters","Cost centers"],["gates","Gate thresholds"]].map(([id,l])=>`<button class="${state.adminTab===id?"on":""}" data-act="adminTab" data-t="${id}">${l}</button>`).join("");
   let body="";
   if(state.adminTab==="environments") body=`<div class="tbl-wrap"><table><thead><tr><th>Order</th><th>Env ID</th><th>Display name</th><th>Tier</th><th>Deploy trigger</th><th>Approval</th></tr></thead><tbody>${ENVS.map(e=>`<tr><td class="num">${e.order}</td><td class="mono">${e.id}</td><td><input type="text" id="envn-${e.id}" value="${e.name}" style="width:120px"></td><td>${e.tier}</td><td>${e.trigger}</td><td>${e.approval?`${chip("warn","Required")} <span class="hint">locked</span>`:chip("idle","None")}</td></tr>`).join("")}</tbody></table></div>
     <div class="row"><button class="btn" data-act="toastOnly" data-msg="Mock: new environment draft created">Add environment</button><button class="btn pri" data-act="toastOnly" data-msg="Mock: change submitted. Prod-tier changes need a second platform admin.">Save changes</button><span class="hint">Approval is locked on for QA/STAGE and every prod-tier environment.</span></div>`;
@@ -630,7 +639,25 @@ function vAdmin(){
     <div class="hint">Each account can belong to one environment only. Saving runs onboarding checks: in the organization, correct OU, bootstrap present, provisioner role reachable.</div>`;
   if(state.adminTab==="regions") body=`<div class="tbl-wrap"><table><thead><tr><th>Region</th><th>Name</th><th>Enabled</th><th>Onboarding</th></tr></thead><tbody>${REGIONS.map((r,i)=>`<tr><td class="mono">${r.id}</td><td>${r.name}</td><td><input type="checkbox" data-act="regToggle" data-i="${i}" ${r.on?"checked":""} aria-label="Enable ${r.id}"></td><td>${r.on?chip("ok","Bootstrap · artifacts · SCP"):chip("idle","Not enabled")}</td></tr>`).join("")}</tbody></table></div>
     <div class="row"><span class="label">Default pair</span><span class="mono">us-east-1 / us-east-2</span><span class="hint">Enabling a region updates the SCP region allow-list after a second admin approves.</span></div>`;
-  if(state.adminTab==="registry") body=REGISTRY.map(pf=>`<div class="field"><span class="label">${pf.name} · <span class="mono">${pf.id}</span></span><div class="tbl-wrap"><table><thead><tr><th>Product / Platform</th><th>ID</th><th>Kind</th><th>Cost center</th><th>Classification ceiling</th></tr></thead><tbody>${pf.products.map(p=>`<tr><td>${p.name}</td><td class="mono">${p.id}</td><td>${p.kind}</td><td class="mono">${p.cc}</td><td>${p.ceiling}</td></tr>`).join("")}</tbody></table></div></div>`).join("")+`<div class="row"><button class="btn" data-act="toastOnly" data-msg="Mock: CSV import preview">Import CSV</button></div>`;
+  if(state.adminTab==="registry") body=REGISTRY.map(pf=>`<div class="field"><span class="label">${pf.name} · <span class="mono">${pf.id}</span></span><div class="tbl-wrap"><table><thead><tr><th>Product / Platform</th><th>ID</th><th>Kind</th><th>Cost center (resolved)</th><th>Classification ceiling</th></tr></thead><tbody>${pf.products.map(p=>`<tr><td>${p.name}</td><td class="mono">${p.id}</td><td>${p.kind}</td><td class="mono">${resolveCC(pf.id,p.id).cc}</td><td>${p.ceiling}</td></tr>`).join("")}</tbody></table></div></div>`).join("")+`<div class="row"><button class="btn" data-act="toastOnly" data-msg="Mock: CSV import preview">Import CSV</button></div>`;
+  if(state.adminTab==="costcenters"){
+    const re=new RegExp(ORG.format); const bad=v=>v && !re.test(v);
+    const inp=(id,val,ph,kind,a,b)=>`<input type="text" id="${id}" value="${esc(val)}" placeholder="${esc(ph)}" data-cc="${kind}" data-a="${a||""}" data-b="${b||""}" style="width:120px" ${can("admin")?"":"disabled"}>${bad(val)?`<div class="err">Format ${esc(ORG.format)}</div>`:""}`;
+    const projCount=(pf,pr)=>PROJECTS.filter(x=>x.pf===pf&&(!pr||x.pr===pr)).length;
+    const rows=REGISTRY.map(pf=>{
+      const pfRes=pf.cc||ORG.defaultCC;
+      return `<tr><td><b>${pf.name}</b><div class="hint mono">${pf.id} · portfolio</div></td><td>${inp("cc-"+pf.id,pf.cc,"inherit: "+ORG.defaultCC,"pf",pf.id)}</td><td class="mono">${pfRes}</td><td>${pf.cc?chip("info","Set on portfolio"):chip("idle","Inherited from org")}</td><td class="num">${projCount(pf.id)}</td></tr>`+
+      pf.products.map(pr=>{const r=resolveCC(pf.id,pr.id); return `<tr><td style="padding-left:28px">${pr.name}<div class="hint mono">${pr.id} · ${pr.kind}</div></td><td>${inp("cc-"+pr.id,pr.cc,"inherit: "+pfRes,"pr",pf.id,pr.id)}</td><td class="mono">${r.cc}</td><td>${pr.cc?chip("info","Set on product"):chip("idle",pf.cc?"Inherited from portfolio":"Inherited from org")}</td><td class="num">${projCount(pf.id,pr.id)}</td></tr>`;}).join("");}).join("");
+    const ov=CC_OVERRIDES.map(o=>`<tr><td class="mono">${o.project}</td><td class="mono">${o.cc}</td><td>${esc(o.reason)}</td><td>${chip("ok",o.status)}</td></tr>`).join("");
+    body=`<div class="grid3">
+      <div class="field"><label for="ccOrg">Organization default</label>${inp("ccOrg",ORG.defaultCC,"required","org")}<span class="hint">Used when no portfolio or product value is set</span></div>
+      <div class="field"><label for="ccFmt">Format rule</label><input type="text" id="ccFmt" value="${esc(ORG.format)}" disabled><span class="hint">Regular expression all cost centers must match</span></div>
+      <div class="field"><label>Resolution order</label><div class="muted" style="padding-top:6px">Project override → product → portfolio → organization default</div></div></div>
+    <div class="tbl-wrap"><table><thead><tr><th>Portfolio / product</th><th>Cost center</th><th>Effective</th><th>Source</th><th>Projects</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <span class="label">Project overrides</span>
+    <div class="tbl-wrap"><table><thead><tr><th>Project</th><th>Cost center</th><th>Reason</th><th>Status</th></tr></thead><tbody>${ov}</tbody></table></div>
+    <div class="row"><button class="btn pri" data-act="ccSave" ${can("admin")?"":"disabled"}>Save cost centers</button><button class="btn" data-act="toastOnly" data-msg="Mock: CSV import preview with validation">Import CSV</button><span class="hint">Saving opens tag-update PRs on affected projects; resources are re-tagged by normal deploys. Cost centers never affect access.</span></div>`;
+  }
   if(state.adminTab==="gates") body=`<div class="grid3">
     <div class="field"><label for="gCov">Minimum test coverage</label><input type="text" id="gCov" value="80%"></div>
     <div class="field"><label for="gVuln">Block vulnerabilities at</label><select id="gVuln"><option>critical and high</option><option>critical only</option></select></div>
@@ -685,10 +712,20 @@ document.addEventListener("click", e=>{
     case "foCancel": FAILOVER=null; go(); break;
     case "foSecond": FAILOVER.step="run"; FAILOVER.n=0; go(); runFailover(); break;
     case "foReset": FAILOVER=null; go(); break;
+    case "ccSave": { const re=new RegExp(ORG.format); const vals=[ORG.defaultCC,...REGISTRY.flatMap(p=>[p.cc,...p.products.map(x=>x.cc)])].filter(Boolean);
+      if(!ORG.defaultCC){ toast("The organization default is required."); break; }
+      const badv=vals.filter(v=>!re.test(v)); if(badv.length){ toast(`Fix ${badv.length} value${badv.length>1?"s":""} that do not match ${ORG.format}.`); break; }
+      toast(`Saved. Tag-update PRs opened on ${PROJECTS.length} projects; org:cost-center updates on their next deploy.`); go(); break; }
   }
 });
 document.addEventListener("change", e=>{
-  const t=e.target; const c=t.dataset.change; if(!c) return;
+  const t=e.target;
+  if(t.dataset.cc){ const v=t.value.trim().toUpperCase(); const k=t.dataset.cc;
+    if(k==="org") ORG.defaultCC=v;
+    if(k==="pf") REGISTRY.find(p=>p.id===t.dataset.a).cc=v;
+    if(k==="pr") REGISTRY.find(p=>p.id===t.dataset.a).products.find(x=>x.id===t.dataset.b).cc=v;
+    render(); return; }
+  const c=t.dataset.change; if(!c) return;
   if(c==="wPf"){ W.pf=t.value; W.pr=REGISTRY.find(p=>p.id===W.pf).products[0].id; }
   if(c==="wPr") W.pr=t.value; if(c==="wCls") W.cls=t.value;
   if(c==="wPrim") W.primary=t.value; if(c==="wSec") W.secondary=t.value; if(c==="wStrat") W.strategy=t.value;
