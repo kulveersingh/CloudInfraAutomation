@@ -1,10 +1,11 @@
 # CloudInfraAutomation — Architecture
 
-**Status:** Draft v2.11 for review. No code is written until this design is approved.
+**Status:** Draft v2.12 for review. No code is written until this design is approved.
 **Date:** 2026-10-03
 **Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9). Every solution is **DR-capable**: it can run in one region, as DR (primary active, secondary standby) or as an HA pair (both active), with **any region pair chosen in the UI** (default us-east-1 / us-east-2) (§10).
 
 **Changes in v2:** added the org registry and tagging strategy (§4); permissions based on tags (§4.5–4.8); multi-account, five-environment model (§5); promotion pipeline (§8). Payload, provisioning, security and scaling sections are updated to match.
+**Changes in v2.12:** cross-account access (§4.11). Infrastructure can use assets in other AWS accounts (S3, SQS, SNS, KMS, DynamoDB, secrets, events, private APIs) through approved sharing agreements. Both sides are generated with tag conditions, inside the organization by default, with expiry, revocation and audit.
 **Changes in v2.11:** any region pair is allowed. Users pick the primary and secondary regions in the UI (pre-filled with us-east-1 / us-east-2). Admins manage enabled regions in the UI. Adds per-pair availability and replication checks, us-east-1 placement for CloudFront certificates/WAF, and region changes after creation (§10.9).
 **Changes in v2.10:** runtime isolation by tags (§4.10). Every component can only talk to resources with the same project and environment tag values, enforced by four layers generated into the template: the runtime role's policy, the permissions boundary, a same-tag resource policy on the target, and an SCP.
 **Changes in v2.9:** multi-region resilience (§10): every template is DR-capable. Projects choose single region, DR (deployed to us-east-1 and us-east-2, only us-east-1 active) or HA pair (both active). Adds per-service replication rules, a global stack, a two-region pipeline, failover/failback, DR drills and a multi-region control plane. Sections 10–17 renumbered to 11–18.
@@ -253,6 +254,8 @@ sequenceDiagram
 | `POST /v1/approvals/{id}:approve` / `:reject` | Approve/reject in the UI; the platform submits it to GitHub as the reviewer. |
 | `POST /v1/projects/{id}/environments/{env}:promote` | Start promotion when the environment is in `on-request` mode. |
 | `POST /v1/overrides` / `POST /v1/overrides/{id}:decide` | Request / decide a high-risk change override. |
+| `GET /v1/shareable-resources` | Catalog of resources other projects have marked shareable (§4.11). |
+| `POST /v1/sharing-agreements` / `:approve` / `:revoke` | Request, approve (provider, security) and revoke cross-account sharing agreements. |
 | `POST /v1/github/webhooks` | GitHub App webhooks. |
 
 ---
@@ -629,6 +632,82 @@ Design notes:
 - **CI cross-project tests (P1):** two projects are deployed in the platform test account. Tests assert that project A's Lambda **cannot** read, write or invoke project B's bucket, queue, table, secret or function, even with the exact ARN, and **can** use its own.
 - **IAM Access Analyzer** (external and internal access findings) runs in every account. Any access path to a project resource from a principal outside that project raises a finding to the platform.
 
+### 4.11 Cross-account access: sharing agreements
+
+Infrastructure created by the platform often needs assets in **other AWS accounts**, for example a central data-lake bucket, a shared SQS queue owned by another team, or another product's KMS-encrypted dataset. This is supported, and it **keeps the tag-based isolation of §4.10**: cross-account access exists only through an explicit, approved **sharing agreement**, and the platform generates the permissions on **both sides** from it.
+
+#### 4.11.1 Sharing agreement
+
+A sharing agreement is a record in the platform registry, created and approved in the UI:
+
+| Field | Example |
+|---|---|
+| Provider | Project `datalake-core` / environment `prod` / account `666666666666` / resource `arn:aws:s3:::datalake-core--curated-666666666666-us-east-1` (or "non-platform resource" + ARN) |
+| Consumer | Project `invoice-ingest` / environment `prod` / account `555555555555` / component (slot) `processor` |
+| Access | `read` \| `write` \| `readwrite` \| `invoke` \| `publish` \| `consume` (mapped to exact actions per service from the Service Authorization Reference, §6.8.1) |
+| Scope | Optional prefix / key condition (e.g. `s3:prefix = invoices/`) |
+| Data classification | Must be ≤ the consumer project's classification ceiling |
+| Expiry / review date | Required, e.g. 12 months; recertified quarterly |
+| Approvals | Consumer owner (request) + **provider owner** + security reviewer for PROD or `confidential`+ data |
+
+**Rules enforced on every agreement:**
+- **Same environment tier only:** DEV↔DEV, PROD↔PROD. PROD resources are never shared with non-PROD. Any other combination needs a security exception.
+- **Inside the AWS Organization by default** (`aws:PrincipalOrgID` / `aws:ResourceOrgID`). Accounts outside the organization (partners, vendors) are off by default and need an explicit exception, with an ExternalId for role assumption.
+- **Least privilege:** exact actions for the access level, exact resource ARNs, optional prefix.
+- **Both sides consent:** nothing is generated until the provider owner approves.
+
+#### 4.11.2 How access is granted (per service)
+
+| Pattern | When | Provider side (generated) | Consumer side (generated) |
+|---|---|---|---|
+| **A. Resource policy grant** (preferred) | Services with resource-based policies: S3, SQS, SNS, KMS, Secrets Manager, EventBridge buses, Lambda (invoke), DynamoDB (resource policies), ECR, OpenSearch, Kinesis (resource policies) | Allow statement for the consumer: `aws:PrincipalAccount = consumer account` **and** `aws:PrincipalTag/org:project = consumer project` **and** `aws:PrincipalTag/org:environment = env` **and** `aws:PrincipalOrgID = our org`. The §4.10 deny statements gain the approved consumer as their only additional exception. | Runtime role statement for the exact ARN + actions, with `aws:ResourceAccount = provider account` and, where supported, `aws:ResourceTag/org:project = provider project` |
+| **B. Cross-account role** | Services without resource policies, or when the provider wants one auditable entry point | A role `xacct/{provider-project}/{consumer-project}` tagged with the provider's tags **plus** `org:share-consumer = {consumer project}`. Trust: the consumer component's role ARN, with `aws:PrincipalTag/org:project` and `org:environment` conditions and `aws:PrincipalOrgID`. Permissions: only the agreed actions on the agreed resources | `sts:AssumeRole` on **that one role ARN** only. The boundary allows `sts:AssumeRole` only when `aws:ResourceTag/org:share-consumer = ${aws:PrincipalTag/org:project}` |
+| **C. AWS RAM share** | Resources shared by AWS RAM (e.g. subnets, Transit Gateway attachments, Glue Data Catalog, Route 53 Resolver rules) | RAM resource share to the consumer account, tagged with the agreement ID | Consumer stack references the shared resource ARN from the contract |
+| **D. Encrypted data** | Any of the above where the data is KMS-encrypted | Key policy grant (pattern A) for the consumer role, with `kms:ViaService` limited to the service in use (e.g. `s3.us-east-1.amazonaws.com`) | `kms:Decrypt` / `kms:GenerateDataKey` on that key ARN only |
+| **E. Private network path** | Cross-account network access (databases, internal APIs) | **PrivateLink endpoint service** (preferred) with allowed principals = consumer account; owned by the provider project or the network team | Interface endpoint + security group in the consumer project (`network.access`) |
+| **F. Events** | EventBridge / SNS → SQS across accounts | Bus policy / topic policy allowing the consumer's rule or subscription (pattern A) | Rule target or subscription, plus the queue policy on the consumer's own queue |
+
+**Non-platform resources** (in accounts the platform does not manage): the platform generates the consumer side. It gives the provider owner a **ready-to-apply policy snippet**. A readiness check (a harmless read such as `HeadBucket` / `GetQueueAttributes` from the consumer role) confirms the grant before the agreement is marked active.
+
+#### 4.11.3 How it fits the four isolation layers (§4.10)
+
+| Layer | Change for an approved agreement |
+|---|---|
+| 1. Consumer runtime role | Gets statements for the provider's exact ARNs and actions (pattern A) or for `sts:AssumeRole` on one role (pattern B). **Generated only from an active agreement**; the linter rejects any other cross-account statement. |
+| 2. Permissions boundary | Allows cross-account access only to resources **inside the organization** (`aws:ResourceOrgID`), and role assumption only to roles tagged `org:share-consumer = ${aws:PrincipalTag/org:project}`. Everything else stays same-project only. |
+| 3. Provider resource policy | Its deny-other-projects statements list **only** its own project plus approved consumers (account + project + environment), and a precise Allow is added per agreement. |
+| 4. SCP data perimeter | Platform principals cannot access resources outside the organization, and resource policies cannot grant to principals outside the organization, unless an exception is registered (§4.7). |
+
+A consumer can therefore reach exactly the agreed resource, with exactly the agreed actions, from exactly the agreed component and environment. No other project in either account gains anything.
+
+#### 4.11.4 Workflow in the UI
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor C as Consumer owner
+  participant UI as Platform UI
+  actor P as Provider owner
+  actor S as Security reviewer
+  participant GH as GitHub (both infra repos)
+  C->>UI: "Connect to resource in another account" (pick a shareable resource or paste an ARN)
+  UI->>UI: validate: same tier, classification, org, access level → exact actions
+  UI->>P: approval request (release console inbox)
+  P-->>UI: approve (scope, expiry)
+  UI->>S: approval request (PROD or confidential+ only)
+  S-->>UI: approve
+  UI->>GH: PR on provider infra repo (resource policy / xacct role / RAM share)
+  UI->>GH: PR on consumer infra repo (role statements + contract binding)
+  GH-->>UI: both deployed through normal gates and approvals
+  UI->>UI: readiness check passes → agreement ACTIVE
+```
+
+- **Shareable resources:** a provider marks resources as `shareable` in its project (with allowed access levels). They appear in a searchable catalog in the UI for consumers.
+- **Contract:** the consumer's contract (§9.4) gets an `external` section with the provider ARN, region, KMS key ARN and access level. Application code reads it like any other binding.
+- **Revocation and expiry:** revoking (by either owner or security) or expiry opens PRs that remove both sides. Expiry warnings go out 30 and 7 days before.
+- **DR/HA (§10):** agreements cover both regions of each side. Resource policies are generated in every region where the provider resource or replica exists, and the contract lists per-region ARNs.
+- **Audit:** every agreement, approval, change and revocation is in the release records. **IAM Access Analyzer** findings that match an active agreement are archived automatically; any other cross-account access raises an alert.
+
 ---
 
 ## 5. Multi-account environment strategy
@@ -862,7 +941,7 @@ flowchart LR
 1. Schema + graph + registry/entitlement checks (§3.3).
 2. **Least-privilege linter:**
    - No `Allow` with `*` / `service:*` actions or `*` resources in generated roles.
-   - No `iam:*`, `sts:AssumeRole` or `iam:PassRole` in app roles.
+   - No `iam:*` or `iam:PassRole` in app roles. No `sts:AssumeRole`, except on the single cross-account role named in an **active sharing agreement** (§4.11). No cross-account resource statements unless generated from an active agreement.
    - Every generated role has the boundary.
 3. **Tag linter:** every taggable resource will carry the required `org:*` keys (via propagation or explicit tags) with **identical** project/environment values. Every runtime role has the boundary and tag conditions, and every resource that supports a resource policy has the same-tag deny statements (§4.10).
 4. cfn-lint; **cfn-guard rules per environment** (e.g. prod: retain + alarms + retention ≥ 365 days).
@@ -960,6 +1039,7 @@ Combinations are built from a **small set of generic connection kinds** that wor
 | `workflow.task` | Step Functions → Lambda / ECS / DynamoDB / SQS / SNS / Glue / Batch / Bedrock … | Task state substitution values + state machine role statements for that integration |
 | `secret.binding` | Any compute → database secret / Secrets Manager secret / SSM parameter | `GetSecretValue`/`GetParameter` on that one ARN + KMS decrypt on its key; value name injected as env var |
 | `cdn.origin` | CloudFront → S3 / ALB / API Gateway | Origin + origin access control and the matching bucket/resource policy |
+| `xacct.access` | Any component → a resource in **another AWS account** (S3, SQS, SNS, KMS, DynamoDB, secrets, events, private APIs) | Created only from an approved **sharing agreement** (§4.11): provider resource policy / cross-account role / RAM share / PrivateLink, plus consumer role statements and contract binding |
 
 Each connection kind declares **which source and target types it accepts**, using capabilities from the generated layer (e.g. "can be a Lambda event source", "has a security group", "has an ARN"). So a new service is usable in combinations as soon as its schema and authorization data are in the catalog. The **compatibility matrix** shown in the UI is computed, not hand-maintained.
 
@@ -1870,6 +1950,7 @@ Failover must work when us-east-1 is down, so the platform itself runs active/st
 
 | Threat | Mitigation |
 |---|---|
+| Unapproved cross-account access | Only via approved sharing agreements (§4.11); both sides generated from the agreement; SCP data perimeter keeps access inside the organization; Access Analyzer alerts on anything not matching an active agreement |
 | A project changes another project's resources | Tag conditions on every create/change action (`aws:RequestTag` / `aws:ResourceTag` = principal tag) + name patterns built from the principal's tag + per-project roles + SCP protecting ownership tags |
 | A repo forges tags to impersonate another product | Role tags are platform-owned and SCP-protected; request tags must equal principal tags (§4.4) |
 | Generated IAM grants too much | Exact-ARN policies; least-privilege linter; shared tag-scoped boundary; exec role can only create roles with the boundary attached |
@@ -2067,6 +2148,9 @@ CloudInfraAutomation/
 | D31 | DR account model | Same account for both regions of an environment (default), or a separate DR account per environment? |
 | D32 | DR defaults | Pilot light (default) or warm standby for DR projects? QA/STAGE mirrors PROD's mode (default)? DR drill frequency (default monthly) and G5 recency (default 30 days)? |
 | D33 | Cognito and other non-replicating services | Exclude from DR/HA projects, or allow with a documented recovery pattern? |
+| D34 | Cross-account outside the AWS Organization | Keep off by default with a security exception per partner account (recommended), or allow certain partner accounts by default? |
+| D35 | Sharing agreement policy | Default expiry (12 months?) and recertification (quarterly?); does PROD sharing always need a security reviewer, or only for `confidential`+ data? |
+| D36 | Cross-environment sharing | Allow same-tier only (recommended), or permit specific exceptions such as PROD → non-PROD read of anonymized data? |
 
 ---
 
@@ -2084,6 +2168,7 @@ CloudInfraAutomation/
 | **P5c — Application golden paths** | Compute slot catalog types, contract publishing (SSM + API), `platform-workflows` (build per language, deploy per compute type), app deploy roles, "Create application repo" flow, contract viewer | A Python Lambda app and a Java ECS app deploy from their own repos to DEV and promote to PROD with approvals; an app repo cannot create IAM or touch another project; an app deploy stops cleanly when the contract lacks a required value |
 | **P5d — Full service catalog** | Catalog sync job (CFN schemas + Service Authorization Reference), Tier 2 generator, generic connection kinds, database blocks (Aurora/RDS/DynamoDB first), layered stacks, pairwise CI, nightly deploy tests, reference patterns | Any enabled resource type can be composed and passes all gates; pairwise suite green; every database engine deploy-tested weekly |
 | **P5e — Multi-region DR/HA** | Resilience modes in wizard and payload, conditions in generated templates, global stack, per-service replication wiring, two-region pipeline, failover/failback operations, ARC readiness, DR drills, multi-region control plane | A DR project deploys to us-east-1 (active) and us-east-2 (standby); a STAGE drill fails over and back within target RTO/RPO; an HA project serves traffic from both regions |
+| **P5f — Cross-account sharing** | Sharing agreements (registry, UI, approvals), shareable-resource catalog, generators for patterns A–F, consumer contract `external` bindings, readiness checks, expiry/revocation, Access Analyzer integration | A consumer in account A reads an approved S3 prefix and consumes an approved SQS queue in account B; any other project or environment in A is denied; revoking the agreement removes access on both sides |
 | **P6 — Production control plane** | Step Functions, webhooks, reconciler, quotas, observability, Config compliance | 100 concurrent jobs on one installation complete without failing on rate limits; tag compliance dashboard live |
 
 **Next step:** review this document, answer §17, and approve a phase to start. No code will be written until then.
