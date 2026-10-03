@@ -1,10 +1,11 @@
 # CloudInfraAutomation — Architecture
 
-**Status:** Draft v2.12 for review. No code is written until this design is approved.
+**Status:** Draft v2.13 for review. No code is written until this design is approved.
 **Date:** 2026-10-03
 **Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9). Every solution is **DR-capable**: it can run in one region, as DR (primary active, secondary standby) or as an HA pair (both active), with **any region pair chosen in the UI** (default us-east-1 / us-east-2) (§10).
 
 **Changes in v2:** added the org registry and tagging strategy (§4); permissions based on tags (§4.5–4.8); multi-account, five-environment model (§5); promotion pipeline (§8). Payload, provisioning, security and scaling sections are updated to match.
+**Changes in v2.13:** sharing by tags (§4.11.1). Providers set `org:share-scope` (product / portfolio / organization) and `org:share-access` on a resource, and any consumer in any account whose tags match (same environment, inside the organization) can connect self-service. Agreements remain for everything tags cannot express.
 **Changes in v2.12:** cross-account access (§4.11). Infrastructure can use assets in other AWS accounts (S3, SQS, SNS, KMS, DynamoDB, secrets, events, private APIs) through approved sharing agreements. Both sides are generated with tag conditions, inside the organization by default, with expiry, revocation and audit.
 **Changes in v2.11:** any region pair is allowed. Users pick the primary and secondary regions in the UI (pre-filled with us-east-1 / us-east-2). Admins manage enabled regions in the UI. Adds per-pair availability and replication checks, us-east-1 placement for CloudFront certificates/WAF, and region changes after creation (§10.9).
 **Changes in v2.10:** runtime isolation by tags (§4.10). Every component can only talk to resources with the same project and environment tag values, enforced by four layers generated into the template: the runtime role's policy, the permissions boundary, a same-tag resource policy on the target, and an SCP.
@@ -422,7 +423,8 @@ The key prefix `org:` is a placeholder; choose your company prefix (D3). All val
 | `org:cost-center` | `CC-4410` | Platform (from product) | Yes | Billing (activated as a cost allocation tag) |
 | `org:data-classification` | `confidential` | User (≤ product ceiling) | Yes | SCP gates (e.g. not in sandbox) |
 | `org:managed-by` | `cloudinfra` | Platform | Yes | Marks resources only the platform pipeline may change |
-| `org:share-scope` | `product` | Binder (opt-in) | No | Allows read by other projects in the same product (§4.6) |
+| `org:share-scope` | `none` / `product` / `portfolio` / `organization` | Provider (UI, via infra PR) | No (default `none`) | **Sharing by tags**: who outside the project may use the resource, across accounts (§4.11.1) |
+| `org:share-access` | `read` / `readwrite` / `invoke` / `publish` / `consume` | Provider (UI, via infra PR) | No (default `read`) | What shared consumers may do (§4.11.1) |
 | `org:resilience` | `dr` | Platform (project setting) | Yes | Reporting, cost, DR drill scheduling (§10) |
 | `org:region-role` | `primary` / `secondary` | Platform (per region) | Yes | Operations and failover tooling (§10) |
 | `org:expires-on` | `2026-11-01` | Platform (sandbox only) | Sandbox only | Automatic cleanup in sandbox |
@@ -498,9 +500,9 @@ AWS support for `aws:ResourceTag` / `aws:RequestTag` **varies by service and by 
 | Action lacks tag-condition support (some describe/list calls, some bucket-configuration actions) | Name pattern `${aws:PrincipalTag/org:project}--*` (still built from the role's tag, so still tag-driven) |
 | Action supports no resource scoping at all (e.g. some `Describe*` calls) | Allowed read-only, at account+region scope, only in platform-owned roles, **never** in generated app roles |
 
-**Sharing within a product (opt-in):** an `iam.access` connection to a resource in *another* project of the *same* product is allowed only if:
-1. The target resource carries `org:share-scope=product`.
-2. The access is read-only (unless an approved exception exists).
+**Sharing with other projects** is done by share tags or by agreement (§4.11). For example, an `iam.access` connection to a resource in *another* project of the *same* product is allowed when:
+1. The target resource carries `org:share-scope=product` (or wider).
+2. The access is within its `org:share-access` level (read by default).
 3. The boundary condition `aws:ResourceTag/org:product = ${aws:PrincipalTag/org:product}` holds.
 
 Access across products is not offered by the platform; it goes through a separate exception process.
@@ -616,7 +618,7 @@ Design notes:
 | Lambda → S3 / DynamoDB / SQS / SNS / Secrets / KMS of the same project + environment | Allowed (exact actions from the connection) |
 | Lambda → same resource type of **another project** (ARN pasted in code) | **Denied** by layers 1, 2 and 3 |
 | DEV component → STAGE resource of the same project | **Denied** (environment tag differs; also a different account) |
-| Opt-in sharing within a product (§4.6) | Resource policy gets one extra **Allow-path** exception: principals with the same `org:product` *and* the target tagged `org:share-scope=product`, **read-only actions only**, added only when such a connection exists |
+| Sharing with other projects / accounts | **By tags** (§4.11.1): the resource policy allows principals whose `org:product` / `org:portfolio` tags match the resource's `org:share-scope`, same environment, inside the organization, limited to `org:share-access` actions. **By agreement** (§4.11.2) for anything else |
 | Humans (Identity Center) | Data access follows the environment policy: e.g. read for the product's engineers in DEV/TEST via an explicit, read-only exception on `org:product`; no human data access in PROD except break-glass |
 | Network paths (DB, cache, OpenSearch in a VPC) | Security groups only allow ingress from the security groups of same-project components (`network.access`, §6.8.4). Databases also use IAM auth / per-project secrets, which are themselves tag-protected |
 | Service without resource policies **and** without tag-condition support | Layer 1 uses exact ARNs, layer 2 uses the principal-tag-derived name pattern, and the catalog marks the service "name-scoped"; such services need platform review before enablement (§6.8.2) |
@@ -632,11 +634,80 @@ Design notes:
 - **CI cross-project tests (P1):** two projects are deployed in the platform test account. Tests assert that project A's Lambda **cannot** read, write or invoke project B's bucket, queue, table, secret or function, even with the exact ARN, and **can** use its own.
 - **IAM Access Analyzer** (external and internal access findings) runs in every account. Any access path to a project resource from a principal outside that project raises a finding to the platform.
 
-### 4.11 Cross-account access: sharing agreements
+### 4.11 Sharing across projects and accounts: by tags or by agreement
 
-Infrastructure created by the platform often needs assets in **other AWS accounts**, for example a central data-lake bucket, a shared SQS queue owned by another team, or another product's KMS-encrypted dataset. This is supported, and it **keeps the tag-based isolation of §4.10**: cross-account access exists only through an explicit, approved **sharing agreement**, and the platform generates the permissions on **both sides** from it.
+Infrastructure created by the platform often needs assets owned by **other projects**, in the same or in **other AWS accounts**: a central data-lake bucket, a shared SQS queue, another product's KMS-encrypted dataset. Sharing is supported in two ways, and both **keep the tag-based isolation of §4.10**:
 
-#### 4.11.1 Sharing agreement
+| Way | How it is decided | Approval per consumer | Use for |
+|---|---|---|---|
+| **1. Sharing by tags** (default) | The provider puts **share tags** on its resource. Any consumer whose own tags match the share rule gets access, in any account of the organization. | **No.** The provider decided once, through the tag; consumers connect self-service | Common, predictable sharing: within a product, within a portfolio, organization-wide reference data |
+| **2. Sharing by agreement** | An explicit record naming one provider resource and one consumer | **Yes** (provider owner, plus security where required) | Anything the tag rules cannot express: one specific consumer, write access across products, outside the organization, exceptions |
+
+In both cases the platform **generates** the permissions on both sides. Nobody hand-edits a policy.
+
+#### 4.11.1 Sharing by tags
+
+**Share tags on the provider resource** (set in the platform UI, deployed through the provider's normal infrastructure PR, gates and approvals):
+
+| Tag | Values | Meaning |
+|---|---|---|
+| `org:share-scope` | `none` (default) \| `product` \| `portfolio` \| `organization` | **Who** may use the resource: principals whose `org:product` (or `org:portfolio`) equals the resource's value, or any platform principal in the organization |
+| `org:share-access` | `read` (default) \| `readwrite` \| `invoke` \| `publish` \| `consume` | **What** they may do; mapped to exact actions per service (§6.8.1) |
+| `org:environment` (existing) | — | Sharing by tags is **always same-environment**: the consumer's `org:environment` must equal the resource's. Never configurable by tag. |
+
+**The rule AWS evaluates** for a consumer principal *P* and a provider resource *R*:
+
+> allow the `org:share-access` actions **if** P's `org:environment` = R's `org:environment` **and** P is in the organization (`aws:PrincipalOrgID`) **and** (`org:share-scope = product` and P's `org:product` = R's `org:product`) **or** (`org:share-scope = portfolio` and P's `org:portfolio` = R's `org:portfolio`) **or** (`org:share-scope = organization`)
+
+The rule needs no consumer ARNs or account IDs. It works **across accounts**, because AWS evaluates the caller's principal tags (`aws:PrincipalTag/...`) in the resource account's policy. A new project or account in the same product gets access automatically, and a project that moves to another product loses it automatically.
+
+**What the platform generates:**
+
+| Side | Generated from the tags |
+|---|---|
+| **Provider resource policy** (S3, SQS, SNS, KMS, Secrets Manager, DynamoDB, EventBridge, Lambda, ECR, Kinesis, OpenSearch, …) | An Allow for the share rule above, with the resource's **own tag values written in** at synthesis time (e.g. `aws:PrincipalTag/org:product = "pr-invoicing"`). The §4.10 deny statements are widened only to the same scope. For `read` sharing, an extra deny blocks every write action for anyone but the owning project. |
+| **Provider KMS key** (if the data is encrypted) | Key policy grant for the same share rule, limited with `kms:ViaService` to the service in use |
+| **Cross-account role** (pattern B, for services without resource policies) | Trust policy: any principal in the organization **with matching `org:product` / `org:portfolio` and `org:environment` tags**, instead of named consumer roles |
+| **Consumer side** | When a consumer draws a connection to a shared resource (picked from the **shareable-resource catalog**, which is built from share tags), the platform checks the tags match, then generates the exact-ARN statements and the contract binding **without asking the provider**. The consumer's boundary allows cross-project access only to resources whose `aws:ResourceTag/org:share-scope` and product/portfolio match the consumer's tags (where the service supports resource-tag conditions), and only inside the organization. |
+
+**Example: generated statements for a bucket tagged `org:product=pr-invoicing`, `org:share-scope=product`, `org:share-access=read`, `org:environment=prod` (illustrative):**
+
+```json
+[
+  { "Sid": "ShareByTagRead", "Effect": "Allow", "Principal": "*",
+    "Action": ["s3:GetObject", "s3:ListBucket"],
+    "Resource": ["arn:aws:s3:::invoice-ingest--uploads-555555555555-us-east-1",
+                 "arn:aws:s3:::invoice-ingest--uploads-555555555555-us-east-1/*"],
+    "Condition": { "StringEquals": { "aws:PrincipalOrgID": "o-exampleorg",
+                                     "aws:PrincipalTag/org:product": "pr-invoicing",
+                                     "aws:PrincipalTag/org:environment": "prod" } } },
+  { "Sid": "DenyOutsideShareScope", "Effect": "Deny", "Principal": "*", "Action": "s3:*",
+    "Resource": ["arn:aws:s3:::invoice-ingest--uploads-555555555555-us-east-1",
+                 "arn:aws:s3:::invoice-ingest--uploads-555555555555-us-east-1/*"],
+    "Condition": { "StringNotEquals": { "aws:PrincipalTag/org:product": "pr-invoicing" },
+                   "BoolIfExists": { "aws:PrincipalIsAWSService": "false" } } },
+  { "Sid": "DenyWritesExceptOwner", "Effect": "Deny", "Principal": "*",
+    "Action": ["s3:PutObject", "s3:DeleteObject", "s3:PutObjectAcl"],
+    "Resource": "arn:aws:s3:::invoice-ingest--uploads-555555555555-us-east-1/*",
+    "Condition": { "StringNotEquals": { "aws:PrincipalTag/org:project": "invoice-ingest" },
+                   "BoolIfExists": { "aws:PrincipalIsAWSService": "false" } } }
+]
+```
+
+The environment deny statement from §4.10.2 stays unchanged, and the service-linked-role and break-glass exceptions apply as before.
+
+**Guardrails on share tags:**
+- Share tags are `org:*` tags, so **only the platform pipeline can set or change them** (SCP §4.7). Changing a share tag is an infrastructure change with the normal gates and approvals.
+- **Classification limits** (defaults, configurable, D37):
+  - `public`/`internal` data: any scope.
+  - `confidential`: up to `product`.
+  - `restricted`: `none`, so agreements only.
+- **Extra approval** from a security reviewer when widening scope beyond `product` or granting anything other than `read`.
+- **Tag Policies** enforce the allowed values. The **shareable-resource catalog** in the UI lists every resource with a share scope, its owner, access level and classification.
+- **IAM Access Analyzer:** archive rules are generated from the share tags, so expected access (e.g. "principals in o-exampleorg with product pr-invoicing, read") is archived automatically, and anything else alerts.
+- **Revoking** = setting `org:share-scope=none`. The next deploy regenerates the policies and access stops for everyone at once. The consumers' connections are flagged in their projects.
+
+#### 4.11.2 Sharing by agreement (explicit, for everything tags don't cover)
 
 A sharing agreement is a record in the platform registry, created and approved in the UI:
 
@@ -656,7 +727,7 @@ A sharing agreement is a record in the platform registry, created and approved i
 - **Least privilege:** exact actions for the access level, exact resource ARNs, optional prefix.
 - **Both sides consent:** nothing is generated until the provider owner approves.
 
-#### 4.11.2 How access is granted (per service)
+#### 4.11.3 How access is granted (per service)
 
 | Pattern | When | Provider side (generated) | Consumer side (generated) |
 |---|---|---|---|
@@ -669,18 +740,18 @@ A sharing agreement is a record in the platform registry, created and approved i
 
 **Non-platform resources** (in accounts the platform does not manage): the platform generates the consumer side. It gives the provider owner a **ready-to-apply policy snippet**. A readiness check (a harmless read such as `HeadBucket` / `GetQueueAttributes` from the consumer role) confirms the grant before the agreement is marked active.
 
-#### 4.11.3 How it fits the four isolation layers (§4.10)
+#### 4.11.4 How sharing fits the four isolation layers (§4.10)
 
 | Layer | Change for an approved agreement |
 |---|---|
 | 1. Consumer runtime role | Gets statements for the provider's exact ARNs and actions (pattern A) or for `sts:AssumeRole` on one role (pattern B). **Generated only from an active agreement**; the linter rejects any other cross-account statement. |
 | 2. Permissions boundary | Allows cross-account access only to resources **inside the organization** (`aws:ResourceOrgID`), and role assumption only to roles tagged `org:share-consumer = ${aws:PrincipalTag/org:project}`. Everything else stays same-project only. |
-| 3. Provider resource policy | Its deny-other-projects statements list **only** its own project plus approved consumers (account + project + environment), and a precise Allow is added per agreement. |
+| 3. Provider resource policy | **By tags:** one Allow for the share rule, with the deny statements widened to the share scope only. **By agreement:** the deny statements list only the owning project plus approved consumers (account + project + environment), and a precise Allow is added per agreement. |
 | 4. SCP data perimeter | Platform principals cannot access resources outside the organization, and resource policies cannot grant to principals outside the organization, unless an exception is registered (§4.7). |
 
 A consumer can therefore reach exactly the agreed resource, with exactly the agreed actions, from exactly the agreed component and environment. No other project in either account gains anything.
 
-#### 4.11.4 Workflow in the UI
+#### 4.11.5 Agreement workflow in the UI
 
 ```mermaid
 sequenceDiagram
@@ -702,7 +773,7 @@ sequenceDiagram
   UI->>UI: readiness check passes → agreement ACTIVE
 ```
 
-- **Shareable resources:** a provider marks resources as `shareable` in its project (with allowed access levels). They appear in a searchable catalog in the UI for consumers.
+- **Shareable resources:** the catalog shows resources with share tags (self-service connect, §4.11.1) and resources marked as available by agreement (request and approve).
 - **Contract:** the consumer's contract (§9.4) gets an `external` section with the provider ARN, region, KMS key ARN and access level. Application code reads it like any other binding.
 - **Revocation and expiry:** revoking (by either owner or security) or expiry opens PRs that remove both sides. Expiry warnings go out 30 and 7 days before.
 - **DR/HA (§10):** agreements cover both regions of each side. Resource policies are generated in every region where the provider resource or replica exists, and the contract lists per-region ARNs.
@@ -2151,6 +2222,7 @@ CloudInfraAutomation/
 | D34 | Cross-account outside the AWS Organization | Keep off by default with a security exception per partner account (recommended), or allow certain partner accounts by default? |
 | D35 | Sharing agreement policy | Default expiry (12 months?) and recertification (quarterly?); does PROD sharing always need a security reviewer, or only for `confidential`+ data? |
 | D36 | Cross-environment sharing | Allow same-tier only (recommended), or permit specific exceptions such as PROD → non-PROD read of anonymized data? |
+| D37 | Share-tag limits | Maximum `org:share-scope` per data classification (default: public/internal any, confidential ≤ product, restricted none) and whether `organization` scope is allowed at all? |
 
 ---
 
