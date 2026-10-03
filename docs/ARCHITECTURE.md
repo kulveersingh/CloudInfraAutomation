@@ -1,10 +1,11 @@
 # CloudInfraAutomation — Architecture
 
-**Status:** Draft v2.4 for review. No code is written until this design is approved.
+**Status:** Draft v2.5 for review. No code is written until this design is approved.
 **Date:** 2026-10-03
 **Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9).
 
 **Changes in v2:** added the org registry and tagging strategy (§4); permissions based on tags (§4.5–4.8); multi-account, five-environment model (§5); promotion pipeline (§8). Payload, provisioning, security and scaling sections are updated to match.
+**Changes in v2.5:** infrastructure and solution code are now explicitly independent (§9.9): contract-first development, placeholder artifacts, expand → migrate → contract changes, optional bindings, local/ephemeral testing, and a responsibilities table. Product teams no longer have to sign off on infrastructure changes.
 **Changes in v2.4:** added developer consumption (§9): infrastructure contract published per environment, application repos linked to compute slots, golden-path build/deploy workflows per language and compute type (Lambda, ECS, EKS, Step Functions), and least-privilege application deploy roles. Sections 9–16 renumbered to 10–17.
 **Changes in v2.3:** STAGE and PROD require GitHub reviewer approval before deployment, using a plan → approve → apply-reviewed-change-set flow that cannot be turned off (§8.3). Added a layered quality-gate strategy for STAGE and PROD (§8.4). Added the release console: promotion and approval workflow in the platform UI, with approvals submitted to GitHub as the reviewer (§8.5).
 **Changes in v2.2:** the hierarchy is now three levels, Portfolio → Product/Platform → Project. The team level and the `org:team` tag are removed.
@@ -58,6 +59,7 @@
 | **Build once, deploy many** | The same artifact (zip + template) moves DEV → TEST → STAGE → PROD. Only parameters change per environment. |
 | **Deterministic over generative** | Templates and IAM come from a versioned, tested catalog of building blocks, never from free-form LLM output. |
 | **Short-lived credentials everywhere** | OIDC for GitHub Actions → AWS, GitHub App installation tokens, STS AssumeRole between accounts. No long-lived keys by default. |
+| **Infrastructure and solution code are independent** | Every solution has two parts: infrastructure (platform-owned) and solution code (product-owned). They live in separate repos with separate pipelines, versions, release schedules and approvals, joined only by a versioned contract. Neither team waits for the other (§9.9). |
 | **Async and safe to retry** | Long-running provisioning is orchestrated as a series of steps, each safe to repeat (keyed by the request ID), with undo steps for anything that fails partway. |
 
 ---
@@ -1137,8 +1139,12 @@ Existing connection kinds still apply (e.g. `s3.notify` → `lambda.function`, `
 
 **Contract versioning and compatibility:**
 - `contractVersion` changes only for schema changes.
-- Each infra change is classified by the gate service as **additive** (new slot/resource/value) or **breaking** (removed or renamed slot/resource, changed runtime family, changed container name). Breaking changes require acknowledgment from the owners of the bound application repos before the infra PR can merge.
-- Application deploys check the contract in the target environment: every slot and binding the app needs must be present. Otherwise the deploy stops with *"DEV infrastructure does not yet provide `uploads` — promote infra first."* Infrastructure and applications are **promoted independently**, and the check keeps them compatible.
+- Each infra change is classified by the gate service as **additive** (new slot/resource/value) or **breaking** (removed or renamed slot/resource, changed runtime family, changed container name).
+- **Additive changes always flow freely.** Breaking changes follow the **expand → migrate → contract** rule (§9.9.4), so the platform team never has to wait for a product team to sign off, and nothing a deployed application uses disappears from under it.
+- Application deploys check the contract in the target environment:
+  - A **required** value that is missing stops that deploy with a clear message (*"DEV infrastructure does not yet provide `uploads`"*). Only the deploy stops; development carries on.
+  - **Optional** values (§9.5) never block a deploy.
+  - Infrastructure and applications are **promoted independently**.
 
 ### 9.5 Linking an application repo: `.platform/app.yaml`
 
@@ -1152,7 +1158,8 @@ components:
     type: lambda.function
     language: python               # python | java | go | rust | nodejs | container
     path: services/processor
-    requires: [uploads]            # contract values this code needs
+    requires: [uploads]            # must exist in the target env, or this deploy waits
+    optional: [archive]            # used if present; code handles absence (feature flag)
   - slot: api
     type: ecs.service
     language: java
@@ -1245,6 +1252,88 @@ For application deploys, the "change set" the reviewer approves is a **deploy di
 | `CONTRACT_PARAMETER` (`/platform/projects/{project}/contract`) | Repository |
 
 **Repo visibility:** infrastructure repos are **internal** (readable by everyone in the GitHub org, writable only through the platform), so developers can read the template and the contract. Application repos follow the product's normal policy.
+
+### 9.9 Working in parallel: how platform and product teams stay independent
+
+Every solution has **two parts**:
+1. **Infrastructure:** owned by the platform team. It is generated and changed through the platform and lives in the infrastructure repo.
+2. **Solution code:** owned by the product team. It is written by developers in application repos and deployed onto the infrastructure.
+
+The goal is that **neither team ever waits for the other**. The design achieves this with six mechanisms.
+
+#### 9.9.1 Separate everything except the contract
+
+| | Infrastructure | Solution code |
+|---|---|---|
+| Repo | `{project}-infra` (platform-generated) | one or more application repos |
+| Owner | Platform team (product team can request changes via the UI) | Product team |
+| Pipeline | Infra pipeline (§8) | Golden-path app pipelines (§9.6) |
+| Version | `infraVersion` (semver, tagged in the infra repo) | each app's own version |
+| Release schedule | Independent | Independent |
+| Approvals/gates | Own GitHub environments + gates | Own GitHub environments + gates |
+| AWS role | Infra deploy role + CFN execution role | App deploy role (only bound slots' artifacts) |
+| **Shared** | **The contract only** (§9.4) | **The contract only** |
+
+- **Neither pipeline ever triggers the other.** An infra deploy never redeploys code; an app deploy never changes infrastructure.
+- **Each side owns its own fields, enforced by IAM, not by convention.** Infra deploys never touch app-owned fields (Lambda code/alias version, ECS task definition, Kubernetes manifests, ASL definitions). App deploy roles cannot touch infra-owned fields (§9.7). Drift checks ignore the other side's fields.
+
+#### 9.9.2 Contract first: product teams can start before infrastructure exists
+
+The contract exists in two forms:
+
+| Form | When it exists | Used for |
+|---|---|---|
+| **Declared contract** | As soon as the project (or a change) is designed in the platform UI. It is generated from `infra.json` **before anything is deployed**. | Developers code against slot names, env var names and value types on day one |
+| **Deployed contract** | Per environment, after each infra deploy (SSM, §9.4) | Actual values used by deploys and running code |
+
+The platform UI shows both, side by side per environment ("declared, not yet deployed in TEST"). A product team can build, unit-test and even merge code that uses a resource the platform team has not deployed yet.
+
+#### 9.9.3 Placeholders: infrastructure can ship before any solution code
+
+Every compute slot is created with a **platform placeholder artifact**:
+- a bootstrap Lambda package for each runtime that returns a clear "no application deployed" response;
+- a placeholder container image with a health endpoint.
+
+So the platform team can deploy, test and promote infrastructure to every environment with no application code present, and alarms and health checks still pass. When the product team's first deploy lands, it simply replaces the placeholder.
+
+#### 9.9.4 Changing the contract without blocking anyone (expand → migrate → contract)
+
+| Change | What happens | Who waits |
+|---|---|---|
+| **Additive** (new resource, slot, value, permission) | Deploys and appears in the contract; apps start using it when they're ready | Nobody |
+| **Rename / replace** | **Expand:** the new value is added next to the old one; the old one is marked `deprecated` (with a removal-not-before date) in the contract. **Migrate:** product teams switch on their own schedule; the platform UI and PR comments remind them. **Contract:** the old value is removed automatically once no deployed app version in that environment still requires it. | Nobody. Removal waits for usage to reach zero, not for a person. |
+| **Remove** | Same as above: deprecate → removal when unused | Nobody |
+| **Emergency removal** (e.g. security issue) | Platform admin override, recorded; affected app owners notified | Explicit exception |
+
+The platform knows exactly which value each **deployed** app version requires, because every app deploy records its `requires` list in the release record per environment. "Unused" is therefore a fact the platform can check, not a guess.
+
+#### 9.9.5 Developing and testing solution code without the real infrastructure
+
+| Need | Mechanism |
+|---|---|
+| Unit tests | Language templates include fakes/mocks for the AWS SDK calls they use; tests read the same env vars the deploy injects |
+| Local integration | `platform dev up` starts **LocalStack** (or service emulators) configured from the **declared contract**: same bucket/table/queue names and env vars |
+| Real AWS without waiting | **Ephemeral sandbox environments**: the platform deploys the declared infrastructure into the sandbox account with a TTL (`org:expires-on`) for a feature branch, without touching shared environments |
+| Contract tests | The golden-path build checks the app's `requires`/`optional` against the declared contract (catches typos and stale names before any deploy) |
+
+#### 9.9.6 Requests between teams are asynchronous
+
+- **Product team needs new infrastructure:** "Change infrastructure" in the platform UI creates a **change request**. It immediately produces an updated **declared contract** (so developers can carry on) and a PR on the infra repo for the platform team. The app uses the new value as `optional` (behind a feature flag) until it is deployed, then switches it to `requires`.
+- **Platform team improves infrastructure** (new runtime version, encryption change, shared cluster upgrade): it ships when ready. Additive changes need no coordination. Anything that affects apps goes through §9.9.4.
+- **Visibility for both sides:** a per-project **compatibility view** in the platform UI shows, for each environment, the deployed infra version, the deployed app versions, and whether each app's needs are met, waiting or deprecated.
+
+#### 9.9.7 Responsibilities
+
+| Activity | Platform team | Product team |
+|---|---|---|
+| Catalog, building blocks, golden-path workflows, language templates | **Owns** | Consulted |
+| Infra repo for a project (template, roles, wiring) | **Owns / approves** | Requests changes via UI |
+| Contract schema and deprecation policy | **Owns** | Informed |
+| Solution code, build, tests, app releases | Informed | **Owns** |
+| App deploy approvals (STAGE/PROD) | — | **Owns** (product reviewers) |
+| Infra deploy approvals (STAGE/PROD) | **Owns** (with product reviewers optional) | Consulted |
+| Incident: app bug | Supports | **Owns** |
+| Incident: infra/platform fault | **Owns** | Supports |
 
 ---
 
@@ -1439,6 +1528,8 @@ CloudInfraAutomation/
 | D21 | Languages in v1 | Python, Java, Go, Rust, Node.js all at once, or start with two (e.g. Python + Java)? |
 | D22 | Developer portal | Platform UI only, or also Backstage (`catalog-info.yaml` generated either way)? |
 | D23 | Networking for ECS/EKS | Shared VPC from the landing zone (subnets/SGs published to SSM by the network team)? |
+| D24 | Deprecation window | Minimum time a deprecated contract value stays after it becomes unused in an environment (e.g. 0 days in DEV/TEST, 14 days in STAGE/PROD)? |
+| D25 | Infra approvals | Should product reviewers also approve infra deploys to STAGE/PROD, or the platform team only? |
 
 ---
 
