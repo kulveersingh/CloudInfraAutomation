@@ -2043,7 +2043,7 @@ CloudInfraAutomation/
 | D7 | Registry source of truth | **Decided:** the platform registry is the master (CSV/REST import available) |
 | D8 | Sandbox model | Shared sandbox account per portfolio with 14-day TTL, or per-product sandbox accounts? |
 | D9 | Approvers | **Decided:** STAGE and PROD require GitHub reviewer approval before deployment. Open: which groups review each (default QA for STAGE; product owner + change management for PROD), and is a built-in change record required for PROD? |
-| D10 | Regions | Single region in v1, or multi-region from the start? |
+| D10 | Regions | **Decided:** multi-region from the start: single region, DR or HA per project, any region pair chosen in the UI (§10) |
 | D11 | Onboarded today? | Do Control Tower / OUs per environment already exist, or does `org/` need to create the OU structure too? |
 | D12 | LLM | Exclude from v1, or NL → draft payload only? |
 | D13 | Who can configure environments and accounts | **Platform admins only, with a second-person approval** for changes to production-tier environments. Normal users see environments read-only. (If you meant every user should configure them, note that whoever binds an account decides where code deploys.) |
@@ -2062,11 +2062,11 @@ CloudInfraAutomation/
 | D26 | Open-source license policy | Allow Apache-2.0, MIT, BSD, MPL-2.0 and LGPL (as libraries); exclude AGPL and source-available licenses unless approved? |
 | D27 | Tier 1 services at launch | Confirm the proposed curated list (§6.8.2), or start smaller (e.g. compute + integration + Aurora/RDS PostgreSQL + DynamoDB) and grow? |
 | D28 | Commercial DB engines | Exclude RDS for Oracle / SQL Server (default, per open-source policy), or allow them? |
+| D29 | Network ownership | Does the landing zone provide shared VPCs with database/private subnets per environment account, or must the platform create project VPCs? |
 | D30 | Region pairs | **Decided:** any two different regions, chosen in the UI per project; default pre-fill us-east-1 / us-east-2; admins manage the enabled-region list |
 | D31 | DR account model | Same account for both regions of an environment (default), or a separate DR account per environment? |
 | D32 | DR defaults | Pilot light (default) or warm standby for DR projects? QA/STAGE mirrors PROD's mode (default)? DR drill frequency (default monthly) and G5 recency (default 30 days)? |
 | D33 | Cognito and other non-replicating services | Exclude from DR/HA projects, or allow with a documented recovery pattern? |
-| D29 | Network ownership | Does the landing zone provide shared VPCs with database/private subnets per environment account, or must the platform create project VPCs? |
 
 ---
 
