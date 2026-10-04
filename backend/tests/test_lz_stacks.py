@@ -520,3 +520,9 @@ def test_disabled_accounts_are_not_vended():
 def test_edited_design_stays_within_the_scp_quota():
     design = edited(EDITS)[0]
     assert ScpQuotaRule().problems(GuardrailPlan.for_design(design, CATALOG)) == []
+
+
+def test_bootstrap_also_deploys_to_root_level_custom_ous():
+    stack_set = next(iter(resources(stack("lz-bootstrap", EDITS), "AWS::CloudFormation::StackSet").values()))["Properties"]
+    targets = stack_set["StackInstancesGroup"][0]["DeploymentTargets"]["OrganizationalUnitIds"]
+    assert targets[-1] == {"Fn::ImportValue": "acme-lz-OuCustomDataLabId"}
