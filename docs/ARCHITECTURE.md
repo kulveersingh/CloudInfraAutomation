@@ -2613,7 +2613,7 @@ sequenceDiagram
 
 ## 20. Landing zone workflow: AWS Organizations OU structure with Control Tower controls
 
-**Status: design for review (rev 3). No code until approved.** Mock: the *Landing zone* page in `mock-ui/index.html`.
+**Status: rev 3 approved and implemented; §20.11 (OU tree editor) approved with changes (E1, E4).** Mock: the *Landing zone* page in `mock-ui/index.html`.
 
 **Inputs:**
 - AWS Prescriptive Guidance *OU structure in regulated AWS landing zones* (the attached document).
@@ -2812,3 +2812,125 @@ API (admin role required): `GET/PUT /v1/admin/landing-zone/questionnaire`, `POST
 | L6 | IAM Identity Center managed by Control Tower | Recommend **yes**, with one permission set per role per environment OU |
 | L7 | Inspection for allowed cross-environment flows | Recommend **AWS Network Firewall** in the egress/inspection VPC |
 | L8 | Landing Zone Accelerator, AFT or CfCT add-ons | Recommend **none**; native CloudFormation types cover this |
+
+### 20.11 OU tree editor
+
+**Status: approved with changes (E1 allows root-level custom OUs; E4 disables accounts instead of removing them).**
+
+After the questionnaire proposes a structure, a platform admin can adjust it on the Review step before requesting approval:
+- add custom OUs, under the root or inside an environment, Infrastructure or another custom OU
+- add accounts, disable generated workload accounts, and move accounts
+- rename, move and remove the custom OUs
+
+The fixed rules (§20.1) still hold. Anything the questionnaire decides (environments, grouping, compliance scopes, shared accounts, optional OUs) is still changed in the questionnaire, not in the editor.
+
+#### Edits are stored as an ordered list, applied on top of the questionnaire
+
+The design keeps storing the **answers**, plus an ordered list of **tree edits**. The final structure is always:
+
+```
+designer(answers)  →  proposed tree  →  apply edit 1 … edit n  →  final tree  →  validator, stacks, diagram
+```
+
+- Changing an answer later keeps the edits, and they are applied again to the new proposal. Storing a finished tree instead would throw away every edit whenever an answer changed.
+- An edit that no longer fits is **reported as a problem, never dropped silently**. For example: "Edit 3 (rename 'Payments'): OU 'payments' no longer exists." The admin undoes or fixes that edit. Request approval stays disabled while any problem remains.
+- Edits are versioned with the design, so the approver sees the questionnaire answers and each manual change.
+
+#### Isolation domains
+
+Every OU belongs to one **isolation domain**. Accounts and custom OUs can move only inside their own domain. This keeps R1: an environment OU holds only its own environment's accounts.
+
+| Domain | OUs in it | Isolation |
+|---|---|---|
+| An environment (DEV, PROD, PCI-PROD, …) | The environment OU and the custom OUs below it | Inherited from the environment OU: SCPs, RCP isolation (the org-path conditions already use `…/ou-…/*`, §20.5), the RAM share of the environment's shared VPC (§20.4) and the bootstrap StackSet target |
+| Infrastructure | The Infrastructure OU and the custom OUs below it | Inherited from Infrastructure |
+| **A root-level custom OU** (E1) | That OU and the custom OUs below it | **Its own boundary.** The OU gets the baseline SCP, the chosen controls profile, and its own isolation RCP and SCP (no access to other OUs' resources or roles), like an environment OU. It gets no shared VPC and no Transit Gateway route; network access for it is a later change. |
+
+#### What can be edited
+
+| OU | Rename / move / remove | Add child OU | Accounts |
+|---|---|---|---|
+| Root (organization) | n/a | **Yes**: a root-level custom OU (its own domain) | None |
+| Security (Control Tower) | No (R3) | No | Fixed (Log Archive, Audit, Security Tooling come from step 4) |
+| Sandbox (Control Tower) | No | No | Fixed (from step 10) |
+| Environment OUs (DEV … PROD, compliance STAGE/PROD) | No (names from step 2, R1) | **Yes** | Add; **disable or enable** the generated workload accounts; move within the environment |
+| Prod / NonProd parents, compliance OUs | No (from the grouping and compliance answers) | No | None |
+| Infrastructure | No | **Yes** | Add custom accounts; shared accounts are chosen in step 5 |
+| Policy Staging, Exceptions, Suspended, Business Users, Automations | No (step 11) | No | Fixed |
+| **Custom OUs** | **Rename; move within its domain; remove only when empty** | Yes (up to the 5-level depth limit) | Add, move within the domain; disable or enable; remove accounts that were added in the editor |
+
+**Disable, not remove (E4).** A generated workload account can't be removed, only **disabled**:
+- A disabled account stays in the design and is shown greyed out in the tree and the diagram.
+- It is not vended (left out of `lz-accounts`), gets no network registration, and doesn't count toward problems.
+- **Enable** brings it back. An account added in the editor can still be removed, since removing it just takes back the add.
+
+**Move first, then remove.** A custom OU can be removed only when it has no child OUs and no accounts, including disabled ones. Until then, the Remove action is disabled with the hint: "Move its accounts and child OUs to another OU first." The server refuses the edit with the same message.
+
+Each OU in the API response carries the edits it allows, so the UI shows only valid actions and doesn't repeat these rules:
+- OU level: `"allowed_edits": ["add_child", "add_account", "rename", "move", "remove"]`
+- Each account: `{"name", "enabled", "added", "allowed_edits": ["move", "disable" | "enable", "remove"]}`
+- For `remove`, a non-empty custom OU lists it under `"blocked_edits": {"remove": "Move its accounts and child OUs to another OU first."}`
+
+#### Edit operations (one class per operation, registered by name: Open/Closed)
+
+| `op` | Fields | Effect | Refused when |
+|---|---|---|---|
+| `add_ou` | `parent` (OU key, or `null` for the root), `name` | Adds a custom OU with key `custom_<slug(name)>`. It joins its parent's domain, or starts a new domain at the root. | Parent doesn't allow `add_child`; name already used; depth over 5 |
+| `rename_ou` | `ou`, `name` | Renames a custom OU | Not a custom OU; name already used |
+| `move_ou` | `ou`, `parent` | Moves a custom OU | Not custom; the new parent is in another domain, or is the OU itself or one of its children. A root-level custom OU stays at the root. |
+| `remove_ou` | `ou` | Removes a custom OU | Not custom; has child OUs or accounts ("Move its accounts and child OUs to another OU first.") |
+| `add_account` | `ou`, `suffix` | Adds `<org>-<suffix>` with a plus-addressed email, like generated accounts | OU doesn't allow `add_account`; name already used; suffix not 2–40 lowercase letters, digits or hyphens |
+| `disable_account` | `account` | Marks a workload account disabled | Fixed account (Security, Sandbox, shared accounts, Automations); already disabled |
+| `enable_account` | `account` | Re-enables a disabled account | Not disabled |
+| `remove_account` | `account` | Removes an account added in the editor | Not added in the editor (use `disable_account`) |
+| `move_account` | `account`, `ou` | Moves an account | Target is in another domain, or doesn't allow accounts |
+
+The existing rules still apply: unique OU names (`UniqueOuNames`), at most 5 levels deep (`MaximumDepth`), at most 5 SCPs per OU (`ScpQuotaRule`). **New validator rules:** `UniqueAccountNames`, and `AccountsStayInTheirDomain` (a safety net under the edit checks).
+
+#### Backend changes
+
+| Component | Change |
+|---|---|
+| `app/landing_zone/edits.py` | `TreeEdit` base class with `apply(design, namer) -> list[str]` (problems), one subclass per `op`, `TreeEditRegistry`, `TreeEditor.apply(design, edits)` that numbers problems by edit position |
+| `OuNode`, `AccountPlan` | OU: `custom`, `domain`, `allowed_edits()`, `blocked_edits()`, `subtree_accounts()`. Account: `enabled`, `added`, `fixed`. `LandingZoneDesign.accounts()` returns enabled accounts only. |
+| `GuardrailPlan` | A root-level custom OU gets the baseline, isolation and perimeter policies and the profile's controls, like an environment OU |
+| `LandingZoneService` | `_design_of` applies the stored edits after the designer; propose and create take `{answers, edits}` |
+| API | `POST …:propose` and `POST …/designs` bodies become `LandingZoneRequest {answers, edits: TreeEdit[] = []}`, a Pydantic union keyed by `op` (E3). Responses add `edits` to the design, and `allowed_edits` / `blocked_edits` to each OU and account. Accounts become objects. |
+| Migration | `landing_zone_designs.edits` JSON column, default `[]` |
+| Network registration, executor | Use the enabled `subtree_accounts()` of each environment OU, so accounts in child OUs get the shared VPC registered too |
+| Diagram | Disabled accounts are drawn greyed and marked "(disabled)" |
+
+#### UI (Review step)
+
+- After **Propose structure**, the OU tree becomes editable. Each OU row shows only the actions in its `allowed_edits`: **Add OU**, **Add account**, **Rename**, **Move to…**, **Remove**. A blocked action is shown disabled, with its reason. Each account shows **Move to…**, **Disable** / **Enable** or **Remove**. An **Add OU at root** action sits above the tree. Small inline forms, no modal dialogs.
+- Every edit is added to the draft and the structure is **proposed again at once** (E2). The server is the single source of truth for the tree, problems, diagram and files.
+- A **Manual changes (n)** list under the tree shows each edit in plain words ("Added OU Payments under PROD", "Disabled acme-retail-prod"), with **Undo** on each. Problems name the edit they come from.
+- The Approvals detail view lists the manual changes, so the second admin can see what was changed by hand.
+
+#### Testing (TDD, 100% coverage)
+
+- Backend:
+  - one test module per edit class: it applies, and each refusal
+  - `TreeEditor` replay: order, and stale edits become problems
+  - the new validator rules
+  - `allowed_edits` / `blocked_edits` per OU kind and account
+  - root-level custom OU policies and controls
+  - disabled accounts left out of vending and network registration
+  - API round trip (propose and create with edits, stored and returned)
+  - the migration
+- Frontend:
+  - the draft's edit list: add, undo, request payload
+  - each tree action producing the right edit and re-proposing
+  - only allowed actions shown, and blocked actions with their reason
+  - disable and enable
+  - the manual changes list
+  - stale-edit problems blocking Request approval
+
+#### Decisions
+
+| # | Decision | Status |
+|---|---|---|
+| E1 | Custom OUs directly under the root | **Decided: allowed.** Each root-level custom OU is its own isolation domain with baseline, isolation and perimeter policies and the profile's controls. It gets no shared VPC. |
+| E2 | Re-propose after every edit | **Decided: yes.** |
+| E3 | Change the propose/create request body to `{answers, edits}` | **Decided: yes.** |
+| E4 | Removing generated workload accounts | **Decided: disable instead of remove.** Disabled accounts stay in the design, aren't vended, and can be re-enabled. A custom OU is removed only after its accounts and child OUs are moved elsewhere. |
