@@ -1,6 +1,6 @@
 import type {
-  CatalogEntry, CloudFormationType, CostCenterChange, CostCenterSettings, EnvironmentInfo, JobStatus,
-  PlatformApiPort, Portfolio, PreviewResult, ProjectRequest, ProjectSummary, RegionInfo,
+  CatalogEntry, CloudFormationType, CostCenterChange, CostCenterSettings, EnvironmentInfo, Identity, JobStatus,
+  PipelineStage, PlatformApiPort, Portfolio, PreviewResult, ProjectRequest, ProjectSummary, RegionInfo, Release,
 } from "./types";
 
 type Fetcher = (input: string, init: RequestInit) => Promise<Response>;
@@ -14,10 +14,31 @@ export class ApiError extends Error {
 
 /** HTTP client for the platform API. Errors carry the server's message so the UI can show it as-is. */
 export class PlatformApi implements PlatformApiPort {
+  private actorHeaders: Record<string, string> = {};
+
   constructor(
     private readonly baseUrl = "",
     private readonly fetcher: Fetcher = (input, init) => globalThis.fetch(input, init),
   ) {}
+
+  setActor(identity: Identity) {
+    this.actorHeaders = { "X-Actor": identity.name, "X-Roles": identity.roles.join(",") };
+  }
+
+  pipeline(projectName: string) { return this.send<PipelineStage[]>("GET", `/v1/projects/${projectName}/pipeline`); }
+
+  inbox() { return this.send<Release[]>("GET", "/v1/approvals/inbox"); }
+
+  simulateRelease(projectName: string, environment: string, highRisk: boolean) {
+    return this.send<Release>("POST", `/v1/projects/${projectName}/releases:simulate`,
+      { environment, high_risk: highRisk });
+  }
+
+  approveRelease(releaseId: string, comment: string) { return this.decide(releaseId, "approve", comment); }
+
+  rejectRelease(releaseId: string, comment: string) { return this.decide(releaseId, "reject", comment); }
+
+  approveOverride(releaseId: string, comment: string) { return this.decide(releaseId, "approve-override", comment); }
 
   orgRegistry() { return this.send<Portfolio[]>("GET", "/v1/org-registry"); }
 
@@ -51,10 +72,14 @@ export class PlatformApi implements PlatformApiPort {
 
   job(jobId: string) { return this.send<JobStatus>("GET", `/v1/jobs/${jobId}`); }
 
+  private decide(releaseId: string, decision: string, comment: string) {
+    return this.send<Release>("POST", `/v1/releases/${releaseId}:${decision}`, { comment });
+  }
+
   private async send<T>(method: string, path: string, body?: unknown, headers: Record<string, string> = {}) {
     const response = await this.fetcher(`${this.baseUrl}${path}`, {
       method,
-      headers: { "Content-Type": "application/json", ...headers },
+      headers: { "Content-Type": "application/json", ...this.actorHeaders, ...headers },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const payload = await response.json();

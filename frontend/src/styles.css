@@ -101,3 +101,21 @@ tr.indented td:first-child { padding-left: 28px; }
   .grid3, .split, .choice { grid-template-columns: minmax(0, 1fr); }
   .content { padding: 16px; }
 }
+
+/* Release console */
+.identity { margin-top: auto; padding-inline: 18px; display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.identity select { background: var(--rail-active); color: #FFFFFF; border-color: var(--rail-active); }
+.pipe { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+.stage { border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.stage.gated { border-color: var(--warn); }
+.stage .env { font-family: var(--f-display); font-size: 15px; font-weight: 700; display: flex; gap: 8px; align-items: center; }
+.pill { font-family: var(--f-mono); font-size: 10.5px; color: var(--muted); border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; }
+.chip.deployed { background: var(--ok-soft); color: var(--ok); }
+.chip.awaiting_approval, .chip.override_requested, .chip.deploying { background: var(--warn-soft); color: var(--warn); }
+.chip.gate_failed, .chip.rejected, .chip.rolled_back { background: var(--crit-soft); color: var(--crit); }
+.chip.risk-low { background: var(--ok-soft); color: var(--ok); }
+.chip.risk-medium { background: var(--warn-soft); color: var(--warn); }
+.chip.risk-high { background: var(--crit-soft); color: var(--crit); }
+tr.risk-high td:first-child { box-shadow: inset 3px 0 0 var(--crit); }
+tr.risk-medium td:first-child { box-shadow: inset 3px 0 0 var(--warn); }
+.inbox, .decisions { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }

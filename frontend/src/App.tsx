@@ -1,24 +1,48 @@
 import { useState, type ReactNode } from "react";
+import { useApi } from "./api/ApiContext";
+import type { Identity } from "./api/types";
 import { AdminPage } from "./pages/admin/AdminPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
+import { ReleaseConsolePage } from "./pages/releases/ReleaseConsolePage";
 import { NewProjectPage } from "./pages/wizard/NewProjectPage";
 
-type Page = "projects" | "new" | "admin";
+type Page = "projects" | "new" | "releases" | "admin";
+
+/** Local identities until SSO is connected; the API receives them as X-Actor / X-Roles. */
+export const IDENTITIES: Identity[] = [
+  { name: "jordan", label: "Jordan Lee · Developer", roles: ["developer"] },
+  { name: "sam", label: "Sam Patel · Reviewer", roles: ["reviewer"] },
+  { name: "alex", label: "Alex Kim · Platform admin", roles: ["platform-admin", "reviewer"] },
+];
+const DEFAULT_IDENTITY = IDENTITIES[1];
 
 const NAVIGATION: Array<{ page: Page; label: string }> = [
   { page: "projects", label: "Projects" },
   { page: "new", label: "New project" },
+  { page: "releases", label: "Release console" },
   { page: "admin", label: "Admin" },
 ];
 
-const PAGES: Record<Page, (go: (page: Page) => void) => ReactNode> = {
+const PAGES: Record<Page, (go: (page: Page) => void, identity: Identity) => ReactNode> = {
   projects: (go) => <ProjectsPage onNewProject={() => go("new")} />,
   new: () => <NewProjectPage />,
+  releases: (_, identity) => <ReleaseConsolePage key={identity.name} identity={identity} />,
   admin: () => <AdminPage />,
 };
 
 export function App() {
+  const api = useApi();
   const [page, setPage] = useState<Page>("projects");
+  const [identity, setIdentity] = useState(() => {
+    api.setActor(DEFAULT_IDENTITY);
+    return DEFAULT_IDENTITY;
+  });
+  const switchIdentity = (name: string) => {
+    const next = IDENTITIES.find((item) => item.name === name)!;
+    api.setActor(next);
+    setIdentity(next);
+  };
+
   return (
     <div className="app">
       <aside className="rail" aria-label="Main navigation">
@@ -31,8 +55,14 @@ export function App() {
             </button>
           ))}
         </nav>
+        <div className="identity">
+          <label htmlFor="identity">Viewing as</label>
+          <select id="identity" value={identity.name} onChange={(event) => switchIdentity(event.target.value)}>
+            {IDENTITIES.map((item) => <option key={item.name} value={item.name}>{item.label}</option>)}
+          </select>
+        </div>
       </aside>
-      <main className="content">{PAGES[page](setPage)}</main>
+      <main className="content">{PAGES[page](setPage, identity)}</main>
     </div>
   );
 }

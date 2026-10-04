@@ -24,7 +24,7 @@ async function openInboxItem() {
 describe("ReleaseConsolePage", () => {
   it("shows the pipeline of the first project", async () => {
     const { api } = renderConsole();
-    expect(await screen.findByText("QA/STAGE")).toBeInTheDocument();
+    expect(await screen.findByRole("group", { name: "QA/STAGE" })).toBeInTheDocument();
     expect(api.pipeline).toHaveBeenCalledWith("invoice-ingest");
   });
 
@@ -106,7 +106,7 @@ describe("ReleaseConsolePage", () => {
 
   it("opens a release from the pipeline", async () => {
     renderConsole();
-    await user().click(await screen.findByRole("button", { name: "Open release rel-0" }));
+    await user().click(await screen.findByRole("button", { name: "Open DEV release" }));
     expect(screen.getByRole("heading", { name: /Release rel-0/ })).toBeInTheDocument();
   });
 
@@ -191,7 +191,7 @@ describe("ReleaseConsolePage", () => {
 
   it("shows no decisions for finished releases", async () => {
     renderConsole();
-    await user().click(await screen.findByRole("button", { name: "Open release rel-0" }));
+    await user().click(await screen.findByRole("button", { name: "Open DEV release" }));
     expect(screen.queryByRole("button", { name: "Approve and release" })).toBeNull();
   });
 
