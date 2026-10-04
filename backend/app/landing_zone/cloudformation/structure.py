@@ -47,14 +47,15 @@ class StructureStack(StackRenderer):
         resources: dict = {}
         names: list[str] = []
         for ou in context.design.walk():
-            for control in context.guardrails.controls.get(ou.key, []):
-                name = f"Control{pascal(ou.key)}{pascal(control.removeprefix('AWS-GR_').lower())}"
+            for enabled in context.guardrails.controls.get(ou.key, []):
+                name = f"Control{pascal(ou.key)}{enabled.control.id.capitalize()}"
                 depends = [] if ou.created_by_control_tower else [f"Baseline{ou_logical_id(ou)}"]
                 if len(names) >= CONTROL_BATCH:
                     depends.append(names[-CONTROL_BATCH])
-                body = {"Type": "AWS::ControlTower::EnabledControl", "Properties": {
-                    "ControlIdentifier": {"Fn::Sub": f"arn:aws:controltower:${{AWS::Region}}::control/{control}"},
-                    "TargetIdentifier": context.references.arn(ou)}}
+                properties = {"ControlIdentifier": enabled.control.arn, "TargetIdentifier": context.references.arn(ou)}
+                if enabled.parameters:
+                    properties["Parameters"] = [{"Key": key, "Value": value} for key, value in enabled.parameters.items()]
+                body = {"Type": "AWS::ControlTower::EnabledControl", "Properties": properties}
                 resources[name] = {**body, "DependsOn": depends} if depends else body
                 names.append(name)
         return resources

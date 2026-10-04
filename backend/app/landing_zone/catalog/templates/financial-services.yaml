@@ -1,5 +1,6 @@
 id: financial-services
 version: 1
+order: 1
 name: Financial services
 industry: Banking, payments and insurance
 description: >-

@@ -1,9 +1,14 @@
 from abc import ABC, abstractmethod
 from collections import Counter
 
+from app.landing_zone.catalog.resolver import PackResolver
 from app.landing_zone.design import LandingZoneDesign, OuNode
 
 MAX_OU_DEPTH = 5
+# Accounts per OU that Control Tower can register, by number of governed Regions (§20.12.1 F5).
+REGISTRATION_LIMITS = [(15, 1000), (21, 600)]
+REGISTRATION_LIMIT_BEYOND = 680
+STRICT_RESIDENCY = "strict-residency"
 
 
 class DesignRule(ABC):
@@ -82,3 +87,46 @@ def _descendants(ou: OuNode) -> list[OuNode]:
 
 def _depths(nodes: list[OuNode], depth: int) -> list[tuple[OuNode, int]]:
     return [pair for node in nodes for pair in ((node, depth), *_depths(node.children, depth + 1))]
+
+
+class DesignWarning(ABC):
+    """Advice shown with a proposal that doesn't block approval. New advice adds a class."""
+
+    @abstractmethod
+    def warnings(self, design: LandingZoneDesign) -> list[str]:
+        ...
+
+
+class ControlPackWarnings(DesignWarning):
+    """Packs that reach no OU, and proactive controls whose prerequisite isn't resolved yet."""
+
+    def warnings(self, design):
+        return PackResolver.default().resolve(design).warnings
+
+
+class StrictResidencyBlocksReplication(DesignWarning):
+    def warnings(self, design):
+        if STRICT_RESIDENCY not in design.answers.packs():
+            return []
+        return [("Strict residency blocks S3 cross-Region replication, so DR/HA projects in these OUs cannot "
+                 "replicate S3 buckets.")]
+
+
+class OuSizeWithinRegistrationLimit(DesignWarning):
+    def warnings(self, design):
+        regions = len(design.answers.governed_regions)
+        limit = next((size for most, size in REGISTRATION_LIMITS if regions <= most), REGISTRATION_LIMIT_BEYOND)
+        return [f"OU '{ou.name}' plans {len(ou.accounts)} accounts; AWS Control Tower registers OUs of up to {limit} "
+                f"with {regions} governed Regions." for ou in design.walk() if len(ou.accounts) > limit]
+
+
+class DesignAdvisor:
+    def __init__(self, rules: list[DesignWarning]):
+        self._rules = rules
+
+    @classmethod
+    def default(cls) -> "DesignAdvisor":
+        return cls([ControlPackWarnings(), StrictResidencyBlocksReplication(), OuSizeWithinRegistrationLimit()])
+
+    def warnings(self, design: LandingZoneDesign) -> list[str]:
+        return [warning for rule in self._rules for warning in rule.warnings(design)]

@@ -1,5 +1,6 @@
 id: key-management
 version: 1
+order: 6
 name: Key management
 description: Customer-managed KMS keys, key rotation and secret rotation for production data.
 selectors:

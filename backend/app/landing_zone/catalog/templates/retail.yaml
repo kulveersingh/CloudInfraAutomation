@@ -1,5 +1,6 @@
 id: retail
 version: 1
+order: 4
 name: Retail & e-commerce
 industry: Retail, e-commerce and consumer goods
 description: >-

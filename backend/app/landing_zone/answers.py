@@ -3,6 +3,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.landing_zone.catalog.packs import PackRegistry
+
 EnvironmentTier = Literal["sandbox", "nonprod", "prod"]
 InfrastructureAccount = Literal["network", "shared_services", "identity", "backup", "monitoring", "cicd"]
 OptionalOu = Literal["exceptions", "suspended", "individual_business_users"]
@@ -19,17 +21,22 @@ class EnvironmentAnswer(BaseModel):
     tier: EnvironmentTier
 
 
-_SANDBOX = EnvironmentAnswer(id="sandbox", name="Sandbox", tier="sandbox")
-_DEV = EnvironmentAnswer(id="dev", name="DEV", tier="nonprod")
-_TEST = EnvironmentAnswer(id="test", name="TEST", tier="nonprod")
-_UAT = EnvironmentAnswer(id="uat", name="UAT", tier="nonprod")
-_STAGE = EnvironmentAnswer(id="stage", name="STAGE", tier="prod")
-_PROD = EnvironmentAnswer(id="prod", name="PROD", tier="prod")
-
-ENVIRONMENT_PRESETS: dict[int, list[EnvironmentAnswer]] = {
-    4: [_SANDBOX, _DEV, _STAGE, _PROD],
-    5: [_SANDBOX, _DEV, _TEST, _STAGE, _PROD],
-    6: [_SANDBOX, _DEV, _TEST, _UAT, _STAGE, _PROD],
+# The environments a design can include, in pipeline order. STAGE and PROD are always included (§20.12.4).
+ENVIRONMENT_CATALOG: dict[str, EnvironmentAnswer] = {environment.id: environment for environment in [
+    EnvironmentAnswer(id="sandbox", name="Sandbox", tier="sandbox"),
+    EnvironmentAnswer(id="dev", name="DEV", tier="nonprod"),
+    EnvironmentAnswer(id="qa", name="QA", tier="nonprod"),
+    EnvironmentAnswer(id="test", name="TEST", tier="nonprod"),
+    EnvironmentAnswer(id="uat", name="UAT", tier="nonprod"),
+    EnvironmentAnswer(id="perf", name="PERF", tier="nonprod"),
+    EnvironmentAnswer(id="stage", name="STAGE", tier="prod"),
+    EnvironmentAnswer(id="prod", name="PROD", tier="prod"),
+]}
+REQUIRED_ENVIRONMENTS = ("stage", "prod")
+ENVIRONMENT_PRESETS: dict[int, list[str]] = {
+    4: ["sandbox", "dev", "stage", "prod"],
+    5: ["sandbox", "dev", "test", "stage", "prod"],
+    6: ["sandbox", "dev", "test", "uat", "stage", "prod"],
 }
 
 
@@ -77,6 +84,13 @@ class SandboxAnswers(BaseModel):
     expiry_days: int = Field(default=30, ge=1, le=365)
 
 
+class TemplateReference(BaseModel):
+    """The industry template, and its version, that a design started from."""
+
+    id: str
+    version: int
+
+
 class LandingZoneAnswers(BaseModel):
     """Everything the landing zone questionnaire asks. Defaults are the platform's recommendations."""
 
@@ -84,7 +98,8 @@ class LandingZoneAnswers(BaseModel):
     management_email: str = Field(pattern=r"^[^@\s+]+@[^@\s]+\.[^@\s]+$")
     home_region: str
     governed_regions: list[str] = Field(min_length=2)
-    environment_count: Literal[4, 5, 6] = 5
+    template: TemplateReference | None = None
+    environment_ids: list[str] = Field(default_factory=lambda: list(ENVIRONMENT_PRESETS[5]))
     environment_names: dict[str, str] = Field(default_factory=dict)
     grouping: Literal["separate", "prod_nonprod"] = "separate"
     account_model: Literal["environment", "portfolio", "product"] = "portfolio"
@@ -96,14 +111,36 @@ class LandingZoneAnswers(BaseModel):
     sandbox: SandboxAnswers = Field(default_factory=SandboxAnswers)
     optional_ous: list[OptionalOu] = Field(default_factory=lambda: ["exceptions", "suspended"])
     controls_profile: Literal["baseline", "recommended", "regulated"] = "recommended"
+    control_packs: list[str] | None = None
+    pack_parameters: dict[str, dict[str, list[str]]] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def legacy_environment_count(cls, data):
+        """Designs saved before §20.12 chose 4, 5 or 6 environments; map the count to its preset."""
+        if "environment_count" not in data:
+            return data
+        upgraded = dict(data)
+        count = upgraded.pop("environment_count")
+        if count not in ENVIRONMENT_PRESETS:
+            raise ValueError(f"Choose 4, 5 or 6 environments, not {count}.")
+        upgraded.setdefault("environment_ids", list(ENVIRONMENT_PRESETS[count]))
+        return upgraded
 
     def environments(self) -> list[EnvironmentAnswer]:
+        chosen = set(self.environment_ids)
         return [environment.model_copy(update={"name": self.environment_names.get(environment.id, environment.name)})
-                for environment in ENVIRONMENT_PRESETS[self.environment_count]]
+                for environment in ENVIRONMENT_CATALOG.values() if environment.id in chosen]
+
+    def packs(self) -> list[str]:
+        """The control packs to apply: the explicit choice, else the controls profile's packs."""
+        return self.control_packs if self.control_packs is not None else PackRegistry.default().for_profile(
+            self.controls_profile)
 
     @model_validator(mode="after")
     def consistent(self) -> "LandingZoneAnswers":
-        problems = [*self._region_problems(), *self._environment_problems(), *self._network_problems()]
+        problems = [*self._region_problems(), *self._environment_set_problems(), *self._environment_problems(),
+                    *self._network_problems(), *self._pack_problems()]
         if problems:
             raise ValueError(" ".join(problems))
         return self
@@ -116,8 +153,24 @@ class LandingZoneAnswers(BaseModel):
             problems.append("The home region must be one of the governed regions.")
         return problems
 
+    def _environment_set_problems(self) -> list[str]:
+        problems = [f"Unknown environment '{key}'." for key in self.environment_ids if key not in ENVIRONMENT_CATALOG]
+        if len(set(self.environment_ids)) != len(self.environment_ids):
+            problems.append("Each environment can be chosen once.")
+        if not set(REQUIRED_ENVIRONMENTS) <= set(self.environment_ids):
+            problems.append("STAGE and PROD are always included.")
+        if not any(environment.tier == "nonprod" for environment in self.environments()):
+            problems.append("Choose at least one non-production environment.")
+        return problems
+
+    def _pack_problems(self) -> list[str]:
+        known = PackRegistry.default()
+        problems = [f"Unknown control pack '{pack}'." for pack in self.control_packs or [] if not known.knows(pack)]
+        return problems + [f"Parameters for control pack '{pack}', which is not chosen." for pack in self.pack_parameters
+                           if pack not in self.packs()]
+
     def _environment_problems(self) -> list[str]:
-        known = {environment.id for environment in ENVIRONMENT_PRESETS[self.environment_count]}
+        known = set(self.environment_ids)
         problems = [f"Unknown environment '{key}'." for key in self.environment_names if key not in known]
         problems += [f"Environment name '{name}' must be 2–16 letters, digits or hyphens."
                      for name in self.environment_names.values() if not _is_environment_name(name)]

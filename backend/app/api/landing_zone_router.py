@@ -12,6 +12,9 @@ BASE = "/admin/landing-zone"
 class LandingZoneRouter:
     def __init__(self):
         self.router = APIRouter(prefix="/v1", tags=["landing-zone"])
+        self.router.add_api_route(f"{BASE}/templates", self.templates, methods=["GET"])
+        self.router.add_api_route(f"{BASE}/templates/{{template_id}}", self.template, methods=["GET"])
+        self.router.add_api_route(f"{BASE}/control-packs", self.control_packs, methods=["GET"])
         self.router.add_api_route(f"{BASE}:propose", self.propose, methods=["POST"])
         self.router.add_api_route(f"{BASE}/designs", self.create, methods=["POST"], status_code=201)
         self.router.add_api_route(f"{BASE}/designs", self.designs, methods=["GET"])
@@ -20,6 +23,15 @@ class LandingZoneRouter:
         self.router.add_api_route(f"{BASE}/designs/{{design_id}}:submit", self.submit, methods=["POST"])
         self.router.add_api_route(f"{BASE}/designs/{{design_id}}:approve", self.approve, methods=["POST"])
         self.router.add_api_route(f"{BASE}/designs/{{design_id}}:reject", self.reject, methods=["POST"])
+
+    def templates(self, services: Services, actor: CurrentActor) -> list[dict]:
+        return services.landing_zone.templates(actor)
+
+    def template(self, template_id: str, services: Services, actor: CurrentActor) -> dict:
+        return services.landing_zone.template(template_id, actor)
+
+    def control_packs(self, services: Services, actor: CurrentActor) -> dict:
+        return services.landing_zone.control_packs(actor)
 
     def propose(self, request: LandingZoneRequest, services: Services, actor: CurrentActor) -> dict:
         return services.landing_zone.propose(request, actor)

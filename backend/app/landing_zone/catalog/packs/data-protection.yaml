@@ -1,5 +1,6 @@
 id: data-protection
 version: 1
+order: 2
 name: Data protection
 description: Encryption at rest and in transit for storage and databases.
 selectors:

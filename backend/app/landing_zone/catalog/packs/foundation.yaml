@@ -1,5 +1,6 @@
 id: foundation
 version: 1
+order: 1
 name: Foundation
 description: Root user, MFA and public-exposure basics for every workload OU.
 selectors:

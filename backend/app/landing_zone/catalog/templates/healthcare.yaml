@@ -1,5 +1,6 @@
 id: healthcare
 version: 1
+order: 2
 name: Healthcare & life sciences
 industry: Providers, payers, pharma and medical devices
 description: >-

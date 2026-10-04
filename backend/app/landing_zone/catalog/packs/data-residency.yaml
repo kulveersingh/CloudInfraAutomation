@@ -1,5 +1,6 @@
 id: data-residency
 version: 1
+order: 8
 name: Data residency
 description: 'Workloads stay in the allowed Regions: per-OU Region deny, no cross-Region networking, no VM import or export.'
 selectors:

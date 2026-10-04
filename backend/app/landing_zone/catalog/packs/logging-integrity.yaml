@@ -1,5 +1,6 @@
 id: logging-integrity
 version: 1
+order: 5
 name: Logging integrity
 description: Tamper-evident trails, flow logs, load balancer logs and GuardDuty.
 selectors:

@@ -193,6 +193,21 @@ jobs:
         return {".github/workflows/deploy-landing-zone.yml": self.TEXT}
 
 
+class ControlsDocument(BundleFile):
+    """The Control Tower controls on each OU, for auditors, with the frameworks the catalog maps them to."""
+
+    def render(self, context):
+        lines = [f"# Control Tower controls: {context.design.answers.organization_name}", "",
+                 "Preventive controls are enabled on the top-most OU and inherited below it; detective and proactive",
+                 "controls are enabled on every OU they apply to.", ""]
+        for ou in context.design.walk():
+            enabled = context.guardrails.controls.get(ou.key, [])
+            if enabled:
+                lines += [f"## {ou.label}", "", "| Control | Name | Behavior | Severity | Packs | Frameworks |",
+                          "|---|---|---|---|---|---|", *map(_control_row, enabled), ""]
+        return {"docs/controls.md": "\n".join(lines)}
+
+
 class Readme(BundleFile):
     def render(self, context):
         design = context.design
@@ -212,7 +227,8 @@ class LandingZoneBundle:
 
     @classmethod
     def default(cls) -> "LandingZoneBundle":
-        return cls([StackFiles(STACKS), DesignJson(), DiagramFiles(), ApplyScript(), DeployWorkflow(), Readme()])
+        return cls([StackFiles(STACKS), DesignJson(), DiagramFiles(), ControlsDocument(), ApplyScript(), DeployWorkflow(),
+                    Readme()])
 
     def render(self, design: LandingZoneDesign, catalog: OrgCatalog) -> dict[str, str]:
         context = StackContext.build(design, catalog)
@@ -220,6 +236,12 @@ class LandingZoneBundle:
         for bundle_file in self._files:
             files.update(bundle_file.render(context))
         return files
+
+
+def _control_row(enabled) -> str:
+    control = enabled.control
+    return (f"| `{control.id}` | {control.name} | {control.behavior} | {control.severity} | {', '.join(enabled.packs)} "
+            f"| {', '.join(control.frameworks) or 'not refreshed'} |")
 
 
 def _ou_json(ou: OuNode) -> dict:

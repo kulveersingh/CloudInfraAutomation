@@ -323,3 +323,7 @@ def test_every_template_proposes_through_the_api(client, template):
         "answers": {**answers_dict(), **chosen["answers"], "template": {"id": template, "version": chosen["version"]}},
         "edits": chosen["edits"]}).json()
     assert response["problems"] == []
+
+
+def test_control_packs_include_the_profiles_they_make_up(client):
+    assert client.get(f"{BASE}/control-packs", headers=ALEX).json()["profiles"]["baseline"] == ["foundation"]

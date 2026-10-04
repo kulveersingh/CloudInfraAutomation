@@ -1,5 +1,6 @@
 id: public-sector
 version: 1
+order: 3
 name: Public sector
 industry: Government agencies and education
 description: >-

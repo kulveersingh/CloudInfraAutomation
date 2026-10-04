@@ -1,5 +1,6 @@
 id: production-resilience
 version: 1
+order: 4
 name: Production resilience
 description: Multi-AZ databases, deletion protection, point-in-time recovery and backup plans.
 selectors:

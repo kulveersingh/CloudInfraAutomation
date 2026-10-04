@@ -1,5 +1,6 @@
 id: network-hardening
 version: 1
+order: 3
 name: Network hardening
 description: No open admin ports, IMDSv2, no automatic public IPs.
 selectors:

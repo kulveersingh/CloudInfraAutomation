@@ -1,5 +1,6 @@
 id: pci-cde
 version: 1
+order: 7
 name: PCI cardholder data environment
 description: No internet or VPN paths, S3 data-event logging, TLS to databases and malware scanning for PCI OUs.
 selectors:

@@ -77,3 +77,13 @@ def test_refreshed_file_keeps_its_explanatory_header(tmp_path):
     text = (tmp_path / "controls.yaml").read_text()
     assert (text.startswith("# Control Catalog snapshot"), yaml.safe_load(text)["mappings_refreshed"]) == (
         True, "2026-10-04")
+
+
+class CatalogWithoutHooksAlias(FakeControlCatalog):
+    def list_controls(self, **kwargs):
+        page = super().list_controls(**kwargs)
+        return {**page, "Controls": [{**control, "Aliases": []} for control in page["Controls"]]}
+
+
+def test_prerequisite_stays_unknown_when_the_catalog_has_no_hooks_alias(tmp_path):
+    assert refreshed(tmp_path, CatalogWithoutHooksAlias()).proactive_prerequisite is None

@@ -1,5 +1,6 @@
 id: eu-sovereignty
 version: 1
+order: 6
 name: EU data sovereignty
 industry: Organizations with EU data residency requirements
 description: >-

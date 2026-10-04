@@ -4,10 +4,10 @@ import pytest
 import yaml
 from cfnlint.api import ManualArgs, lint
 
+from app.landing_zone.catalog.templates import TemplateRegistry
 from app.landing_zone.cloudformation.bundle import STACK_FILES, LandingZoneBundle
 from app.landing_zone.cloudformation.guardrails import GuardrailPlan, ScpQuotaRule
 from app.landing_zone.designer import LandingZoneDesigner
-from app.landing_zone.catalog.templates import TemplateRegistry
 from tests.lz_factories import CATALOG, account_op, add_account, add_ou, answers, edited
 
 FLOW = {"source": "dev", "destination": "test", "protocol": "tcp", "port": 5432, "reason": "Data refresh"}
@@ -72,7 +72,8 @@ def test_edited_stack_has_no_cfn_lint_findings(name):
 
 def test_bundle_files():
     assert set(bundle()) == {*STACK_FILES.values(), "design.json", "README.md", "docs/ou-structure.svg",
-                             "docs/ou-structure.mmd", "scripts/apply.sh", ".github/workflows/deploy-landing-zone.yml"}
+                             "docs/ou-structure.mmd", "docs/controls.md", "scripts/apply.sh",
+                             ".github/workflows/deploy-landing-zone.yml"}
 
 
 def test_design_json_records_the_answers():

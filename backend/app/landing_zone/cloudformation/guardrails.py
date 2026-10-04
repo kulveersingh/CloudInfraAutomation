@@ -1,11 +1,14 @@
+import math
 from dataclasses import dataclass, field
 
+from app.landing_zone.catalog.resolver import EnabledControl, PackResolver
 from app.landing_zone.cloudformation.references import OuReferences
 from app.landing_zone.design import LandingZoneDesign, OrgCatalog, OuNode
 
 SCP = "SERVICE_CONTROL_POLICY"
 RCP = "RESOURCE_CONTROL_POLICY"
-SCP_QUOTA = 5
+SCP_QUOTA = 10  # AWS Control Tower's limit per OU, FullAWSAccess included (§20.12.1 F5)
+CONTROLS_PER_CONTROL_TOWER_SCP = 5  # how Control Tower packs SCP-based controls is unverified (O1): count conservatively
 POLICY_VERSION = "2012-10-17"
 CONTROL_TOWER_EXECUTION = "arn:aws:iam::*:role/AWSControlTowerExecution"
 BREAK_GLASS = "arn:aws:iam::*:role/BreakGlass"
@@ -17,14 +20,6 @@ GLOBAL_SERVICES = ["iam:*", "organizations:*", "sts:*", "support:*", "cloudfront
                    "waf:*", "budgets:*", "ce:*", "cur:*", "health:*", "trustedadvisor:*", "account:*",
                    "controltower:*", "sso:*", "globalaccelerator:*", "shield:*", "pricing:*", "s3:ListAllMyBuckets",
                    "s3:GetAccountPublicAccessBlock", "s3:PutAccountPublicAccessBlock", "ec2:DescribeRegions"]
-
-BASELINE_CONTROLS = ["AWS-GR_RESTRICT_ROOT_USER", "AWS-GR_RESTRICT_ROOT_USER_ACCESS_KEYS"]
-RECOMMENDED_CONTROLS = ["AWS-GR_ROOT_ACCOUNT_MFA_ENABLED", "AWS-GR_MFA_ENABLED_FOR_IAM_CONSOLE_ACCESS",
-                        "AWS-GR_S3_BUCKET_PUBLIC_READ_PROHIBITED", "AWS-GR_S3_BUCKET_PUBLIC_WRITE_PROHIBITED",
-                        "AWS-GR_RDS_INSTANCE_PUBLIC_ACCESS_CHECK", "AWS-GR_RDS_SNAPSHOTS_PUBLIC_PROHIBITED",
-                        "AWS-GR_RDS_STORAGE_ENCRYPTED", "AWS-GR_ENCRYPTED_VOLUMES"]
-PRODUCTION_CONTROLS = ["AWS-GR_RESTRICTED_SSH", "AWS-GR_RESTRICTED_COMMON_PORTS"]
-REGULATED_CONTROLS = ["AWS-GR_EBS_OPTIMIZED_INSTANCE", "AWS-GR_EC2_VOLUME_INUSE_CHECK"]
 
 
 @dataclass
@@ -48,23 +43,10 @@ def _exempt(*principals: str) -> dict:
     return {"ArnNotLike": {"aws:PrincipalARN": list(principals)}}
 
 
-class ControlCatalog:
-    """Control Tower controls per OU for the chosen profile. Identifiers are checked against ListControls at plan time."""
-
-    def controls_for(self, ou: OuNode, profile: str) -> list[str]:
-        if ou.kind in {"security", "suspended", "parent", "compliance", "custom"}:
-            return []
-        if profile == "baseline":
-            return list(BASELINE_CONTROLS)
-        production = ou.tier == "prod" or ou.kind in {"infrastructure", "policy_staging"} or profile == "regulated"
-        return [*BASELINE_CONTROLS, *RECOMMENDED_CONTROLS, *(PRODUCTION_CONTROLS if production else []),
-                *(REGULATED_CONTROLS if profile == "regulated" else [])]
-
-
 class GuardrailPlan:
     """Which organization policies and Control Tower controls attach to which OU."""
 
-    def __init__(self, design: LandingZoneDesign, policies: list[PolicySpec], controls: dict[str, list[str]]):
+    def __init__(self, design: LandingZoneDesign, policies: list[PolicySpec], controls: dict[str, list[EnabledControl]]):
         self.design = design
         self.policies = policies
         self.controls = controls
@@ -72,8 +54,7 @@ class GuardrailPlan:
     @classmethod
     def for_design(cls, design: LandingZoneDesign, catalog: OrgCatalog | None = None) -> "GuardrailPlan":
         builder = PolicyBuilder(design, OuReferences(design), catalog or OrgCatalog(portfolios=[], products=[]))
-        controls = {ou.key: ControlCatalog().controls_for(ou, design.answers.controls_profile) for ou in design.walk()}
-        return cls(design, builder.policies(), {key: value for key, value in controls.items() if value})
+        return cls(design, builder.policies(), PackResolver.default().resolve(design).controls)
 
     def attach_scp(self, name: str, ou: OuNode) -> None:
         self.policies.append(PolicySpec(name=name, type=SCP, content=_document(_statement(name, "*")), targets=[ou]))
@@ -81,13 +62,18 @@ class GuardrailPlan:
     def scp_count(self, ou: OuNode) -> int:
         return sum(1 for policy in self.policies if policy.type == SCP and ou in policy.targets)
 
+    def control_tower_scps(self, ou: OuNode) -> int:
+        """SCPs Control Tower attaches to the OU for the SCP-based controls enabled directly on it."""
+        scp_controls = sum(1 for enabled in self.controls.get(ou.key, []) if enabled.control.is_scp)
+        return math.ceil(scp_controls / CONTROLS_PER_CONTROL_TOWER_SCP)
+
 
 class ScpQuotaRule:
     """AWS Organizations allows five SCPs per OU, and FullAWSAccess is always one of them."""
 
     def problems(self, plan: GuardrailPlan) -> list[str]:
-        counts = [(ou, plan.scp_count(ou) + 1) for ou in plan.design.walk()]
-        return [f"OU '{ou.name}' would have {count} SCPs; AWS Organizations allows {SCP_QUOTA} including FullAWSAccess."
+        counts = [(ou, plan.scp_count(ou) + plan.control_tower_scps(ou) + 1) for ou in plan.design.walk()]
+        return [f"OU '{ou.name}' would have {count} SCPs; AWS Control Tower allows {SCP_QUOTA} including FullAWSAccess."
                 for ou, count in counts if count > SCP_QUOTA]
 
 

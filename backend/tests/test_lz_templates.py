@@ -1,5 +1,6 @@
 import pytest
 
+from app.landing_zone.catalog.resolver import UNRESOLVED_PREREQUISITE
 from app.landing_zone.catalog.templates import TemplateRegistry
 from app.landing_zone.cloudformation.guardrails import GuardrailPlan, ScpQuotaRule
 from app.landing_zone.validation import DesignAdvisor, DesignValidator
@@ -97,6 +98,4 @@ def test_registration_limit_shrinks_with_many_governed_regions():
 
 
 def test_recommended_design_has_only_the_catalog_refresh_warning():
-    assert warnings(edited([])[0]) == [
-        "Proactive controls need the CloudFormation-hooks prerequisite control (CT.CLOUDFORMATION.PR.1). "
-        "Refresh the control catalog to resolve its identifier."]
+    assert warnings(edited([])[0]) == [UNRESOLVED_PREREQUISITE]

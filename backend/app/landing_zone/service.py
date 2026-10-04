@@ -1,4 +1,5 @@
 import uuid
+from collections import Counter
 
 from sqlalchemy.orm import Session
 
@@ -6,6 +7,10 @@ from app.adapters.ports import GitHubPort
 from app.db import models
 from app.errors import ConflictError, ForbiddenError, NotFoundError, ValidationFailedError
 from app.landing_zone.answers import LandingZoneAnswers
+from app.landing_zone.catalog.controls import CatalogError, ControlCatalogSnapshot
+from app.landing_zone.catalog.packs import PROFILE_PACKS, PackRegistry
+from app.landing_zone.catalog.resolver import EnabledControl, PackResolver
+from app.landing_zone.catalog.templates import IndustryTemplate, TemplateRegistry
 from app.landing_zone.cloudformation.bundle import LandingZoneBundle
 from app.landing_zone.cloudformation.guardrails import GuardrailPlan, ScpQuotaRule
 from app.landing_zone.design import AccountPlan, LandingZoneDesign, OrgCatalog, OuNode
@@ -16,7 +21,7 @@ from app.landing_zone.executor import LandingZoneExecutor, LandingZoneOutputs
 from app.landing_zone.repository import LandingZoneRepository
 from app.landing_zone.request import LandingZoneRequest
 from app.landing_zone.states import DesignStatus
-from app.landing_zone.validation import DesignValidator
+from app.landing_zone.validation import DesignAdvisor, DesignValidator
 from app.networks.models import NetworkInput
 from app.networks.service import NetworkService
 from app.registry.service import RegistryService, require
@@ -24,6 +29,10 @@ from app.releases.policy import Actor, Role
 
 REPOSITORY_NAME = "landing-zone-infra"
 REPOSITORY_MARKER = "landing-zone"
+BEHAVIORS = ("PREVENTIVE", "DETECTIVE", "PROACTIVE")
+# Placeholder identity used only to preview a template's structure before the customer names the organization.
+PREVIEW_ORGANIZATION = {"organization_name": "example", "management_email": "aws@example.com",
+                        "home_region": "us-east-1", "governed_regions": ["us-east-1", "us-east-2"]}
 
 
 class LandingZonePolicy:
@@ -73,6 +82,27 @@ class LandingZoneService:
         self._repository.add(record)
         self._repository.commit()
         return self._describe(record)
+
+    def templates(self, actor: Actor) -> list[dict]:
+        self._policy.require_admin(actor)
+        return [self._template_summary(template) for template in TemplateRegistry.default().all()]
+
+    def template(self, template_id: str, actor: Actor) -> dict:
+        self._policy.require_admin(actor)
+        try:
+            template = TemplateRegistry.default().get(template_id)
+        except CatalogError as error:
+            raise NotFoundError(str(error)) from error
+        return {**self._template_summary(template), "answers": template.answers, "edits": template.edits}
+
+    def control_packs(self, actor: Actor) -> dict:
+        self._policy.require_admin(actor)
+        snapshot = ControlCatalogSnapshot.default()
+        return {"mappings_refreshed": snapshot.mappings_refreshed, "profiles": PROFILE_PACKS,
+                "packs": [{"id": pack.id, "version": pack.version, "name": pack.name, "description": pack.description,
+                           "selectors": list(pack.selectors), "optional": pack.optional,
+                           "controls": [_control_json(snapshot.get(control_id)) for control_id in pack.control_ids]}
+                          for pack in PackRegistry.default().all()]}
 
     def designs(self, actor: Actor) -> list[dict]:
         self._policy.require_admin(actor)
@@ -135,9 +165,23 @@ class LandingZoneService:
         return [*design.edit_problems, *DesignValidator.default().problems(design),
                 *ScpQuotaRule().problems(GuardrailPlan.for_design(design))]
 
+    def _template_summary(self, template: IndustryTemplate) -> dict:
+        answers = LandingZoneAnswers.model_validate({**PREVIEW_ORGANIZATION, **template.answers})
+        design = self._design(answers, TreeEditor.parse(template.edits))
+        behaviors = Counter(enabled.control.behavior for controls in PackResolver.default().resolve(design).controls.values()
+                            for enabled in controls)
+        return {"id": template.id, "version": template.version, "name": template.name, "industry": template.industry,
+                "description": template.description, "frameworks": list(template.frameworks),
+                "frameworks_verified": ControlCatalogSnapshot.default().mappings_refreshed is not None,
+                "environments": [environment.name for environment in answers.environments()],
+                "packs": answers.packs(), "ou_count": len(list(design.walk())),
+                "control_counts": {behavior: behaviors[behavior] for behavior in BEHAVIORS}}
+
     def _explain(self, design: LandingZoneDesign) -> dict:
         renderer = OuDiagramRenderer()
-        return {"ous": [_ou_json(ou) for ou in design.root_ous], "problems": self._problems(design),
+        controls = PackResolver.default().resolve(design).controls
+        return {"ous": [_ou_json(ou, controls) for ou in design.root_ous], "problems": self._problems(design),
+                "warnings": DesignAdvisor.default().warnings(design),
                 "diagram": {"svg": renderer.svg(design), "mermaid": renderer.mermaid(design)}}
 
     def _record(self, design_id: uuid.UUID) -> models.LandingZoneDesignRecord:
@@ -175,13 +219,21 @@ class LandingZoneService:
                 "created_at": record.created_at.isoformat()}
 
 
-def _ou_json(ou: OuNode) -> dict:
+def _ou_json(ou: OuNode, controls: dict[str, list[EnabledControl]]) -> dict:
     permissions = EditPermissions()
     return {"key": ou.key, "name": ou.name, "kind": ou.kind, "environment": ou.environment, "tier": ou.tier,
             "created_by_control_tower": ou.created_by_control_tower, "custom": ou.custom,
             "domain": ou.isolation_domain, "allowed_edits": permissions.for_ou(ou),
             "blocked_edits": permissions.blocked_for_ou(ou), "accounts": [_account_json(account) for account in ou.accounts],
-            "children": [_ou_json(child) for child in ou.children]}
+            "controls": [{"id": enabled.control.id, "name": enabled.control.name, "behavior": enabled.control.behavior,
+                          "severity": enabled.control.severity, "packs": list(enabled.packs)}
+                         for enabled in controls.get(ou.key, [])],
+            "children": [_ou_json(child, controls) for child in ou.children]}
+
+
+def _control_json(control) -> dict:
+    return {"id": control.id, "name": control.name, "behavior": control.behavior, "severity": control.severity,
+            "implementation": control.implementation, "frameworks": list(control.frameworks)}
 
 
 def _account_json(account: AccountPlan) -> dict:

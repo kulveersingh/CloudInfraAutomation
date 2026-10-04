@@ -4,7 +4,7 @@ import pytest
 
 from app.landing_zone.catalog.controls import ControlCatalogSnapshot
 from app.landing_zone.catalog.packs import PackRegistry
-from app.landing_zone.catalog.resolver import PackResolver
+from app.landing_zone.catalog.resolver import UNRESOLVED_PREREQUISITE, PackResolver
 from app.landing_zone.catalog.selectors import SelectorRegistry
 from tests.lz_factories import add_ou, edited
 
@@ -143,9 +143,7 @@ def test_ous_without_proactive_controls_do_not(snapshot_with_prerequisite):
 
 
 def test_an_unknown_prerequisite_is_a_warning():
-    assert resolved(design()).warnings == [
-        "Proactive controls need the CloudFormation-hooks prerequisite control (CT.CLOUDFORMATION.PR.1). "
-        "Refresh the control catalog to resolve its identifier."]
+    assert resolved(design()).warnings == [UNRESOLVED_PREREQUISITE]
 
 
 def test_no_warning_without_proactive_controls():
