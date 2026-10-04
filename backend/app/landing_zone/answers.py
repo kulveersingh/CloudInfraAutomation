@@ -51,6 +51,15 @@ class NetworkAnswers(BaseModel):
     cidr: str = "10.0.0.0/8"
     flows: list[FlowException] = Field(default_factory=list)
 
+    @property
+    def central_egress(self) -> bool:
+        return self.hub and self.egress == "central"
+
+    @property
+    def inspects_flows(self) -> bool:
+        """The firewall sits in the central egress VPC, so inspection needs the hub and central egress."""
+        return self.central_egress and self.inspection
+
     @field_validator("cidr")
     @classmethod
     def private_and_large_enough(cls, cidr: str) -> str:
@@ -121,8 +130,8 @@ class LandingZoneAnswers(BaseModel):
         problems = []
         if self.network.hub and "network" not in self.infrastructure:
             problems.append("Hub-and-spoke networking needs the Network account.")
-        if self.network.flows and not (self.network.hub and self.network.inspection):
-            problems.append("Cross-environment flows need the hub and traffic inspection.")
+        if self.network.flows and not self.network.inspects_flows:
+            problems.append("Cross-environment flows need the hub, central egress and traffic inspection.")
         tiers = {environment.id: environment.tier for environment in self.environments()}
         for flow in self.network.flows:
             problems += _flow_problems(flow, tiers)

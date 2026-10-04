@@ -126,6 +126,10 @@ def test_flows_need_inspection():
     assert invalid(network={"inspection": False, "flows": [flow()]})
 
 
+def test_flows_need_central_egress_where_the_firewall_runs():
+    assert invalid(network={"egress": "local", "flows": [flow()]})
+
+
 def test_flows_need_the_hub():
     assert invalid(infrastructure=["shared_services"], network={"hub": False, "flows": [flow()]})
 

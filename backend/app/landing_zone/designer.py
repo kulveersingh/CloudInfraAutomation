@@ -130,5 +130,13 @@ class LandingZoneDesigner:
         return design
 
 
+def network_host_suffix(answers: LandingZoneAnswers) -> str | None:
+    """The account that owns the shared VPCs: Network, else Shared Services, else the management account (None)."""
+    for key in ("network", "shared_services"):
+        if key in answers.infrastructure:
+            return INFRASTRUCTURE_ACCOUNTS[key]
+    return None
+
+
 def _short(registry_id: str) -> str:
     return registry_id.split("-", 1)[-1]

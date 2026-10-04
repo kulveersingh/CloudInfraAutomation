@@ -21,6 +21,7 @@ VARIANTS = {
     "local-egress": {"network": {"egress": "local"}},
     "no-inspection": {"network": {"inspection": False}},
     "no-hub": {"infrastructure": ["shared_services"], "network": {"hub": False}},
+    "no-shared-accounts": {"infrastructure": [], "network": {"hub": False}},
 }
 
 
@@ -84,6 +85,15 @@ def test_apply_script_deploys_the_stacks_in_order():
     script = bundle()["scripts/apply.sh"]
     positions = [script.index(f"stacks/{name}.yaml") for name in STACK_FILES]
     assert positions == sorted(positions)
+
+
+def test_apply_script_assumes_the_network_account_role():
+    assert "role/AWSControlTowerExecution" in bundle()["scripts/apply.sh"]
+
+
+def test_without_network_or_shared_services_the_vpcs_stay_in_the_management_account():
+    script = bundle(infrastructure=[], network={"hub": False})["scripts/apply.sh"]
+    assert "AWSControlTowerExecution" not in script and "live in the management account" in script
 
 
 def test_apply_script_deploys_the_network_in_every_governed_region():
