@@ -77,6 +77,10 @@ def test_home_region_must_be_governed():
     assert invalid(home_region="eu-west-1")
 
 
+def test_custom_organization_cidr_is_normalised():
+    assert answers(network={"cidr": "172.16.5.0/12"}).network.cidr == "172.16.0.0/12"
+
+
 def test_organization_cidr_must_be_private():
     assert invalid(network={"cidr": "8.0.0.0/8"})
 

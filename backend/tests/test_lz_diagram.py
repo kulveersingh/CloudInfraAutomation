@@ -1,4 +1,4 @@
-import xml.etree.ElementTree as ElementTree
+from xml.etree import ElementTree
 
 from app.landing_zone.designer import LandingZoneDesigner
 from app.landing_zone.diagram import OuDiagramRenderer
