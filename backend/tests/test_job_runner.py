@@ -3,9 +3,11 @@ import pytest
 from app.db import models
 from app.provisioning.queue import JobQueue, JobState
 from app.provisioning.runner import JobRunner
+from app.readback.manifest import MANIFEST_PATH, ManifestSigner
 from tests.factories import dr_request_dict, request_dict
 
 OWNER = "acme-platform"
+SIGNER = ManifestSigner({"k1": "secret"}, "k1")
 
 
 @pytest.fixture
@@ -23,7 +25,7 @@ def start(seeded, queue, payload: dict) -> models.Job:
 
 def run(seeded, queue, local_github, local_aws, payload: dict) -> models.Job:
     job = start(seeded, queue, payload)
-    JobRunner.for_session(seeded, local_github, local_aws, OWNER).run(job)
+    JobRunner.for_session(seeded, local_github, local_aws, OWNER, SIGNER).run(job)
     return job
 
 
@@ -134,3 +136,16 @@ def _raise(message: str):
         raise RuntimeError(message)
 
     return failing
+
+
+def test_commit_is_sealed_with_the_manifest(seeded, queue, local_github, local_aws):
+    run(seeded, queue, local_github, local_aws, request_dict())
+    files = local_github.read_files(OWNER, "invoice-ingest-infra").files
+    import json
+    assert SIGNER.verify(json.loads(files[MANIFEST_PATH])).id == "invoice-ingest"
+
+
+def test_project_records_the_commit(seeded, queue, local_github, local_aws):
+    run(seeded, queue, local_github, local_aws, request_dict())
+    project = seeded.get(models.Project, "invoice-ingest")
+    assert project.commit_sha == local_github.read_files(OWNER, "invoice-ingest-infra").commit_sha

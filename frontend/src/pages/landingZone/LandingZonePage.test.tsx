@@ -2,7 +2,7 @@ import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { Identity, PlatformApiPort, TreeEdit } from "../../api/types";
-import { fakeApi, landingZoneDesign, landingZoneDetail, PACK_CATALOG, PROPOSAL } from "../../test/fakes";
+import { fakeApi, landingZoneDesign, landingZoneDetail, PACK_CATALOG, PROPOSAL, READ_BACK } from "../../test/fakes";
 import { renderWithApi } from "../../test/render";
 import { LandingZonePage } from "./LandingZonePage";
 
@@ -703,6 +703,67 @@ describe("LandingZonePage", () => {
       renderPage(fakeApi({ landingZoneDesigns: vi.fn().mockResolvedValue([]) }));
       await user().click(await screen.findByRole("tab", { name: "Approvals" }));
       expect(await screen.findByText("No landing zone designs yet.")).toBeInTheDocument();
+    });
+  });
+
+  describe("editing the current landing zone", () => {
+    const HAND_EDITED = {
+      ...READ_BACK, verified: false, request: null,
+      findings: [{ check: "integrity", severity: "blocking" as const,
+        message: "Files were edited outside the platform. Revert them in GitHub, or change the design here.",
+        files: [{ path: "stacks/lz-structure.yaml", diff: "--- generated/stacks/lz-structure.yaml\n+# tweaked\n" },
+          { path: "design.json", diff: null }] }],
+    };
+
+    async function editCurrent() {
+      await user().click(await screen.findByRole("button", { name: /Edit the current landing zone/ }));
+    }
+
+    it("loads the committed design into the questionnaire and opens Review", async () => {
+      const api = fakeApi();
+      renderPage(api);
+      await editCurrent();
+      expect(await screen.findByRole("heading", { name: "9. Review the proposed structure" })).toBeInTheDocument();
+      await user().click(screen.getByRole("button", { name: "Propose structure" }));
+      expect(lastRequest(api)).toEqual(READ_BACK.request);
+    });
+
+    it("says which version and commit it loaded", async () => {
+      renderPage();
+      await editCurrent();
+      expect(await screen.findByText("Loaded design v3 from landing-zone-infra at abcdef1.")).toBeInTheDocument();
+    });
+
+    it("shows warnings about the repository", async () => {
+      renderPage(fakeApi({ landingZoneReadBack: vi.fn().mockResolvedValue({ ...READ_BACK, findings: [
+        { check: "head", severity: "warning", message: "The repository has commits the platform did not make.", files: [] }] }) }));
+      await editCurrent();
+      expect(await screen.findByText("The repository has commits the platform did not make.")).toBeInTheDocument();
+    });
+
+    it("refuses a hand-edited repository and shows the changes", async () => {
+      const api = fakeApi({ landingZoneReadBack: vi.fn().mockResolvedValue(HAND_EDITED) });
+      renderPage(api);
+      await editCurrent();
+      const panel = await screen.findByRole("region", { name: "The landing zone repository can't be loaded" });
+      expect([within(panel).getByText(/Files were edited outside the platform/), within(panel).getByText("stacks/lz-structure.yaml"),
+        within(panel).getByText(/\+# tweaked/), within(panel).getByText("design.json"),
+        screen.getByRole("heading", { name: "Start from a template" })]).toHaveLength(5);
+    });
+
+    it("keeps the draft when the repository is refused", async () => {
+      const api = fakeApi({ landingZoneReadBack: vi.fn().mockResolvedValue(HAND_EDITED) });
+      renderPage(api);
+      await editCurrent();
+      await screen.findByRole("region", { name: "The landing zone repository can't be loaded" });
+      await fillOrganization();
+      expect((await propose(api)).log_retention_days).toBe(365);
+    });
+
+    it("shows read-back errors", async () => {
+      renderPage(fakeApi({ landingZoneReadBack: vi.fn().mockRejectedValue(new Error("No landing zone has been applied yet.")) }));
+      await editCurrent();
+      expect(await screen.findByRole("alert")).toHaveTextContent("No landing zone has been applied yet.");
     });
   });
 });

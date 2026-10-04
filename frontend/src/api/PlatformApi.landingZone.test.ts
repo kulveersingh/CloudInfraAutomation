@@ -28,6 +28,13 @@ describe("PlatformApi landing zone", () => {
     expect(fetcher.mock.calls[0][0]).toBe("/v1/admin/landing-zone/templates/saas");
   });
 
+  it("reads back the landing zone repository", async () => {
+    const fetcher = respond();
+    await new PlatformApi("", fetcher).landingZoneReadBack();
+    expect(fetcher).toHaveBeenCalledWith("/v1/admin/landing-zone/repository:read-back",
+      expect.objectContaining({ method: "GET" }));
+  });
+
   it("lists control packs", async () => {
     const fetcher = respond();
     await new PlatformApi("", fetcher).controlPacks();

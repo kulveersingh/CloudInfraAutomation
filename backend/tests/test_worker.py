@@ -2,13 +2,15 @@ from app.adapters.factory import AdapterFactory
 from app.db import models
 from app.provisioning.queue import JobQueue, JobState
 from app.provisioning.worker import Worker, WorkerCommand
+from app.readback.manifest import ManifestSigner
 from app.seed import ReferenceDataSeeder
 from tests.factories import request_dict
 
 
 def build_worker(session_factory, settings) -> Worker:
     factory = AdapterFactory()
-    return Worker(session_factory, factory.github(settings), factory.aws(settings), settings.github_owner)
+    return Worker(session_factory, factory.github(settings), factory.aws(settings), settings.github_owner,
+                  ManifestSigner.from_settings(settings))
 
 
 def enqueue_project(session_factory) -> models.Job:

@@ -101,6 +101,16 @@ describe("LandingZoneDraft", () => {
     expect(draft.toRequest().edits).toEqual([ADD_OU, DISABLE]);
   });
 
+  it("loads a design read back from the repository", () => {
+    const request = named().with({ log_retention_days: 730 }).withEdit(ADD_OU).toRequest();
+    expect(LandingZoneDraft.fromRequest(request).toRequest()).toEqual(request);
+  });
+
+  it("fills answers a repository design predates with the recommendations", () => {
+    const { pack_parameters: _dropped, ...older } = named().toAnswers();
+    expect(LandingZoneDraft.fromRequest({ answers: older as never, edits: [] }).toAnswers().pack_parameters).toEqual({});
+  });
+
   it("undoes one tree edit", () => {
     expect(named().withEdit(ADD_OU).withEdit(DISABLE).withoutEdit(0).edits()).toEqual([DISABLE]);
   });

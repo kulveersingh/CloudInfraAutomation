@@ -1,7 +1,7 @@
 import { vi } from "vitest";
 import type {
   AccountInfo, CatalogControlInfo, CatalogEntry, ControlPackCatalog, CostCenterSettings, IndustryTemplate, TemplateSummary, EnvironmentInfo, JobStatus, LandingZoneDesign, LandingZoneDesignDetail,
-  LandingZoneProposal, NetworkInfo, NetworkOption, OuInfo, PipelineStage, PlatformApiPort, Portfolio, PreviewResult,
+  LandingZoneProposal, LandingZoneReadBack, NetworkInfo, NetworkOption, OuInfo, PipelineStage, PlatformApiPort, Portfolio, PreviewResult,
   ProjectSummary, RegionInfo, Release,
 } from "../api/types";
 import { LandingZoneDraft } from "../landingZone/LandingZoneDraft";
@@ -207,6 +207,13 @@ export const SAAS_TEMPLATE: IndustryTemplate = {
   edits: [{ op: "add_ou", parent: "prod", name: "Tenants" }],
 };
 
+export const READ_BACK: LandingZoneReadBack = {
+  verified: true, commit_sha: "abcdef1234567890abcdef1234567890abcdef12", findings: [],
+  design: { kind: "landing-zone", id: "lz-3", revision: 3 },
+  request: LandingZoneDraft.initial().withOrganization("acme", "aws@acme.example").with({ log_retention_days: 730 })
+    .withEdit({ op: "add_ou", parent: "prod", name: "Tenants" }).toRequest(),
+};
+
 export function fakeApi(overrides: Partial<PlatformApiPort> = {}): PlatformApiPort {
   return {
     orgRegistry: vi.fn().mockResolvedValue(PORTFOLIOS),
@@ -229,6 +236,7 @@ export function fakeApi(overrides: Partial<PlatformApiPort> = {}): PlatformApiPo
     landingZoneTemplates: vi.fn().mockResolvedValue(TEMPLATES),
     landingZoneTemplate: vi.fn().mockResolvedValue(SAAS_TEMPLATE),
     controlPacks: vi.fn().mockResolvedValue(PACK_CATALOG),
+    landingZoneReadBack: vi.fn().mockResolvedValue(READ_BACK),
     proposeLandingZone: vi.fn().mockResolvedValue(PROPOSAL),
     createLandingZoneDesign: vi.fn().mockResolvedValue(landingZoneDesign({ status: "draft", submitted_by: null })),
     landingZoneDesigns: vi.fn().mockResolvedValue([landingZoneDesign()]),

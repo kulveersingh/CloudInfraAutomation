@@ -82,3 +82,39 @@ def test_delete_repository(local_github):
 
 def test_delete_missing_repository_is_harmless(local_github):
     assert local_github.delete_repository("acme", "demo-infra") is None
+
+
+def test_read_files_returns_head_tree_and_sha(local_github):
+    local_github.create_repository("acme", "demo-infra", marker="req-1")
+    sha = local_github.commit_files("acme", "demo-infra", {"a.txt": "1", "dir/b.txt": "two\n"}, "Initial")
+    snapshot = local_github.read_files("acme", "demo-infra")
+    assert (snapshot.commit_sha, snapshot.files) == (sha, {"a.txt": "1", "dir/b.txt": "two\n"})
+
+
+def test_read_files_sees_the_latest_commit(local_github):
+    local_github.create_repository("acme", "demo-infra", marker="req-1")
+    local_github.commit_files("acme", "demo-infra", {"a.txt": "1"}, "one")
+    local_github.commit_files("acme", "demo-infra", {"a.txt": "2", "b.txt": "3"}, "two")
+    assert local_github.read_files("acme", "demo-infra").files == {"a.txt": "2", "b.txt": "3"}
+
+
+def test_read_files_of_an_empty_repository(local_github):
+    local_github.create_repository("acme", "demo-infra", marker="req-1")
+    snapshot = local_github.read_files("acme", "demo-infra")
+    assert (snapshot.commit_sha, snapshot.files) == (None, {})
+
+
+def test_read_files_of_unknown_repository(local_github):
+    with pytest.raises(FileNotFoundError):
+        local_github.read_files("acme", "missing")
+
+
+def test_repository_properties_are_stored(local_github):
+    local_github.create_repository("acme", "demo-infra", marker="req-1")
+    local_github.set_repository_properties("acme", "demo-infra", {"cloudinfra-managed": "true"})
+    assert local_github.repository_properties("acme", "demo-infra") == {"cloudinfra-managed": "true"}
+
+
+def test_new_repository_has_no_properties(local_github):
+    local_github.create_repository("acme", "demo-infra", marker="req-1")
+    assert local_github.repository_properties("acme", "demo-infra") == {}
