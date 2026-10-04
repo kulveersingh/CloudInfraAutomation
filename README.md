@@ -54,3 +54,24 @@ cd frontend && npm test                # Vitest; fails below 100% coverage
 3. The API task runs migrations and seeds reference data on start; open the `ConsoleUrl` output.
 
 GitHub App and AWS adapters for real accounts are the next phase; until then the stack runs in `local` mode.
+
+## Offline end-to-end run and template validation
+
+Runs the platform in Docker, creates sample projects (single region, DR, HA, no-VPC and schema-driven
+services incl. Aurora PostgreSQL) through the API, clones every generated repository and validates
+each CloudFormation template with cfn-lint against the AWS resource schemas (no AWS account needed).
+
+```bash
+./scripts/offline/run-and-validate.sh --fresh   # --fresh clears earlier generated projects
+ls ../cloudinfra-generated                      # one working clone per generated repo + platform.yaml
+```
+
+Sample projects are in `scripts/offline/projects.json`. Generated bare repositories live in
+`var/state/github` (override with `CLOUDINFRA_STATE_DIR`, clones with `OUT_DIR`).
+
+With AWS credentials (`aws login` or SSO), the same templates can also be checked by the CloudFormation API;
+this creates nothing:
+
+```bash
+./scripts/offline/validate-with-aws.sh
+```

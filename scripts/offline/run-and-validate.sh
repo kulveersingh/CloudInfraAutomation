@@ -8,10 +8,17 @@ OUT_DIR="${OUT_DIR:-$ROOT/../cloudinfra-generated}"
 STATE_DIR="${CLOUDINFRA_STATE_DIR:-$ROOT/var/state}"
 OWNER="${GITHUB_OWNER:-acme-platform}"
 RUN_ID="$(date +%s)"
+FRESH="${1:-}"
 
 cd "$ROOT"
 CLOUDINFRA_STATE_DIR="$STATE_DIR" docker compose --profile full up -d --build api worker >/dev/null
 until curl -fs "$API/healthz" >/dev/null; do sleep 1; done
+if [ "$FRESH" = "--fresh" ]; then
+  # Clears generated projects only; reference data (environments, accounts, networks) stays.
+  docker compose exec -T db psql -q -U cloudinfra -d cloudinfra -c \
+    "TRUNCATE release_decisions, releases, job_steps, jobs, projects RESTART IDENTITY CASCADE;"
+  rm -rf "$STATE_DIR/github" "$STATE_DIR/aws"
+fi
 mkdir -p "$OUT_DIR"
 
 count=$(python3 -c "import json;print(len(json.load(open('scripts/offline/projects.json'))))")
