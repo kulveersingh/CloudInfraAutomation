@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { LandingZoneDraft } from "./LandingZoneDraft";
 
 const FLOW = { source: "dev", destination: "test", protocol: "tcp" as const, port: 5432, reason: "Data refresh" };
+const ADD_OU = { op: "add_ou" as const, parent: "prod", name: "Payments" };
+const DISABLE = { op: "disable_account" as const, account: "acme-retail-prod" };
 const named = () => LandingZoneDraft.initial().withOrganization("acme", "aws@acme.example");
 
 describe("LandingZoneDraft", () => {
@@ -87,5 +89,22 @@ describe("LandingZoneDraft", () => {
 
   it("has no problems with valid answers", () => {
     expect(named().problems()).toEqual([]);
+  });
+
+  it("starts with no tree edits", () => {
+    expect(named().toRequest()).toEqual({ answers: named().toAnswers(), edits: [] });
+  });
+
+  it("records tree edits in order", () => {
+    const draft = named().withEdit(ADD_OU).withEdit(DISABLE);
+    expect(draft.toRequest().edits).toEqual([ADD_OU, DISABLE]);
+  });
+
+  it("undoes one tree edit", () => {
+    expect(named().withEdit(ADD_OU).withEdit(DISABLE).withoutEdit(0).edits()).toEqual([DISABLE]);
+  });
+
+  it("keeps tree edits when an answer changes", () => {
+    expect(named().withEdit(ADD_OU).with({ grouping: "prod_nonprod" }).edits()).toEqual([ADD_OU]);
   });
 });

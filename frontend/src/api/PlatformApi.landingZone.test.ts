@@ -6,18 +6,19 @@ function respond(body: unknown = {}) {
   return vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => body } as Response);
 }
 
-const ANSWERS = LandingZoneDraft.initial().toAnswers();
+const REQUEST = LandingZoneDraft.initial().toRequest();
 
 describe("PlatformApi landing zone", () => {
-  it("proposes a structure", async () => {
+  it("proposes a structure from the answers and the tree edits", async () => {
     const fetcher = respond();
-    await new PlatformApi("", fetcher).proposeLandingZone(ANSWERS);
-    expect(fetcher).toHaveBeenCalledWith("/v1/admin/landing-zone:propose", expect.objectContaining({ method: "POST" }));
+    await new PlatformApi("", fetcher).proposeLandingZone(REQUEST);
+    expect(fetcher).toHaveBeenCalledWith("/v1/admin/landing-zone:propose", expect.objectContaining({
+      method: "POST", body: JSON.stringify(REQUEST) }));
   });
 
   it("saves a design", async () => {
     const fetcher = respond();
-    await new PlatformApi("", fetcher).createLandingZoneDesign(ANSWERS);
+    await new PlatformApi("", fetcher).createLandingZoneDesign(REQUEST);
     expect(fetcher).toHaveBeenCalledWith("/v1/admin/landing-zone/designs", expect.objectContaining({ method: "POST" }));
   });
 

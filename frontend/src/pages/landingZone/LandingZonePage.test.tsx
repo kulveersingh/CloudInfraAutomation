@@ -1,7 +1,7 @@
 import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import type { Identity, PlatformApiPort } from "../../api/types";
+import type { Identity, PlatformApiPort, TreeEdit } from "../../api/types";
 import { fakeApi, landingZoneDesign, landingZoneDetail, PROPOSAL } from "../../test/fakes";
 import { renderWithApi } from "../../test/render";
 import { LandingZonePage } from "./LandingZonePage";
@@ -23,8 +23,12 @@ async function fillOrganization() {
   await user().type(screen.getByLabelText("Management account email"), "aws@acme.example");
 }
 
-function lastAnswers(api: PlatformApiPort) {
+function lastRequest(api: PlatformApiPort) {
   return vi.mocked(api.proposeLandingZone).mock.calls.at(-1)![0];
+}
+
+function lastAnswers(api: PlatformApiPort) {
+  return lastRequest(api).answers;
 }
 
 async function propose(api: PlatformApiPort) {
@@ -256,6 +260,170 @@ describe("LandingZonePage", () => {
     await propose(api);
     await user().click(screen.getByRole("button", { name: "Request approval" }));
     expect(screen.getByRole("alert")).toHaveTextContent("forbidden");
+  });
+
+  describe("OU tree editor", () => {
+    async function proposed(api: PlatformApiPort = fakeApi()) {
+      renderPage(api);
+      await fillOrganization();
+      await propose(api);
+      return api;
+    }
+
+    async function lastEdits(api: PlatformApiPort) {
+      await vi.waitFor(() => expect(api.proposeLandingZone).toHaveBeenCalledTimes(2));
+      return lastRequest(api).edits;
+    }
+
+    const button = (name: string) => screen.getByRole("button", { name });
+
+    it("adds an OU under an environment and proposes again", async () => {
+      const api = await proposed();
+      await user().click(button("Add OU under PROD"));
+      await user().type(screen.getByLabelText("New OU name"), "Data");
+      await user().click(button("Add OU"));
+      expect(await lastEdits(api)).toEqual([{ op: "add_ou", parent: "prod", name: "Data" }]);
+    });
+
+    it("adds an OU at the root", async () => {
+      const api = await proposed();
+      await user().click(button("Add OU at the root"));
+      await user().type(screen.getByLabelText("New OU name"), "Data Lab");
+      await user().click(button("Add OU"));
+      expect(await lastEdits(api)).toEqual([{ op: "add_ou", parent: null, name: "Data Lab" }]);
+    });
+
+    it("adds an account", async () => {
+      const api = await proposed();
+      await user().click(button("Add account to PROD"));
+      await user().type(screen.getByLabelText("Account suffix"), "billing-prod");
+      await user().click(button("Add account"));
+      expect(await lastEdits(api)).toEqual([{ op: "add_account", ou: "prod", suffix: "billing-prod" }]);
+    });
+
+    it("renames a custom OU", async () => {
+      const api = await proposed();
+      await user().click(button("Rename Payments"));
+      await user().clear(screen.getByLabelText("New name for Payments"));
+      await user().type(screen.getByLabelText("New name for Payments"), "Billing");
+      await user().click(button("Save name"));
+      expect(await lastEdits(api)).toEqual([{ op: "rename_ou", ou: "custom_payments", name: "Billing" }]);
+    });
+
+    it("moves a custom OU only within its isolation domain", async () => {
+      const api = await proposed();
+      await user().click(button("Move Payments"));
+      const targets = within(screen.getByLabelText("Move Payments to")).getAllByRole("option").map((option) => option.textContent);
+      await user().click(button("Move"));
+      expect([targets, await lastEdits(api)]).toEqual([["Cards"], [{ op: "move_ou", ou: "custom_payments", parent: "custom_cards" }]]);
+    });
+
+    it("removes an empty custom OU", async () => {
+      const api = await proposed();
+      await user().click(button("Remove Payments"));
+      expect(await lastEdits(api)).toEqual([{ op: "remove_ou", ou: "custom_payments" }]);
+    });
+
+    it("asks to move accounts out before an OU can be removed", async () => {
+      await proposed();
+      expect([button("Remove Cards"), screen.getByText("Move its accounts and child OUs to another OU first.")]).toEqual(
+        [expect.toBeDisabled(), expect.anything()]);
+    });
+
+    it("offers only the edits each OU and account allows", async () => {
+      await proposed();
+      expect(["Add OU under Security", "Rename PROD", "Remove PROD", "Disable acme-audit", "Move acme-network"]
+        .map((name) => screen.queryByRole("button", { name }))).toEqual([null, null, null, null, null]);
+    });
+
+    it("disables a generated workload account instead of removing it", async () => {
+      const api = await proposed();
+      expect(screen.queryByRole("button", { name: "Remove acme-payments-prod" })).toBeNull();
+      await user().click(button("Disable acme-payments-prod"));
+      expect(await lastEdits(api)).toEqual([{ op: "disable_account", account: "acme-payments-prod" }]);
+    });
+
+    it("marks and re-enables a disabled account", async () => {
+      const api = await proposed();
+      expect(within(screen.getByRole("tree")).getByText("Disabled")).toBeInTheDocument();
+      await user().click(button("Enable acme-retail-dev"));
+      expect(await lastEdits(api)).toEqual([{ op: "enable_account", account: "acme-retail-dev" }]);
+    });
+
+    it("removes an account added in the editor", async () => {
+      const api = await proposed();
+      await user().click(button("Remove acme-cards-prod"));
+      expect(await lastEdits(api)).toEqual([{ op: "remove_account", account: "acme-cards-prod" }]);
+    });
+
+    it("moves an account within its environment", async () => {
+      const api = await proposed();
+      await user().click(button("Move acme-payments-prod"));
+      await user().selectOptions(screen.getByLabelText("Move acme-payments-prod to"), "custom_cards");
+      await user().click(button("Move"));
+      expect(await lastEdits(api)).toEqual([{ op: "move_account", account: "acme-payments-prod", ou: "custom_cards" }]);
+    });
+
+    it("hides Move when there is nowhere in the domain to go", async () => {
+      await proposed();
+      expect(screen.queryByRole("button", { name: "Move acme-retail-dev" })).toBeNull();
+    });
+
+    it("lists the manual changes in plain words", async () => {
+      const api = await proposed();
+      await user().click(button("Add OU under PROD"));
+      await user().type(screen.getByLabelText("New OU name"), "Data");
+      await user().click(button("Add OU"));
+      await lastEdits(api);
+      const changes = screen.getByRole("list", { name: "Manual changes" });
+      expect([screen.getByText("Manual changes (1)"), within(changes).getByText("Added OU Data under PROD")])
+        .toHaveLength(2);
+    });
+
+    it("undoes a manual change and proposes again", async () => {
+      const api = await proposed();
+      await user().click(button("Disable acme-payments-prod"));
+      await lastEdits(api);
+      await user().click(button("Undo change 1"));
+      await vi.waitFor(() => expect(api.proposeLandingZone).toHaveBeenCalledTimes(3));
+      expect(lastRequest(api).edits).toEqual([]);
+    });
+
+    it("keeps the edits when the questionnaire is revisited", async () => {
+      const api = await proposed();
+      await user().click(button("Disable acme-payments-prod"));
+      await lastEdits(api);
+      await goTo("Controls");
+      expect(await propose(api)).toBeDefined();
+      expect(lastRequest(api).edits).toEqual([{ op: "disable_account", account: "acme-payments-prod" }]);
+    });
+
+    it("requests approval with the edits", async () => {
+      const api = await proposed();
+      await user().click(button("Disable acme-payments-prod"));
+      await lastEdits(api);
+      await user().click(button("Request approval"));
+      expect(vi.mocked(api.createLandingZoneDesign).mock.calls[0][0].edits).toEqual(
+        [{ op: "disable_account", account: "acme-payments-prod" }]);
+    });
+
+    it("describes every kind of change", async () => {
+      const edits: TreeEdit[] = [
+        { op: "add_ou", parent: null, name: "Data Lab" }, { op: "rename_ou", ou: "custom_payments", name: "Billing" },
+        { op: "move_ou", ou: "custom_payments", parent: "custom_cards" }, { op: "remove_ou", ou: "custom_old" },
+        { op: "add_account", ou: "prod", suffix: "billing-prod" }, { op: "enable_account", account: "acme-retail-dev" },
+        { op: "remove_account", account: "acme-cards-prod" },
+        { op: "move_account", account: "acme-payments-prod", ou: "custom_cards" }];
+      const api = fakeApi({ landingZoneDesign: vi.fn().mockResolvedValue(landingZoneDetail({ edits })) });
+      renderPage(api);
+      await user().click(await screen.findByRole("tab", { name: "Approvals" }));
+      await user().click(await screen.findByRole("button", { name: "View v1" }));
+      const changes = await screen.findByRole("list", { name: "Manual changes" });
+      expect(within(changes).getAllByRole("listitem").map((item) => item.textContent)).toEqual([
+        "Added OU Data Lab at the root", "Renamed Payments to Billing", "Moved Payments under Cards",
+        "Removed OU custom_old", "Added account billing-prod to PROD", "Enabled acme-retail-dev",
+        "Removed acme-cards-prod", "Moved acme-payments-prod to Cards"]);
+    });
   });
 
   describe("approvals", () => {

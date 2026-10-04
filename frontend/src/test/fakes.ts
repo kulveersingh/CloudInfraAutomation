@@ -1,6 +1,6 @@
 import { vi } from "vitest";
 import type {
-  CatalogEntry, CostCenterSettings, EnvironmentInfo, JobStatus, LandingZoneDesign, LandingZoneDesignDetail,
+  AccountInfo, CatalogEntry, CostCenterSettings, EnvironmentInfo, JobStatus, LandingZoneDesign, LandingZoneDesignDetail,
   LandingZoneProposal, NetworkInfo, NetworkOption, OuInfo, PipelineStage, PlatformApiPort, Portfolio, PreviewResult,
   ProjectSummary, RegionInfo, Release,
 } from "../api/types";
@@ -113,14 +113,32 @@ export function job(state: string, steps: JobStatus["steps"] = [], error: string
 }
 
 const ou = (key: string, name: string, kind: string, extra: Partial<OuInfo> = {}): OuInfo => ({
-  key, name, kind, environment: null, tier: null, created_by_control_tower: false, accounts: [], children: [], ...extra,
+  key, name, kind, environment: null, tier: null, created_by_control_tower: false, custom: false, domain: null,
+  allowed_edits: [], blocked_edits: {}, accounts: [], children: [], ...extra,
 });
 
+const account = (name: string, extra: Partial<AccountInfo> = {}): AccountInfo => ({
+  name, enabled: true, added: false, allowed_edits: ["move", "disable"], ...extra,
+});
+const fixed = (name: string) => account(name, { allowed_edits: [] });
+const CONTAINER: OuInfo["allowed_edits"] = ["add_child", "add_account"];
+
 export const OU_TREE: OuInfo[] = [
-  ou("security", "Security", "security", { created_by_control_tower: true, accounts: ["acme-log-archive", "acme-audit"] }),
-  ou("infrastructure", "Infrastructure", "infrastructure", { accounts: ["acme-network"] }),
-  ou("prod", "PROD", "environment", { environment: "prod", tier: "prod", accounts: ["acme-payments-prod"] }),
-  ou("parent_nonprod", "NonProd", "parent", { children: [ou("dev", "DEV", "environment", { environment: "dev" })] }),
+  ou("security", "Security", "security", { created_by_control_tower: true,
+    accounts: [fixed("acme-log-archive"), fixed("acme-audit")] }),
+  ou("infrastructure", "Infrastructure", "infrastructure", { domain: "infrastructure", allowed_edits: CONTAINER,
+    accounts: [fixed("acme-network")] }),
+  ou("prod", "PROD", "environment", { environment: "prod", tier: "prod", domain: "prod", allowed_edits: CONTAINER,
+    accounts: [account("acme-payments-prod")], children: [
+      ou("custom_payments", "Payments", "custom", { custom: true, domain: "prod",
+        allowed_edits: [...CONTAINER, "rename", "move", "remove"] }),
+      ou("custom_cards", "Cards", "custom", { custom: true, domain: "prod", allowed_edits: [...CONTAINER, "rename", "move"],
+        blocked_edits: { remove: "Move its accounts and child OUs to another OU first." },
+        accounts: [account("acme-cards-prod", { added: true, allowed_edits: ["move", "disable", "remove"] })] }),
+    ] }),
+  ou("parent_nonprod", "NonProd", "parent", { children: [ou("dev", "DEV", "environment", { environment: "dev",
+    domain: "dev", allowed_edits: CONTAINER,
+    accounts: [account("acme-retail-dev", { enabled: false, allowed_edits: ["move", "enable"] })] })] }),
 ];
 
 const DIAGRAM = { svg: '<svg xmlns="http://www.w3.org/2000/svg"><text>PROD OU</text></svg>', mermaid: "flowchart TD" };
@@ -133,7 +151,7 @@ export const PROPOSAL: LandingZoneProposal = {
 export function landingZoneDesign(overrides: Partial<LandingZoneDesign> = {}): LandingZoneDesign {
   return {
     id: "lz-1", version: 1, status: "pending_approval", organization_name: "acme",
-    answers: LandingZoneDraft.initial().withOrganization("acme", "aws@acme.example").toAnswers(),
+    answers: LandingZoneDraft.initial().withOrganization("acme", "aws@acme.example").toAnswers(), edits: [],
     created_by: "alex", submitted_by: "alex", decided_by: null, decision_comment: null, repository: null,
     commit_sha: null, accounts: {}, created_at: "2026-10-04T08:00:00", ...overrides,
   };

@@ -232,6 +232,27 @@ export interface LandingZoneAnswers {
   controls_profile: "baseline" | "recommended" | "regulated";
 }
 
+export type TreeEdit =
+  | { op: "add_ou"; parent: string | null; name: string }
+  | { op: "rename_ou"; ou: string; name: string }
+  | { op: "move_ou"; ou: string; parent: string }
+  | { op: "remove_ou"; ou: string }
+  | { op: "add_account"; ou: string; suffix: string }
+  | { op: "disable_account"; account: string }
+  | { op: "enable_account"; account: string }
+  | { op: "remove_account"; account: string }
+  | { op: "move_account"; account: string; ou: string };
+
+export type OuEdit = "add_child" | "add_account" | "rename" | "move" | "remove";
+export type AccountEdit = "move" | "disable" | "enable" | "remove";
+
+export interface AccountInfo {
+  name: string;
+  enabled: boolean;
+  added: boolean;
+  allowed_edits: AccountEdit[];
+}
+
 export interface OuInfo {
   key: string;
   name: string;
@@ -239,8 +260,17 @@ export interface OuInfo {
   environment: string | null;
   tier: string | null;
   created_by_control_tower: boolean;
-  accounts: string[];
+  custom: boolean;
+  domain: string | null;
+  allowed_edits: OuEdit[];
+  blocked_edits: Partial<Record<OuEdit, string>>;
+  accounts: AccountInfo[];
   children: OuInfo[];
+}
+
+export interface LandingZoneRequest {
+  answers: LandingZoneAnswers;
+  edits: TreeEdit[];
 }
 
 export interface LandingZoneExplanation {
@@ -261,6 +291,7 @@ export interface LandingZoneDesign {
   status: LandingZoneStatus;
   organization_name: string;
   answers: LandingZoneAnswers;
+  edits: TreeEdit[];
   created_by: string;
   submitted_by: string | null;
   decided_by: string | null;
@@ -280,8 +311,8 @@ export interface Identity {
 }
 
 export interface PlatformApiPort {
-  proposeLandingZone(answers: LandingZoneAnswers): Promise<LandingZoneProposal>;
-  createLandingZoneDesign(answers: LandingZoneAnswers): Promise<LandingZoneDesign>;
+  proposeLandingZone(request: LandingZoneRequest): Promise<LandingZoneProposal>;
+  createLandingZoneDesign(request: LandingZoneRequest): Promise<LandingZoneDesign>;
   landingZoneDesigns(): Promise<LandingZoneDesign[]>;
   landingZoneDesign(designId: string): Promise<LandingZoneDesignDetail>;
   submitLandingZoneDesign(designId: string): Promise<LandingZoneDesign>;
