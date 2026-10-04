@@ -2613,7 +2613,7 @@ sequenceDiagram
 
 ## 20. Landing zone workflow: AWS Organizations OU structure with Control Tower controls
 
-**Status: rev 3 approved and implemented; §20.11 (OU tree editor) approved with changes (E1, E4).** Mock: the *Landing zone* page in `mock-ui/index.html`.
+**Status: rev 3 approved and implemented; §20.11 (OU tree editor) approved with changes (E1, E4); §20.12 (industry templates) is a design for review.** Mock: the *Landing zone* page in `mock-ui/index.html`.
 
 **Inputs:**
 - AWS Prescriptive Guidance *OU structure in regulated AWS landing zones* (the attached document).
@@ -2934,3 +2934,260 @@ The existing rules still apply: unique OU names (`UniqueOuNames`), at most 5 lev
 | E2 | Re-propose after every edit | **Decided: yes.** |
 | E3 | Change the propose/create request body to `{answers, edits}` | **Decided: yes.** |
 | E4 | Removing generated workload accounts | **Decided: disable instead of remove.** Disabled accounts stay in the design, aren't vended, and can be re-enabled. A custom OU is removed only after its accounts and child OUs are moved elsewhere. |
+
+### 20.12 Industry templates and control packs
+
+**Status: design for review. No code until approved.**
+
+Customers can start from a ready-made **industry template** instead of designing a landing zone from scratch. A template sets the questionnaire answers, the OU structure (including preset custom OUs) and a set of **control packs**: Control Tower controls with the OUs they apply to. The customer can use the template as is, or adjust it:
+- pick a different combination of environments
+- add or remove OUs in the tree editor (§20.11)
+- turn control packs on or off
+
+The design records which template and version it started from, and lists every change made to it.
+
+#### 20.12.1 Research findings
+
+Sources:
+- [aws-samples/aws-control-tower-controls-cdk](https://github.com/aws-samples/aws-control-tower-controls-cdk), including its Control Catalog export of 760 controls
+- *AWS Control Tower User Guide* (PDF, 729 pages)
+- [Frameworks supported](https://docs.aws.amazon.com/controltower/latest/controlreference/frameworks-supported.html)
+- [Control Catalog ontology](https://docs.aws.amazon.com/controlcatalog/latest/userguide/ontology-overview.html)
+
+| # | Finding | Effect on this design |
+|---|---|---|
+| F1 | Controls are enabled by **global identifier**, `arn:aws:controlcatalog:::control/<id>`. The sample states that regional identifiers (`arn:aws:controltower:<region>::control/AWS-GR_…`) are **no longer supported**. | **Our `lz-structure` stack uses regional identifiers today.** This work moves every control to global identifiers (§20.12.6). |
+| F2 | The catalog has 760 controls: <ul><li>66 preventive: 53 SCP, 9 RCP, 4 EC2 declarative policies</li><li>459 detective: 263 Config rules, 196 Security Hub controls</li><li>235 proactive (CloudFormation hooks)</li></ul> | Packs mix all three behaviors. Proactive controls need the CloudFormation-hooks prerequisite control (`CT.CLOUDFORMATION.PR.1`). Security Hub-based detective controls need Security Hub, which our Security OU design already enables. |
+| F3 | Control Catalog maps controls to **17 frameworks** through `ListControlMappings`: <ul><li>PCI DSS v3.2.1 and v4.0</li><li>NIST SP 800-53 r5, NIST SP 800-171 r2, NIST CSF v1.1</li><li>FedRAMP r4</li><li>ISO/IEC 27001:2013 Annex A</li><li>SSAE-18 SOC 2</li><li>CIS AWS Benchmark v1.2/1.3/1.4, CIS v7.1/v8.0</li><li>ACSC Essential Eight, ACSC ISM</li><li>CCCS Medium</li><li>AWS Well-Architected v10</li></ul> **HIPAA, GDPR and GxP are not mapped directly.** | Templates show "aligned with" frameworks, using mapping data from the catalog. They never claim compliance. Healthcare aligns through NIST 800-53 r5; the EU template uses data-residency controls plus ISO 27001. |
+| F4 | Up to **100 control operations** can be in flight, but **10** run at a time (the rest queue). Five account operations run at once. | Our `DependsOn` batches of 10 controls already respect this. Templates with ~60 controls per OU still deploy in one stack. |
+| F5 | Limits: <ul><li>**10 SCPs per OU** in Control Tower</li><li>OUs nested at most 5 levels</li><li>**≤1,000 accounts per OU** (fewer above 15 governed Regions)</li><li>10,000 accounts per organization</li></ul> | The SCP quota rule moves from 5 to the Control Tower limit of 10, and counts Control Tower's own SCPs (§20.12.6). A warning appears when an OU's planned accounts × governed Regions nears the registration limits. |
+| F6 | Region deny can be applied **per OU** with parameters (`AllowedRegions`, `ExemptedPrincipalArns`, `ExemptedActions`), as well as for the whole landing zone. | The data-residency pack uses the per-OU control. Our hand-written region-deny statement is dropped from the baseline SCP when that pack is on, which frees SCP space. |
+| F7 | A **digital sovereignty** control group (65 controls) covers data residency, granular access, encryption and resiliency. Examples: disallow cross-Region networking or S3 replication, disallow VPN, key material from CloudHSM or an external source. | Used by the EU sovereignty template and the optional strict-residency pack |
+| F8 | **Landing zone 4.0**: <ul><li>Config, CloudTrail, SecurityRoles and **Backup** become optional integrations, with their own baselines</li><li>Control Tower no longer creates the Security OU</li><li>Drift alerts go to EventBridge</li></ul> We pin **3.3** today. | Templates don't depend on 4.0. Moving to 4.0, which adds a central Backup vault for regulated templates, is a separate decision (T5). |
+| F9 | The user guide recommends these OUs: Security, Sandbox, **Infrastructure**, **Workloads**, with **Production and Staging always separate**. | Matches rule R1. Every template keeps Production and Staging as separate OUs. |
+| F10 | The CDK sample's configuration is a list of `{controls (+ parameters, tags), OU ids}`. | That's what a control pack is: a set of controls plus an OU selector. |
+
+#### 20.12.2 Concepts
+
+| Concept | What it is | Where it lives (Open/Closed) |
+|---|---|---|
+| **Control catalog snapshot** | The controls the packs use: global id, name, behavior, severity, implementation, parameters, and **frameworks** (from `ListControlMappings`) | `backend/app/landing_zone/catalog/controls.yaml`. Refreshed by `scripts/refresh_control_catalog.py` (read-only Control Catalog API; decision T2). Checked against `ListControls` when the plan is built (§20.6). |
+| **Control pack** | A named, versioned set of controls, with a **selector** that says which OUs receive them, and optional parameters (for example, allowed Regions) | One YAML file per pack in `catalog/packs/`. A new pack adds a file. |
+| **OU selector** | Chooses target OUs from the final tree (after edits): `workloads`, `production_tier`, `nonproduction_tier`, `sandbox`, `infrastructure`, `compliance:<scope>`, `custom_domains` | One class per selector, in a registry |
+| **Industry template** | A versioned bundle: questionnaire answers, preset tree edits (§20.11), control packs, aligned frameworks and a description | One YAML file per template in `catalog/templates/`. A new industry adds a file. |
+| **Environment catalog** | The environments a design can include (§20.12.4) | Code constant with a tier per environment |
+
+#### 20.12.3 Control packs
+
+The controls below are the pack contents, by global id (the `<id>` in `arn:aws:controlcatalog:::control/<id>`) and catalog name. **Prev** = preventive, **Det** = detective, **Pro** = proactive.
+
+**`foundation`** (all workload OUs). Identity and public-exposure basics.
+
+| Control (global id) | Behavior | Name |
+|---|---|---|
+| `5kvme4m5d2b4d7if2fs5yg2ui` | Prev (SCP) | Disallow actions as a root user |
+| `8ui9y3oace2513xarz8aqojl7` | Prev (SCP) | Disallow creation of access keys for the root user |
+| `24izmu4k16gv9tvd7sexnyrfy` | Det | Detect whether MFA for the root user is enabled |
+| `1fvktjhpo9wdpt3pjb2wsz7nt` | Det | Detect whether MFA is enabled for IAM users of the console |
+| `6wmutsohbkwhfw6sf7cbt5e81` | Det | S3 account-level Block Public Access set |
+| `4jc77cq1lcr7g64xywwypykv8` | Det | Detect public access to RDS database instances |
+| `1h4eyqyyonp19dlrreqf1i3w0` | Det | Detect public access to RDS snapshots |
+| `6rilu41n0gb9w6mxrkyewoer4` | Det | Detect unrestricted incoming SSH |
+| `clmlaa2in1wkntwekh7uw2jyx` | Prev (declarative) | Disallow public sharing of AMIs |
+| `ek6wc2bmgzmho1kk6bn236mqt` | Prev (declarative) | Disallow public sharing of EBS snapshots |
+
+**`data-protection`** (all workload OUs). Encryption at rest and in transit.
+
+| Control | Behavior | Name |
+|---|---|---|
+| `dkjyeuczqj3rnyhn9116p16pw` | Prev (SCP) | Require an attached EBS volume to be encrypted at rest |
+| `97hes2glndlye96adkdcdeef4` | Prev (SCP) | Require an EBS snapshot to be created from an encrypted volume |
+| `chlzfpsllhs3knp1ixr773wa6` | Prev (SCP) | Require that an EBS snapshot cannot be publicly restorable |
+| `7mo7a2h2ebsq71l8k6uzr96ou` | Prev (RCP) | Require encryption of data in transit for calls to S3 |
+| `e34kieahgkm0lggs5g0s412jt` | Det | Detect whether RDS storage encryption is enabled |
+| `d4wgeffz6izrb627c2yb8nq8d` | Det | S3 default encryption enabled |
+| `47j0mbl42qhyollch0c07aawc` | Pro | Require an RDS instance to be encrypted at rest |
+| `b7p5zuz380l9pblepsai1u6an` | Pro | Require an S3 bucket to use SSE-KMS |
+
+**`network-hardening`** (all workload OUs).
+
+| Control | Behavior | Name |
+|---|---|---|
+| `df2ta5ytg2zatj1q7y5e09u32` | Det | Detect unrestricted incoming TCP traffic |
+| `e94oghk9gn3wb5xhpw9l53xr9` | Det | Network ACLs don't allow 0.0.0.0/0 to ports 22/3389 |
+| `cdn8m939ffm43gw43z7fzlmoj` | Pro | Require network ACLs to block 0.0.0.0/0 to ports 22/3389 |
+| `10au7g2tdfmykh2cunfbpbam1` | Det | EC2 instances use IMDSv2 |
+| `2wsx5sll20kxurworrzvjn7by` | Pro | Require an EC2 launch template to have IMDSv2 |
+| `ev4nb47hdhfom2ic1k0ljc7am` | Pro | Require launch templates not to auto-assign public IPs |
+
+**`logging-integrity`** (workload OUs and Infrastructure).
+
+| Control | Behavior | Name |
+|---|---|---|
+| `624yg0j9d8swiglwfc1m4kvnm` | Det | CloudTrail log file validation enabled |
+| `cok7rgoujcdjcy6bjzgpvnq8w` | Pro | Require a CloudTrail trail to have log file validation |
+| `blnba8rkwuvh4lm6aczhfk3t6` | Det | VPC flow logging enabled in all VPCs |
+| `ajlgwooddm54wepz191t6gd0a` | Pro | Require ELB load balancers to have logging |
+| `62smpoz33dsy0oa7u1iwa58lz` | Det | GuardDuty enabled |
+
+**`key-management`** (production-tier and compliance OUs).
+
+| Control | Behavior | Name |
+|---|---|---|
+| `bpnmuwwmpvn362b2l34xxrqfx` | Prev (RCP) | Require S3 uploads to use SSE-KMS |
+| `beyhbq47poryf052dlel7oig5` | Prev (SCP) | Require a KMS key with the bypass-policy-lockout safety check |
+| `8tq2qsio9o9nliasf359rvnso` | Prev (SCP) | Require KMS key policies to limit grants to AWS services |
+| `esv514s4zvnxdunuijbgerpn3` | Det | KMS key rotation enabled |
+| `54a6rhgyml01y7vexkrn7bgd2` | Det | Secrets Manager automatic rotation enabled |
+
+**`production-resilience`** (production-tier OUs).
+
+| Control | Behavior | Name |
+|---|---|---|
+| `avr20py8ssve39u69tyuxcanz` | Pro | Require RDS instances with multiple Availability Zones |
+| `1b4fdyb4pwzlryd3wds4nu754` | Det | RDS instances with multiple Availability Zones |
+| `1cxi1br09glocqagbfwu2kgxu` | Pro | Require RDS deletion protection |
+| `4docid6lj7n5tstdmm7btegt1` | Pro | Require DynamoDB point-in-time recovery |
+| `aqh482zxh1libhd8e5pff5r1w` | Det | EC2 instances protected by a backup plan |
+| `dm91qhaj7bjtyrovbq0szj49u` | Det | DynamoDB tables in a backup plan |
+
+**`pci-cde`** (`compliance:PCI` OUs: the cardholder data environment).
+
+| Control | Behavior | Name |
+|---|---|---|
+| `41ngl8m5c4eb1myoz0t707n7h` | Prev (SCP) | Disallow internet access for a customer-managed VPC instance. Fits our central-egress design: workload VPCs have no internet gateway. |
+| `5rlqt6yj6u0v0gb62pqdy4ae` | Prev (SCP) | Disallow VPN connections |
+| `5svkm0sfsp3chc06m683cygz` | Det | CloudTrail logs all S3 write data events |
+| `65l0pkpmktv0d9qw0c7gdhv5d` | Det | CloudTrail logs all S3 read data events |
+| `6qvep4e99ha6pgc0osehy0w4t` | Pro | Require RDS parameter groups to require TLS |
+| `3bsf69bolxub33ycbh9oiiphi` | Det | GuardDuty Malware Protection enabled |
+
+**`data-residency`** (all workload OUs). Parameter `AllowedRegions`, which defaults to the governed Regions.
+
+| Control | Behavior | Name |
+|---|---|---|
+| `ka8e3pkqefnjsxuyc26ji580` | Prev (SCP, parameterized) | Deny access based on the requested Region, per OU |
+| `dvuaav61i5cnfazfelmvn9m6k` | Prev (SCP) | Disallow cross-Region networking (EC2, CloudFront, Global Accelerator) |
+| `53u8m2z255npa7rldrk77vm5z` | Prev (SCP) | Disallow EC2 VM import and export |
+
+**`strict-residency`** (optional, off by default: T6).
+
+| Control | Behavior | Name |
+|---|---|---|
+| `3zbcht7oxkzts9r1z20nz5lcw` | Prev (SCP) | Disallow cross-Region replication for S3 buckets. **Conflicts with DR/HA projects whose S3 buckets replicate to the second Region (§4.11)**; the wizard hides replicated S3 for these OUs. |
+| `d0dnxm99zg7gfsow9ei70qhea` | Prev (SCP) | Require KMS customer-managed keys with external key material |
+
+**Controls profiles (§20.6) become packs too**, so the "Start from scratch" path behaves as before, now with global identifiers:
+- Baseline = `foundation`
+- Strongly recommended = `foundation` + `data-protection` + `network-hardening`, plus `production-resilience` on production-tier OUs
+- Regulated = Strongly recommended + `logging-integrity` + `key-management`
+
+The same control from two packs on one OU is enabled once.
+
+#### 20.12.4 Environment combinations
+
+Today a customer chooses 4, 5 or 6 environments. This becomes a **choice of environments from a catalog**, with 4, 5 and 6 kept as one-click presets:
+
+| Environment | Tier | Notes |
+|---|---|---|
+| Sandbox | sandbox | Optional (recommended). Control Tower creates the Sandbox OU. |
+| DEV | non-production | |
+| QA | non-production | Functional test |
+| TEST | non-production | Integration test |
+| UAT | non-production | Business acceptance; renameable (e.g. VALIDATION for GxP) |
+| PERF | non-production | Performance and load testing |
+| STAGE | production | **Always included** (F9: Staging distinct from Production) |
+| PROD | production | **Always included** |
+
+The rules:
+- STAGE and PROD are always included, plus at least one non-production environment.
+- A design has at most 8 environments.
+- Every environment remains its own isolated OU (R1).
+- Names stay editable.
+- The IPAM planner already splits the CIDR for any number of environments.
+
+`environment_count` is replaced by `environments: [ids]`. Old answers with `environment_count` still load, mapped to the matching preset (decision T3).
+
+#### 20.12.5 Industry templates (v1)
+
+Each template fills in the questionnaire and the tree editor. Everything stays editable, and the Review step shows "Based on *template* v1" with the list of differences.
+
+| Template | Aligned frameworks (F3) | Environments | Structure (beyond Security, Infrastructure, Sandbox, environments) | Accounts | Packs | Notable answers |
+|---|---|---|---|---|---|---|
+| **Financial services** (banking, payments, insurance) | PCI-DSS-v4.0, SSAE-18-SOC-2, NIST-CSF-v1.1 | Sandbox, DEV, TEST, UAT, STAGE, PROD | PCI OU (PCI-STAGE, PCI-PROD); root-level custom OU **Third-party Integrations** (vendor-connected accounts in their own isolation domain); Exceptions, Suspended | One per product | all except data-residency and strict-residency | Regulated profile; logs kept 7 years; Direct Connect; inspection on; Security Tooling account; sandbox $300 a month, 14-day expiry |
+| **Healthcare & life sciences** (HIPAA-aligned, GxP) | NIST-SP-800-53-r5 (HIPAA Security Rule crosswalk), ISO-IEC-27001 | Sandbox, DEV, TEST, **VALIDATION** (UAT renamed, for GxP IQ/OQ/PQ), STAGE, PROD | HIPAA and GxP compliance OUs; root-level custom OU **Research** (de-identified data, isolated from clinical workloads) | One per product | foundation, data-protection, network-hardening, logging-integrity, key-management, production-resilience | Regulated profile; logs kept 7 years; inspection on |
+| **Public sector** (FedRAMP Moderate-aligned commercial Regions) | NIST-SP-800-53-r5, FedRAMP-r4, NIST-SP-800-171-r2 | Sandbox, DEV, TEST, STAGE, PROD | Exceptions, Suspended | One per portfolio | foundation, data-protection, network-hardening, logging-integrity, key-management, production-resilience, **data-residency (US Regions)** | Governed Regions us-east-1 and us-west-2. Note: FedRAMP High and ITAR need AWS GovCloud, which this tool doesn't target. |
+| **Retail & e-commerce** | PCI-DSS-v4.0, CIS-AWS-Benchmark-v1.4 | Sandbox, DEV, QA, PERF (peak-season load tests), STAGE, PROD | PCI OU for the cardholder data environment only, so the rest of retail stays out of PCI scope; root-level custom OU **Store Edge** (in-store and IoT accounts) | One per portfolio | foundation, data-protection, network-hardening, production-resilience, pci-cde | Strongly recommended profile; sandbox per developer |
+| **SaaS & technology** | SSAE-18-SOC-2, CIS-v8.0, AWS-WAF-v10 | Sandbox, DEV, STAGE, PROD | Custom OU **Tenants** under PROD (account-per-tenant silo model); Automations OU (CI/CD) | One per product | foundation, data-protection, network-hardening, production-resilience | Strongly recommended profile; local egress allowed |
+| **EU data sovereignty** (GDPR-aligned) | ISO-IEC-27001, NIST-CSF-v1.1 (GDPR has no catalog mapping; residency comes from controls) | Sandbox, DEV, TEST, STAGE, PROD | Exceptions, Suspended | One per portfolio | foundation, data-protection, network-hardening, logging-integrity, key-management, **data-residency (EU Regions)**; strict-residency offered | Home Region eu-central-1; governed Regions eu-central-1 and eu-west-1 |
+| **Start from scratch** | n/a | Recommended five | Recommended defaults | One per portfolio | From the controls profile | Today's questionnaire |
+
+Example template file (`catalog/templates/saas.yaml`):
+
+```yaml
+id: saas
+version: 1
+name: SaaS & technology
+industry: Technology
+description: Account-per-tenant SaaS with SOC 2-aligned controls.
+frameworks: [SSAE-18-SOC-2-Oct-2023, CIS-v8.0, AWS-WAF-v10]
+answers:
+  environments: [sandbox, dev, stage, prod]
+  account_model: product
+  infrastructure: [network, shared_services, identity, backup, monitoring, cicd]
+  network: {egress: local}
+  controls_profile: recommended
+edits:
+  - {op: add_ou, parent: prod, name: Tenants}
+packs: [foundation, data-protection, network-hardening, production-resilience]
+```
+
+#### 20.12.6 Changes to the platform
+
+| Area | Change |
+|---|---|
+| Answers | Add `template: {id, version} \| null`, `environments: [ids]` (replaces `environment_count`; T3), and `control_packs: [ids]` (defaults to the profile's packs). Add `pack_parameters` (for example, `data-residency.AllowedRegions`). |
+| Catalog | `ControlCatalogSnapshot`, `ControlPack`, `PackRegistry`, `OuSelector` subclasses, `TemplateRegistry`, all loaded from the YAML files and validated at startup (unknown control or pack ids fail fast) |
+| Guardrails | `ControlCatalog` (regional `AWS-GR_` names, §20.6) is replaced by a `PackResolver`: final tree + packs → controls per OU, with duplicates removed. Our own SCP statements that a Control Tower control now covers (root user, region deny) are dropped from the baseline SCP when that pack is on. |
+| `lz-structure` | `AWS::ControlTower::EnabledControl` uses `arn:aws:controlcatalog:::control/<id>` (F1), with `Parameters` for parameterized controls. Batches of 10 stay (F4). The CloudFormation-hooks prerequisite is enabled on OUs that get proactive controls (F2). |
+| Validation | `ScpQuotaRule` uses the Control Tower limit of **10** SCPs per OU (F5), counting our SCPs, Control Tower's SCP-based controls, and FullAWSAccess. Exactly how Control Tower packs controls into SCPs is unverified (O1), so the rule counts one SCP per 5 SCP-type controls. New rules: `PackTargetsExist` (every pack resolves to at least one OU, or warns), `ResidencyCompatible` (strict-residency vs DR replication), and `OuSizeWithinRegistrationLimit` (warning, F5). |
+| API | `GET /v1/admin/landing-zone/templates` returns summaries: industry, frameworks, environments, OU count, control count by behavior. `GET …/templates/{id}` returns the full template. `GET …/control-packs` returns packs with their controls. Proposals add, per OU, the controls that apply (`id`, `name`, `behavior`, `severity`, `packs`) and counts. |
+| Bundle | `design.json` records the template and version, the packs and their parameters. `docs/controls.md` lists the controls per OU with their framework mappings, for auditors. |
+| UI | <ul><li>**New first step, "Start"**: template cards showing industry, aligned frameworks, environments, OU and control counts, and a description. Choosing one fills in the questionnaire and edits. "Start from scratch" keeps today's flow.</li><li>**Environments step**: the environment catalog as checkboxes, with the 4/5/6 presets as buttons.</li><li>**Controls step**: the profile plus pack toggles. Each pack shows target OUs, control counts by behavior and aligned frameworks, with an expandable control list. Turning off a template's pack warns: "Removes alignment with PCI-DSS-v4.0 for PCI OUs".</li><li>**Review step**: a "Based on *template* v1" banner with the differences and **Reset to template**. Each OU in the tree shows its control count.</li></ul> |
+
+#### 20.12.7 Testing (TDD, 100% coverage)
+
+- **Catalog loading:**
+  - every template and pack file validates
+  - unknown ids fail
+  - every control id in a pack exists in the snapshot
+- **Each OU selector** against designs with grouping, compliance scopes and custom OUs
+- **`PackResolver`:**
+  - removes duplicate controls
+  - passes parameters through
+  - selects production-tier OUs only
+- **Each template:**
+  - proposes with **no problems**
+  - every stack passes cfn-lint (added to the lint variants)
+  - SCP quota respected
+  - environments, OUs and packs as documented
+- **Environment catalog:** the required STAGE and PROD, the maximum of 8, and old `environment_count` answers still load
+- **Structure stack:**
+  - global identifiers
+  - parameters on the region-deny control
+  - batches of 10
+  - the hooks prerequisite
+- **UI:** template cards, filling in from a template, differences and reset, environment checkboxes and presets, pack toggles with warnings, controls per OU
+
+#### 20.12.8 Decisions and open questions
+
+| # | Decision | Recommendation |
+|---|---|---|
+| T1 | The six industry templates in §20.12.5 (plus Start from scratch) | **Approve the list.** More industries (energy, media, telecom) are new YAML files later. |
+| T2 | Framework mappings come from `ListControlMappings`, a read-only call that needs AWS credentials in any account | **Run `scripts/refresh_control_catalog.py` once with your credentials** and commit the snapshot. Until then, the UI shows template frameworks as *intended alignment (unverified)*. |
+| T3 | Replace `environment_count` with an environment list (catalog of 8, with STAGE and PROD required) | **Yes**, keeping 4/5/6 as presets |
+| T4 | Move all controls to global identifiers and replace the profile catalog with packs | **Yes.** It's required (F1), and the profiles keep their meaning. |
+| T5 | Landing zone 4.0 (optional integrations, central Backup vault) | **Stay on 3.3 for this change**; plan 4.0 separately |
+| T6 | The strict-residency pack (blocks S3 cross-Region replication) | **Optional, off by default**, because it breaks DR/HA S3 replication |
+| O1 | How Control Tower packs SCP-based controls into SCPs per OU | Verify on a real landing zone. Until then, count one SCP per 5 SCP-type controls (conservative). |
+| O2 | The global id of the CloudFormation-hooks prerequisite (`CT.CLOUDFORMATION.PR.1`) is not in the sample's 2025 export | Resolve with `ListControls` in the refresh script and pin it in the snapshot |
