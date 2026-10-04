@@ -105,6 +105,7 @@ describe("ProjectDraft", () => {
       environments: ["dev"],
       resources: [{ id: "bucket", type: "s3.bucket" }],
       connections: [],
+      network: { attach_compute: true, selections: {} },
     });
   });
 
@@ -112,5 +113,26 @@ describe("ProjectDraft", () => {
     const request = ready().withMode("dr").withResourceProperties("bucket", { Foo: 1 }).toRequest();
     expect([request.resilience.secondary_region, request.resources[0].config]).toEqual([
       "us-east-2", { properties: { Foo: 1 } }]);
+  });
+
+  it("can detach compute from the VPC", () => {
+    expect(ready().withAttachCompute(false).toRequest().network.attach_compute).toBe(false);
+  });
+
+  it("records a network choice per environment and region", () => {
+    expect(ready().withNetworkSelection("prod", "us-east-1", "net-9").toRequest().network.selections)
+      .toEqual({ "prod:us-east-1": "net-9" });
+  });
+
+  it("deploys lower environments to the primary region only", () => {
+    expect(ready().withMode("dr").regionsFor("dev")).toEqual(["us-east-1"]);
+  });
+
+  it("deploys stage and prod to both regions for DR and HA", () => {
+    expect(ready().withMode("ha").regionsFor("prod")).toEqual(["us-east-1", "us-east-2"]);
+  });
+
+  it("deploys everything to the primary region for single-region projects", () => {
+    expect(ready().regionsFor("prod")).toEqual(["us-east-1"]);
   });
 });

@@ -1,7 +1,7 @@
 import { vi } from "vitest";
 import type {
-  CatalogEntry, CostCenterSettings, EnvironmentInfo, JobStatus, PipelineStage, PlatformApiPort, Portfolio,
-  PreviewResult, ProjectSummary, RegionInfo, Release,
+  CatalogEntry, CostCenterSettings, EnvironmentInfo, JobStatus, NetworkInfo, NetworkOption, PipelineStage,
+  PlatformApiPort, Portfolio, PreviewResult, ProjectSummary, RegionInfo, Release,
 } from "../api/types";
 
 export const PORTFOLIOS: Portfolio[] = [
@@ -53,7 +53,9 @@ export const COST_CENTERS: CostCenterSettings = {
 export const PREVIEW: PreviewResult = {
   files: { "template.yaml": "Resources:\n  UploadsBucket: {}\n", "README.md": "# demo" },
   tags: { "org:project": "demo-app", "org:cost-center": "CC-4410" },
-  targets: { prod: { account_id: "555555555555", regions: ["us-east-1", "us-east-2"] } },
+  targets: { prod: { account_id: "555555555555", regions: ["us-east-1", "us-east-2"], networks: {
+    "us-east-1": { network_id: "net-prod-use1", vpc_id: "vpc-0aaa1111bbbb22223", subnet_ids: ["subnet-0a", "subnet-0b"] },
+  } } },
   lint: [],
 };
 
@@ -86,6 +88,24 @@ export function pipeline(stageRelease: Release | null = release()): PipelineStag
   ];
 }
 
+export function network(overrides: Partial<NetworkInfo> = {}): NetworkInfo {
+  return {
+    id: "net-prod-use1", name: "Org shared VPC", account_id: "555555555555", region: "us-east-1",
+    vpc_id: "vpc-0aaa1111bbbb22223", cidr: "10.5.0.0/16", private_subnet_ids: ["subnet-0a1111", "subnet-0b2222"],
+    security_group_ids: ["sg-0c3333"], is_default: true, ...overrides,
+  };
+}
+
+export const NETWORK_OPTIONS: NetworkOption[] = [
+  { environment: "dev", region: "us-east-1", account_id: "222222222222",
+    networks: [network({ id: "net-dev-use1", account_id: "222222222222", cidr: "10.3.0.0/16" })],
+    default_network_id: "net-dev-use1" },
+  { environment: "prod", region: "us-east-1", account_id: "555555555555",
+    networks: [network(), network({ id: "net-prod-alt", name: "Isolated VPC", is_default: false, cidr: "10.9.0.0/16" })],
+    default_network_id: "net-prod-use1" },
+  { environment: "prod", region: "us-east-2", account_id: "555555555555", networks: [], default_network_id: null },
+];
+
 export function job(state: string, steps: JobStatus["steps"] = [], error: string | null = null): JobStatus {
   return { id: "job-1", project_name: "demo-app", state, error, steps };
 }
@@ -109,6 +129,13 @@ export function fakeApi(overrides: Partial<PlatformApiPort> = {}): PlatformApiPo
     projects: vi.fn().mockResolvedValue(PROJECTS),
     job: vi.fn().mockResolvedValue(job("succeeded")),
     setActor: vi.fn(),
+    networks: vi.fn().mockResolvedValue([network(), network({ id: "net-dev-use1", account_id: "222222222222",
+      is_default: false })]),
+    createNetwork: vi.fn().mockImplementation(async (input) => ({ id: "net-new", ...input })),
+    updateNetwork: vi.fn().mockImplementation(async (id, input) => ({ id, ...input })),
+    networkSettings: vi.fn().mockResolvedValue({ attach_compute_by_default: true }),
+    updateNetworkSettings: vi.fn().mockImplementation(async (settings) => settings),
+    networkOptions: vi.fn().mockResolvedValue(NETWORK_OPTIONS),
     pipeline: vi.fn().mockResolvedValue(pipeline()),
     inbox: vi.fn().mockResolvedValue([release()]),
     simulateRelease: vi.fn().mockResolvedValue(release({ id: "rel-2" })),

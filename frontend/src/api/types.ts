@@ -97,12 +97,40 @@ export interface ProjectRequest {
   environments: string[];
   resources: ResourceRequest[];
   connections: ConnectionRequest[];
+  network: { attach_compute: boolean; selections: Record<string, string> };
+}
+
+export interface NetworkInfo {
+  id: string;
+  name: string;
+  account_id: string;
+  region: string;
+  vpc_id: string;
+  cidr: string;
+  private_subnet_ids: string[];
+  security_group_ids: string[];
+  is_default: boolean;
+}
+
+export type NetworkInput = Omit<NetworkInfo, "id">;
+
+export interface NetworkOption {
+  environment: string;
+  region: string;
+  account_id: string;
+  networks: NetworkInfo[];
+  default_network_id: string | null;
+}
+
+export interface NetworkSettings {
+  attach_compute_by_default: boolean;
 }
 
 export interface PreviewResult {
   files: Record<string, string>;
   tags: Record<string, string>;
-  targets: Record<string, { account_id: string; regions: string[] }>;
+  targets: Record<string, { account_id: string; regions: string[];
+    networks: Record<string, { network_id: string; vpc_id: string; subnet_ids: string[] }> }>;
   lint: string[];
 }
 
@@ -175,6 +203,12 @@ export interface Identity {
 }
 
 export interface PlatformApiPort {
+  networks(): Promise<NetworkInfo[]>;
+  createNetwork(network: NetworkInput): Promise<NetworkInfo>;
+  updateNetwork(networkId: string, network: NetworkInput): Promise<NetworkInfo>;
+  networkSettings(): Promise<NetworkSettings>;
+  updateNetworkSettings(settings: NetworkSettings): Promise<NetworkSettings>;
+  networkOptions(portfolioId: string): Promise<NetworkOption[]>;
   setActor(identity: Identity): void;
   pipeline(projectName: string): Promise<PipelineStage[]>;
   inbox(): Promise<Release[]>;
