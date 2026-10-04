@@ -1,9 +1,13 @@
 import type {
   CatalogEntry, CloudFormationType, CostCenterChange, CostCenterSettings, EnvironmentInfo, Identity, JobStatus,
-  NetworkInfo, NetworkInput, NetworkOption, NetworkSettings, PipelineStage, PlatformApiPort, Portfolio, PreviewResult, ProjectRequest, ProjectSummary, RegionInfo, Release,
+  LandingZoneAnswers, LandingZoneDesign, LandingZoneDesignDetail, LandingZoneProposal, NetworkInfo, NetworkInput,
+  NetworkOption, NetworkSettings, PipelineStage, PlatformApiPort, Portfolio, PreviewResult, ProjectRequest, ProjectSummary,
+  RegionInfo, Release,
 } from "./types";
 
 type Fetcher = (input: string, init: RequestInit) => Promise<Response>;
+
+const LANDING_ZONE_DESIGNS = "/v1/admin/landing-zone/designs";
 
 export class ApiError extends Error {
   constructor(readonly status: number, message: string) {
@@ -23,6 +27,32 @@ export class PlatformApi implements PlatformApiPort {
 
   setActor(identity: Identity) {
     this.actorHeaders = { "X-Actor": identity.name, "X-Roles": identity.roles.join(",") };
+  }
+
+  proposeLandingZone(answers: LandingZoneAnswers) {
+    return this.send<LandingZoneProposal>("POST", "/v1/admin/landing-zone:propose", answers);
+  }
+
+  createLandingZoneDesign(answers: LandingZoneAnswers) {
+    return this.send<LandingZoneDesign>("POST", LANDING_ZONE_DESIGNS, answers);
+  }
+
+  landingZoneDesigns() { return this.send<LandingZoneDesign[]>("GET", LANDING_ZONE_DESIGNS); }
+
+  landingZoneDesign(designId: string) {
+    return this.send<LandingZoneDesignDetail>("GET", `${LANDING_ZONE_DESIGNS}/${designId}`);
+  }
+
+  submitLandingZoneDesign(designId: string) {
+    return this.send<LandingZoneDesign>("POST", `${LANDING_ZONE_DESIGNS}/${designId}:submit`);
+  }
+
+  approveLandingZoneDesign(designId: string, comment: string) {
+    return this.decideLandingZone(designId, "approve", comment);
+  }
+
+  rejectLandingZoneDesign(designId: string, comment: string) {
+    return this.decideLandingZone(designId, "reject", comment);
   }
 
   networks() { return this.send<NetworkInfo[]>("GET", "/v1/admin/networks"); }
@@ -92,6 +122,10 @@ export class PlatformApi implements PlatformApiPort {
 
   private decide(releaseId: string, decision: string, comment: string) {
     return this.send<Release>("POST", `/v1/releases/${releaseId}:${decision}`, { comment });
+  }
+
+  private decideLandingZone(designId: string, decision: string, comment: string) {
+    return this.send<LandingZoneDesign>("POST", `${LANDING_ZONE_DESIGNS}/${designId}:${decision}`, { comment });
   }
 
   private async send<T>(method: string, path: string, body?: unknown, headers: Record<string, string> = {}) {
