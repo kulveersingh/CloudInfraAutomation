@@ -10,7 +10,8 @@ export interface Choice<T> {
 interface ChoicesProps<T> {
   label: string;
   choices: Array<Choice<T>>;
-  selected: T;
+  /** Nothing is pressed when the current answer matches no choice (e.g. a custom environment combination). */
+  selected: T | undefined;
   onSelect: (value: T) => void;
 }
 

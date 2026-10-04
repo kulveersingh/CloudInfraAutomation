@@ -2,7 +2,7 @@ import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { Identity, PlatformApiPort, TreeEdit } from "../../api/types";
-import { fakeApi, landingZoneDesign, landingZoneDetail, PROPOSAL } from "../../test/fakes";
+import { fakeApi, landingZoneDesign, landingZoneDetail, PACK_CATALOG, PROPOSAL } from "../../test/fakes";
 import { renderWithApi } from "../../test/render";
 import { LandingZonePage } from "./LandingZonePage";
 
@@ -274,8 +274,8 @@ describe("LandingZonePage", () => {
       renderPage();
       const saas = await screen.findByRole("button", { name: /SaaS & technology/ });
       expect([saas.textContent?.includes("SSAE-18-SOC-2-Oct-2023"), saas.textContent?.includes("Sandbox · DEV · STAGE · PROD"),
-        saas.textContent?.includes("50 controls"), saas.textContent?.includes("intended alignment (unverified)")])
-        .toEqual([true, true, true, true]);
+        saas.textContent?.includes("50 controls (130 enablements)"),
+        saas.textContent?.includes("intended alignment (unverified)")]).toEqual([true, true, true, true]);
     });
 
     it("marks frameworks verified once the catalog is refreshed", async () => {
@@ -369,7 +369,7 @@ describe("LandingZonePage", () => {
       await screen.findByRole("heading", { name: "Start from a template" });
       await goTo("Environments");
       await user().click(screen.getByLabelText("Include QA"));
-      expect(screen.getAllByRole("button", { name: /environments/, pressed: true })).toHaveLength(0);
+      expect(screen.queryAllByRole("button", { name: /environments/, pressed: true })).toHaveLength(0);
     });
   });
 
@@ -399,6 +399,11 @@ describe("LandingZonePage", () => {
       await openControls();
       const foundation = screen.getByRole("group", { name: "Foundation" });
       expect(within(foundation).getByText("Frameworks: not refreshed yet")).toBeInTheDocument();
+    });
+
+    it("says when a refreshed pack maps to no framework", async () => {
+      await openControls(fakeApi({ controlPacks: vi.fn().mockResolvedValue({ ...PACK_CATALOG, mappings_refreshed: "2026-10-04" }) }));
+      expect(within(screen.getByRole("group", { name: "Foundation" })).getByText("Frameworks: none mapped")).toBeInTheDocument();
     });
 
     it("lists a pack's controls", async () => {
@@ -446,7 +451,8 @@ describe("LandingZonePage", () => {
       renderPage(api);
       await fillOrganization();
       await propose(api);
-      expect(within(screen.getByRole("tree")).getByText("2 controls")).toBeInTheDocument();
+      expect([within(screen.getByRole("tree")).getByText("2 controls"), within(screen.getByRole("tree")).getByText("1 control")])
+        .toHaveLength(2);
     });
 
     it("shows warnings without blocking approval", async () => {

@@ -146,3 +146,6 @@ pre.file { font-family: var(--f-mono); font-size: 12px; background: var(--sunken
 .tree li.account.off .tag { text-decoration: line-through; opacity: .6; }
 ul.changes { list-style: none; margin: 0; }
 ul.changes li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--line); }
+.choice.templates .opt { text-align: left; }
+.packs { display: grid; gap: 10px; }
+fieldset.pack { display: flex; flex-direction: column; gap: 4px; padding: 12px; margin: 0; }

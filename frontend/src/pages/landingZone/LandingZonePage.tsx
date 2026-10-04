@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import type { Identity, LandingZoneDesign } from "../../api/types";
+import type { Identity, IndustryTemplate, LandingZoneDesign } from "../../api/types";
 import { StatusMessage, type SaveStatus } from "../../components/Notices";
 import { LandingZoneDraft } from "../../landingZone/LandingZoneDraft";
 import { ApprovalsPanel } from "./ApprovalsPanel";
@@ -12,11 +12,13 @@ import { OrganizationStep } from "./steps/OrganizationStep";
 import { ReviewStep } from "./steps/ReviewStep";
 import { SandboxStep } from "./steps/SandboxStep";
 import { SecurityStep } from "./steps/SecurityStep";
+import { StartStep } from "./steps/StartStep";
 import type { StepProps } from "./steps/StepProps";
 
 const PLATFORM_ADMIN = "platform-admin";
 
 const STEPS: Array<{ label: string; title: string; render: (props: StepProps) => ReactNode }> = [
+  { label: "Start", title: "Start from a template", render: (props) => <StartStep {...props} /> },
   { label: "Organization", title: "Organization", render: (props) => <OrganizationStep {...props} /> },
   { label: "Environments", title: "Environments", render: (props) => <EnvironmentsStep {...props} /> },
   { label: "Accounts", title: "Accounts per environment", render: (props) => <AccountsStep {...props} /> },
@@ -73,7 +75,12 @@ function LandingZoneWorkspace() {
 
 function Questionnaire({ onSubmitted }: { onSubmitted: (design: LandingZoneDesign) => void }) {
   const [draft, setDraft] = useState(LandingZoneDraft.initial);
+  const [template, setTemplate] = useState<IndustryTemplate>();
   const [step, setStep] = useState(0);
+  const startFrom = (chosen?: IndustryTemplate) => {
+    setTemplate(chosen);
+    setDraft(chosen ? draft.withTemplate(chosen) : draft.fromScratch());
+  };
   const last = STEPS.length - 1;
   return (
     <>
@@ -85,8 +92,8 @@ function Questionnaire({ onSubmitted }: { onSubmitted: (design: LandingZoneDesig
           </button>
         ))}
       </nav>
-      <h2>{`${step + 1}. ${STEPS[step].title}`}</h2>
-      {STEPS[step].render({ draft, onChange: setDraft, onSubmitted })}
+      <h2>{step === 0 ? STEPS[0].title : `${step}. ${STEPS[step].title}`}</h2>
+      {STEPS[step].render({ draft, onChange: setDraft, onSubmitted, template, onTemplate: startFrom })}
       <div className="row">
         <button className="btn" disabled={step === 0} onClick={() => setStep(step - 1)}>Back</button>
         {step < last && <button className="btn pri" onClick={() => setStep(step + 1)}>Continue</button>}

@@ -221,6 +221,20 @@ class Readme(BundleFile):
         return {"README.md": "\n".join(lines)}
 
 
+CLOUDFORMATION_RESOURCE_LIMIT = 500
+
+
+class StackSizeRule:
+    """CloudFormation allows 500 resources per stack; a bigger stack would only fail at deploy time."""
+
+    def problems(self, design: LandingZoneDesign, catalog: OrgCatalog) -> list[str]:
+        context = StackContext.build(design, catalog)
+        sizes = [(stack.name, len(stack.render(context)["Resources"])) for stack in STACKS]
+        return [f"Stack {name} would have {size} resources; CloudFormation allows {CLOUDFORMATION_RESOURCE_LIMIT} per "
+                "stack. Remove OUs or control packs, or split the design."
+                for name, size in sizes if size > CLOUDFORMATION_RESOURCE_LIMIT]
+
+
 class LandingZoneBundle:
     def __init__(self, files: list[BundleFile]):
         self._files = files

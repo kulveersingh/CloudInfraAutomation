@@ -2937,7 +2937,7 @@ The existing rules still apply: unique OU names (`UniqueOuNames`), at most 5 lev
 
 ### 20.12 Industry templates and control packs
 
-**Status: design for review. No code until approved.**
+**Status: approved (T1–T6 as recommended) and implemented.**
 
 Customers can start from a ready-made **industry template** instead of designing a landing zone from scratch. A template sets the questionnaire answers, the OU structure (including preset custom OUs) and a set of **control packs**: Control Tower controls with the OUs they apply to. The customer can use the template as is, or adjust it:
 - pick a different combination of environments
@@ -2966,6 +2966,8 @@ Sources:
 | F8 | **Landing zone 4.0**: <ul><li>Config, CloudTrail, SecurityRoles and **Backup** become optional integrations, with their own baselines</li><li>Control Tower no longer creates the Security OU</li><li>Drift alerts go to EventBridge</li></ul> We pin **3.3** today. | Templates don't depend on 4.0. Moving to 4.0, which adds a central Backup vault for regulated templates, is a separate decision (T5). |
 | F9 | The user guide recommends these OUs: Security, Sandbox, **Infrastructure**, **Workloads**, with **Production and Staging always separate**. | Matches rule R1. Every template keeps Production and Staging as separate OUs. |
 | F10 | The CDK sample's configuration is a list of `{controls (+ parameters, tags), OU ids}`. | That's what a control pack is: a set of controls plus an OU selector. |
+| F11 | **Preventive controls flow down to nested OUs; detective and proactive controls do not and must be enabled on each nested OU** (user guide, *Nested OUs and controls*). | The pack resolver puts preventive controls on the top-most targeted OU only, and detective and proactive controls on every targeted OU, nested ones included. This also gives OUs added in the tree editor (§20.11) their own detective controls. |
+| F12 | CloudFormation allows **500 resources per stack**. A regulated template with many OUs approaches that in `lz-structure`. | A validation problem blocks approval when any stack would exceed 500 resources. |
 
 #### 20.12.2 Concepts
 
@@ -3106,7 +3108,7 @@ The rules:
 - Names stay editable.
 - The IPAM planner already splits the CIDR for any number of environments.
 
-`environment_count` is replaced by `environments: [ids]`. Old answers with `environment_count` still load, mapped to the matching preset (decision T3).
+`environment_count` is replaced by `environment_ids: [ids]` (`environments()` stays the method that lists them). Old answers with `environment_count` still load, mapped to the matching preset (decision T3).
 
 #### 20.12.5 Industry templates (v1)
 
@@ -3146,12 +3148,12 @@ packs: [foundation, data-protection, network-hardening, production-resilience]
 
 | Area | Change |
 |---|---|
-| Answers | Add `template: {id, version} \| null`, `environments: [ids]` (replaces `environment_count`; T3), and `control_packs: [ids]` (defaults to the profile's packs). Add `pack_parameters` (for example, `data-residency.AllowedRegions`). |
-| Catalog | `ControlCatalogSnapshot`, `ControlPack`, `PackRegistry`, `OuSelector` subclasses, `TemplateRegistry`, all loaded from the YAML files and validated at startup (unknown control or pack ids fail fast) |
-| Guardrails | `ControlCatalog` (regional `AWS-GR_` names, §20.6) is replaced by a `PackResolver`: final tree + packs → controls per OU, with duplicates removed. Our own SCP statements that a Control Tower control now covers (root user, region deny) are dropped from the baseline SCP when that pack is on. |
+| Answers | Add `template: {id, version} \| null`, `environment_ids: [ids]` (replaces `environment_count`; T3), and `control_packs: [ids] \| null` (null means the profile's packs). Add `pack_parameters` (for example, `data-residency.AllowedRegions`, which defaults to the governed Regions). |
+| Catalog | `app/landing_zone/catalog/`: `ControlCatalogSnapshot`, `ControlPack`, `PackRegistry`, `OuSelector` subclasses, `PackResolver`, `TemplateRegistry`, and `ControlCatalogRefresher` (`uv run --with boto3 python -m app.landing_zone.catalog.refresh`). Everything is loaded from the YAML files and validated (unknown control, selector or pack ids fail fast). The snapshot was generated from the sample repo's Control Catalog export, so names, behaviors and severities match the catalog. |
+| Guardrails | `ControlCatalog` (regional `AWS-GR_` names, §20.6) is replaced by a `PackResolver`: final tree + packs → controls per OU, with duplicates removed and inheritance applied (F11). **Change from the first draft:** our own baseline SCP keeps its root-user and region-deny statements, because it also covers OUs the packs don't target (Policy Staging, Exceptions, Business Users, Automations). The raised quota of 10 leaves room. |
 | `lz-structure` | `AWS::ControlTower::EnabledControl` uses `arn:aws:controlcatalog:::control/<id>` (F1), with `Parameters` for parameterized controls. Batches of 10 stay (F4). The CloudFormation-hooks prerequisite is enabled on OUs that get proactive controls (F2). |
-| Validation | `ScpQuotaRule` uses the Control Tower limit of **10** SCPs per OU (F5), counting our SCPs, Control Tower's SCP-based controls, and FullAWSAccess. Exactly how Control Tower packs controls into SCPs is unverified (O1), so the rule counts one SCP per 5 SCP-type controls. New rules: `PackTargetsExist` (every pack resolves to at least one OU, or warns), `ResidencyCompatible` (strict-residency vs DR replication), and `OuSizeWithinRegistrationLimit` (warning, F5). |
-| API | `GET /v1/admin/landing-zone/templates` returns summaries: industry, frameworks, environments, OU count, control count by behavior. `GET …/templates/{id}` returns the full template. `GET …/control-packs` returns packs with their controls. Proposals add, per OU, the controls that apply (`id`, `name`, `behavior`, `severity`, `packs`) and counts. |
+| Validation | `ScpQuotaRule` uses the Control Tower limit of **10** SCPs per OU (F5), counting our SCPs, Control Tower's SCP-based controls, and FullAWSAccess. Exactly how Control Tower packs controls into SCPs is unverified (O1), so the rule counts one SCP per 5 SCP-type controls. New problem: `StackSizeRule` (F12). New **warnings**, returned with each proposal and shown without blocking approval (`DesignAdvisor`): a pack that reaches no OU, the unresolved CloudFormation-hooks prerequisite (O2), strict residency vs DR replication, and an OU planned beyond the registration limit (F5). |
+| API | `GET /v1/admin/landing-zone/templates` returns summaries: industry, frameworks, environments, OU count, distinct controls by behavior and total enablements (controls × OUs). `GET …/templates/{id}` returns the full template. `GET …/control-packs` returns packs with their controls, and the profile → packs mapping. Proposals add, per OU, the controls that apply (`id`, `name`, `behavior`, `severity`, `packs`) and counts. |
 | Bundle | `design.json` records the template and version, the packs and their parameters. `docs/controls.md` lists the controls per OU with their framework mappings, for auditors. |
 | UI | <ul><li>**New first step, "Start"**: template cards showing industry, aligned frameworks, environments, OU and control counts, and a description. Choosing one fills in the questionnaire and edits. "Start from scratch" keeps today's flow.</li><li>**Environments step**: the environment catalog as checkboxes, with the 4/5/6 presets as buttons.</li><li>**Controls step**: the profile plus pack toggles. Each pack shows target OUs, control counts by behavior and aligned frameworks, with an expandable control list. Turning off a template's pack warns: "Removes alignment with PCI-DSS-v4.0 for PCI OUs".</li><li>**Review step**: a "Based on *template* v1" banner with the differences and **Reset to template**. Each OU in the tree shows its control count.</li></ul> |
 

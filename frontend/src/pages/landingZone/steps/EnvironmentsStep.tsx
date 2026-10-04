@@ -1,10 +1,12 @@
 import { useState } from "react";
-import type { EnvironmentCount, LandingZoneAnswers } from "../../../api/types";
-import type { EnvironmentTier, LandingZoneDraft, LandingZoneEnvironment } from "../../../landingZone/LandingZoneDraft";
+import type { EnvironmentPreset, LandingZoneAnswers } from "../../../api/types";
+import {
+  LandingZoneDraft, REQUIRED_ENVIRONMENTS, type EnvironmentTier, type LandingZoneEnvironment,
+} from "../../../landingZone/LandingZoneDraft";
 import { Choices, type Choice } from "../controls";
 import type { StepProps } from "./StepProps";
 
-const COUNTS: Array<Choice<EnvironmentCount>> = [
+const PRESETS: Array<Choice<EnvironmentPreset>> = [
   { value: 4, title: "4 environments", description: "Sandbox · DEV · STAGE · PROD. Testing runs in DEV." },
   { value: 5, title: "5 environments", description: "Sandbox · DEV · TEST · STAGE · PROD. Testing is isolated from development.",
     recommended: true },
@@ -22,11 +24,26 @@ const GROUPINGS: Array<Choice<LandingZoneAnswers["grouping"]>> = [
 const TIERS: Record<EnvironmentTier, string> = { sandbox: "Sandbox", nonprod: "Non-production", prod: "Production tier" };
 
 export function EnvironmentsStep({ draft, onChange }: StepProps) {
-  const { environment_count, grouping } = draft.toAnswers();
+  const { environment_ids, grouping } = draft.toAnswers();
   return (
     <>
-      <Choices label="How many environments?" choices={COUNTS} selected={environment_count}
-               onSelect={(count) => onChange(draft.withEnvironmentCount(count))} />
+      <Choices label="Start from a preset" choices={PRESETS} selected={draft.preset()}
+               onSelect={(preset) => onChange(draft.withEnvironmentPreset(preset))} />
+      <div className="field">
+        <span className="label">Or choose any combination</span>
+        <div className="row wrap">
+          {LandingZoneDraft.environmentCatalog().map((environment) => (
+            <label key={environment.id} className="row">
+              <input type="checkbox" aria-label={`Include ${environment.name}`} checked={environment_ids.includes(environment.id)}
+                     disabled={REQUIRED_ENVIRONMENTS.includes(environment.id)}
+                     onChange={(event) => onChange(draft.withEnvironment(environment.id, event.target.checked))} />
+              {environment.name}
+            </label>
+          ))}
+        </div>
+        <span className="hint">STAGE and PROD are always included, so production has a separate pre-production
+          environment. Every environment is its own isolated OU.</span>
+      </div>
       <table>
         <thead><tr><th>Name</th><th>Tier</th><th>OU</th></tr></thead>
         <tbody>

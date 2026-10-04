@@ -1,4 +1,6 @@
-import type { EnvironmentCount, FlowException, LandingZoneAnswers, LandingZoneRequest, TreeEdit } from "../api/types";
+import type {
+  ControlsProfile, EnvironmentPreset, FlowException, IndustryTemplate, LandingZoneAnswers, LandingZoneRequest, TreeEdit,
+} from "../api/types";
 
 const ORGANIZATION_NAME_PATTERN = /^[a-z][a-z0-9-]{1,30}$/;
 const EMAIL_PATTERN = /^[^@\s+]+@[^@\s]+\.[^@\s]+$/;
@@ -13,19 +15,31 @@ export interface LandingZoneEnvironment {
   tier: EnvironmentTier;
 }
 
-const SANDBOX: LandingZoneEnvironment = { id: "sandbox", name: "Sandbox", tier: "sandbox" };
-const DEV: LandingZoneEnvironment = { id: "dev", name: "DEV", tier: "nonprod" };
-const TEST: LandingZoneEnvironment = { id: "test", name: "TEST", tier: "nonprod" };
-const UAT: LandingZoneEnvironment = { id: "uat", name: "UAT", tier: "nonprod" };
-const STAGE: LandingZoneEnvironment = { id: "stage", name: "STAGE", tier: "prod" };
-const PROD: LandingZoneEnvironment = { id: "prod", name: "PROD", tier: "prod" };
+/** Mirrors the platform's environment catalog, in pipeline order. STAGE and PROD are always included. */
+const ENVIRONMENT_CATALOG: LandingZoneEnvironment[] = [
+  { id: "sandbox", name: "Sandbox", tier: "sandbox" }, { id: "dev", name: "DEV", tier: "nonprod" },
+  { id: "qa", name: "QA", tier: "nonprod" }, { id: "test", name: "TEST", tier: "nonprod" },
+  { id: "uat", name: "UAT", tier: "nonprod" }, { id: "perf", name: "PERF", tier: "nonprod" },
+  { id: "stage", name: "STAGE", tier: "prod" }, { id: "prod", name: "PROD", tier: "prod" },
+];
+export const REQUIRED_ENVIRONMENTS = ["stage", "prod"];
 
-/** Mirrors the platform's presets: 4 folds testing into DEV, 5 is recommended, 6 adds UAT. */
-export const ENVIRONMENT_PRESETS: Record<EnvironmentCount, LandingZoneEnvironment[]> = {
-  4: [SANDBOX, DEV, STAGE, PROD],
-  5: [SANDBOX, DEV, TEST, STAGE, PROD],
-  6: [SANDBOX, DEV, TEST, UAT, STAGE, PROD],
+/** One-click combinations: 4 folds testing into DEV, 5 is recommended, 6 adds UAT. */
+export const ENVIRONMENT_PRESETS: Record<EnvironmentPreset, string[]> = {
+  4: ["sandbox", "dev", "stage", "prod"],
+  5: ["sandbox", "dev", "test", "stage", "prod"],
+  6: ["sandbox", "dev", "test", "uat", "stage", "prod"],
 };
+
+/** The answers compared with a template, labelled as the questionnaire shows them; identity fields are left out. */
+const COMPARED_ANSWERS: Array<[keyof LandingZoneAnswers, string]> = [
+  ["home_region", "Home region"], ["governed_regions", "Governed regions"], ["environment_ids", "Environments"],
+  ["environment_names", "Environment names"], ["grouping", "OU grouping"], ["account_model", "Accounts per environment"],
+  ["compliance", "Compliance scopes"], ["security_tooling", "Security Tooling account"],
+  ["log_retention_days", "Log retention"], ["infrastructure", "Shared infrastructure"], ["network", "Network"],
+  ["sandbox", "Sandbox"], ["optional_ous", "Other OUs"], ["controls_profile", "Controls profile"],
+  ["control_packs", "Control packs"], ["pack_parameters", "Pack parameters"],
+];
 
 /**
  * Immutable model of the landing zone questionnaire plus the OU tree editor's changes, in order.
@@ -37,13 +51,37 @@ export class LandingZoneDraft {
   static initial(): LandingZoneDraft {
     return new LandingZoneDraft({
       organization_name: "", management_email: "", home_region: "us-east-1", governed_regions: ["us-east-1", "us-east-2"],
-      environment_count: 5, environment_names: {}, grouping: "separate", account_model: "portfolio", compliance: [],
+      template: null, environment_ids: [...ENVIRONMENT_PRESETS[5]], environment_names: {}, grouping: "separate",
+      account_model: "portfolio", compliance: [],
       security_tooling: true, log_retention_days: 365,
       infrastructure: ["network", "shared_services", "identity", "backup", "monitoring"],
       network: { hub: true, egress: "central", inspection: true, on_premises: "none", cidr: "10.0.0.0/8", flows: [] },
       sandbox: { model: "team", monthly_budget_usd: 500, expiry_days: 30 },
-      optional_ous: ["exceptions", "suspended"], controls_profile: "recommended",
+      optional_ous: ["exceptions", "suspended"], controls_profile: "recommended", control_packs: null, pack_parameters: {},
     }, []);
+  }
+
+  static environmentCatalog(): LandingZoneEnvironment[] {
+    return ENVIRONMENT_CATALOG;
+  }
+
+  /** The template's answers and OU edits on top of the recommendations, keeping the organization already entered. */
+  withTemplate(template: IndustryTemplate): LandingZoneDraft {
+    const { answers } = LandingZoneDraft.initial().with({ ...template.answers,
+      template: { id: template.id, version: template.version } }).keepingOrganization(this);
+    return new LandingZoneDraft(answers, template.edits);
+  }
+
+  fromScratch(): LandingZoneDraft {
+    return LandingZoneDraft.initial().keepingOrganization(this);
+  }
+
+  /** Labels of the answers, and "OU structure" for the edits, that differ from the template's. */
+  differencesFrom(template: IndustryTemplate): string[] {
+    const original = this.withTemplate(template);
+    const changed = COMPARED_ANSWERS.filter(([key]) => !same(this.answers[key], original.answers[key]))
+      .map(([, label]) => label);
+    return same(this.treeEdits, original.treeEdits) ? changed : [...changed, "OU structure"];
   }
 
   with(change: Partial<LandingZoneAnswers>): LandingZoneDraft {
@@ -70,12 +108,30 @@ export class LandingZoneDraft {
     return this.with({ governed_regions: toggled(this.answers.governed_regions, region, governed) });
   }
 
-  withEnvironmentCount(count: EnvironmentCount) {
-    const known = new Set(ENVIRONMENT_PRESETS[count].map((environment) => environment.id));
-    const names = Object.entries(this.answers.environment_names).filter(([id]) => known.has(id));
-    const flows = this.answers.network.flows.filter((flow) => known.has(flow.source) && known.has(flow.destination));
-    return this.with({ environment_count: count, environment_names: Object.fromEntries(names) })
-      .withNetwork({ flows });
+  withEnvironmentPreset(preset: EnvironmentPreset) {
+    return this.withEnvironments(ENVIRONMENT_PRESETS[preset]);
+  }
+
+  /** STAGE and PROD stay in every design; removing another environment drops its rename and flows. */
+  withEnvironment(environmentId: string, included: boolean) {
+    if (REQUIRED_ENVIRONMENTS.includes(environmentId)) return this;
+    return this.withEnvironments(toggled(this.answers.environment_ids, environmentId, included));
+  }
+
+  /** The preset the chosen environments match, if any. */
+  preset(): EnvironmentPreset | undefined {
+    const presets = Object.entries(ENVIRONMENT_PRESETS) as unknown as Array<[string, string[]]>;
+    const match = presets.find(([, ids]) => same(ids, this.answers.environment_ids));
+    return match ? (Number(match[0]) as EnvironmentPreset) : undefined;
+  }
+
+  withControlPacks(packs: string[]) {
+    return this.with({ control_packs: packs });
+  }
+
+  /** A profile brings its own packs, so an explicit pack choice is dropped. */
+  withProfile(profile: ControlsProfile) {
+    return this.with({ controls_profile: profile, control_packs: null });
   }
 
   /** An empty name restores the preset name. */
@@ -105,9 +161,9 @@ export class LandingZoneDraft {
   }
 
   environments(): LandingZoneEnvironment[] {
-    const { environment_count, environment_names } = this.answers;
-    return ENVIRONMENT_PRESETS[environment_count].map(
-      (environment) => ({ ...environment, name: environment_names[environment.id] ?? environment.name }));
+    const { environment_ids, environment_names } = this.answers;
+    return ENVIRONMENT_CATALOG.filter((environment) => environment_ids.includes(environment.id))
+      .map((environment) => ({ ...environment, name: environment_names[environment.id] ?? environment.name }));
   }
 
   /** Checks the browser can make; the platform validates the rest when it proposes the structure. */
@@ -129,6 +185,22 @@ export class LandingZoneDraft {
   toRequest(): LandingZoneRequest {
     return { answers: this.answers, edits: this.treeEdits };
   }
+
+  private withEnvironments(ids: string[]) {
+    const known = new Set(ids);
+    const names = Object.entries(this.answers.environment_names).filter(([id]) => known.has(id));
+    const flows = this.answers.network.flows.filter((flow) => known.has(flow.source) && known.has(flow.destination));
+    const ordered = ENVIRONMENT_CATALOG.map((environment) => environment.id).filter((id) => known.has(id));
+    return this.with({ environment_ids: ordered, environment_names: Object.fromEntries(names) }).withNetwork({ flows });
+  }
+
+  private keepingOrganization(source: LandingZoneDraft) {
+    return this.withOrganization(source.answers.organization_name, source.answers.management_email);
+  }
+}
+
+function same(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function toggled<T extends string>(items: T[], item: string, included: boolean): T[] {

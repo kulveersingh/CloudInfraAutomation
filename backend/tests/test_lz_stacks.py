@@ -5,7 +5,7 @@ import yaml
 from cfnlint.api import ManualArgs, lint
 
 from app.landing_zone.catalog.templates import TemplateRegistry
-from app.landing_zone.cloudformation.bundle import STACK_FILES, LandingZoneBundle
+from app.landing_zone.cloudformation.bundle import STACK_FILES, LandingZoneBundle, StackSizeRule
 from app.landing_zone.cloudformation.guardrails import GuardrailPlan, ScpQuotaRule
 from app.landing_zone.designer import LandingZoneDesigner
 from tests.lz_factories import CATALOG, account_op, add_account, add_ou, answers, edited
@@ -571,3 +571,16 @@ def test_controls_document_lists_each_ous_controls():
     document = bundle()["docs/controls.md"]
     assert ("## PROD OU" in document, f"| `{ROOT_USER}` | Disallow actions as a root user | PREVENTIVE | HIGH | foundation |"
             in document) == (True, True)
+
+
+# ---- CloudFormation limits ----
+
+def test_stacks_within_the_resource_limit_have_no_problems():
+    assert StackSizeRule().problems(edited([])[0], CATALOG) == []
+
+
+def test_a_stack_over_500_resources_is_a_problem():
+    design = edited([add_ou(f"Team {index:02d}") for index in range(60)], controls_profile="regulated")[0]
+    problems = StackSizeRule().problems(design, CATALOG)
+    assert problems[0].startswith("Stack lz-structure would have ") and problems[0].endswith(
+        " resources; CloudFormation allows 500 per stack. Remove OUs or control packs, or split the design.")

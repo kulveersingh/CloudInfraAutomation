@@ -287,7 +287,10 @@ export interface TemplateSummary {
   environments: string[];
   packs: string[];
   ou_count: number;
+  /** Distinct controls by behavior. */
   control_counts: Record<ControlBehavior, number>;
+  /** Controls times the OUs they are enabled on: what Control Tower deploys. */
+  enabled_controls: number;
 }
 
 export interface IndustryTemplate extends TemplateSummary {

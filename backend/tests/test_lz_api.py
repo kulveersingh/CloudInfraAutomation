@@ -327,3 +327,9 @@ def test_every_template_proposes_through_the_api(client, template):
 
 def test_control_packs_include_the_profiles_they_make_up(client):
     assert client.get(f"{BASE}/control-packs", headers=ALEX).json()["profiles"]["baseline"] == ["foundation"]
+
+
+def test_template_summary_counts_distinct_controls_and_their_enablements(client):
+    saas = next(template for template in client.get(f"{BASE}/templates", headers=ALEX).json() if template["id"] == "saas")
+    distinct = sum(saas["control_counts"].values())
+    assert (distinct <= 51, saas["enabled_controls"] > distinct) == (True, True)

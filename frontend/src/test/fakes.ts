@@ -139,6 +139,7 @@ export const OU_TREE: OuInfo[] = [
       ou("custom_payments", "Payments", "custom", { custom: true, domain: "prod",
         allowed_edits: [...CONTAINER, "rename", "move", "remove"] }),
       ou("custom_cards", "Cards", "custom", { custom: true, domain: "prod", allowed_edits: [...CONTAINER, "rename", "move"],
+        controls: [{ ...ROOT_MFA, packs: ["foundation"] }],
         blocked_edits: { remove: "Move its accounts and child OUs to another OU first." },
         accounts: [account("acme-cards-prod", { added: true, allowed_edits: ["move", "disable", "remove"] })] }),
     ] }),
@@ -167,7 +168,8 @@ export function landingZoneDetail(overrides: Partial<LandingZoneDesign> = {}): L
   return { ...landingZoneDesign(overrides), ous: OU_TREE, problems: [], warnings: [], diagram: DIAGRAM };
 }
 
-const catalogControl = (control: typeof ROOT_USER, implementation: string): CatalogControlInfo => ({
+const catalogControl = (control: Omit<CatalogControlInfo, "implementation" | "frameworks">,
+  implementation: string): CatalogControlInfo => ({
   ...control, implementation, frameworks: [] });
 
 export const PACK_CATALOG: ControlPackCatalog = {
@@ -189,7 +191,7 @@ const SAAS_SUMMARY: TemplateSummary = {
   id: "saas", version: 1, name: "SaaS & technology", industry: "Software and technology companies",
   description: "Account-per-tenant SaaS.", frameworks: ["SSAE-18-SOC-2-Oct-2023", "CIS-v8.0"], frameworks_verified: false,
   environments: ["Sandbox", "DEV", "STAGE", "PROD"], packs: ["foundation", "data-protection"], ou_count: 9,
-  control_counts: { PREVENTIVE: 12, DETECTIVE: 30, PROACTIVE: 8 },
+  control_counts: { PREVENTIVE: 12, DETECTIVE: 30, PROACTIVE: 8 }, enabled_controls: 130,
 };
 
 export const TEMPLATES: TemplateSummary[] = [

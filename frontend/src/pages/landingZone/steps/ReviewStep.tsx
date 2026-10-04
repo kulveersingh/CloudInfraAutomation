@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useApi } from "../../../api/ApiContext";
-import type { LandingZoneProposal } from "../../../api/types";
+import type { IndustryTemplate, LandingZoneProposal } from "../../../api/types";
 import { ErrorAlert } from "../../../components/Notices";
 import { EditDescriber } from "../../../landingZone/EditDescriber";
 import type { LandingZoneDraft } from "../../../landingZone/LandingZoneDraft";
@@ -9,7 +9,7 @@ import { GeneratedFiles, StructureView } from "../StructureView";
 import { ManualChanges } from "../tree/ManualChanges";
 import type { StepProps } from "./StepProps";
 
-export function ReviewStep({ draft, onChange, onSubmitted }: StepProps) {
+export function ReviewStep({ draft, onChange, onSubmitted, template }: StepProps) {
   const api = useApi();
   const [proposal, setProposal] = useState<LandingZoneProposal>();
   const [error, setError] = useState<string>();
@@ -38,6 +38,7 @@ export function ReviewStep({ draft, onChange, onSubmitted }: StepProps) {
     <>
       <p className="sub">The platform proposes the OU structure from your answers and generates the CloudFormation. Nothing
         is created until a second platform admin approves.</p>
+      {template && <TemplateBanner draft={draft} template={template} onReset={() => onChange(draft.withTemplate(template))} />}
       <ProblemList problems={problems} />
       <div className="row">
         <button className="btn" disabled={problems.length > 0} onClick={() => propose(draft)}>Propose structure</button>
@@ -62,11 +63,32 @@ function ProposalEditor({ proposal, draft, onChange }: ProposalEditorProps) {
   return (
     <>
       <ProblemList problems={proposal.problems} />
+      {proposal.warnings.length > 0 && (
+        <ul className="notice warn">{proposal.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
+      )}
       <StructureView explanation={proposal} stage="Proposed" editor={{ index, onEdit: (edit) => onChange(draft.withEdit(edit)) }} />
       <ManualChanges edits={draft.edits()} describer={new EditDescriber(index)}
                      onUndo={(position) => onChange(draft.withoutEdit(position))} />
       <GeneratedFiles files={proposal.files} />
     </>
+  );
+}
+
+interface TemplateBannerProps {
+  draft: LandingZoneDraft;
+  template: IndustryTemplate;
+  onReset: () => void;
+}
+
+/** Which template the design started from and what was changed from it. */
+function TemplateBanner({ draft, template, onReset }: TemplateBannerProps) {
+  const differences = draft.differencesFrom(template);
+  return (
+    <div className="notice row">
+      <b>Based on {template.name} v{template.version}</b>
+      {differences.length > 0 && <span>Changed: {differences.join(", ")}</span>}
+      <button className="btn ghost" onClick={onReset}>Reset to template</button>
+    </div>
   );
 }
 

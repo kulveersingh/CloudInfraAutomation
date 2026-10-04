@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { AccountInfo, LandingZoneExplanation, OuInfo } from "../../api/types";
+import { plural } from "../../landingZone/plural";
 import { AccountActions } from "./tree/AccountActions";
 import { OuActions, RootActions } from "./tree/OuActions";
 import type { TreeEditor } from "./tree/TreeEditor";
@@ -39,6 +40,7 @@ function OuNode({ ou, editor }: { ou: OuInfo; editor?: TreeEditor }) {
       <span className="ou">
         <b>{ou.name} OU</b>
         {ou.created_by_control_tower && <span className="chip">Control Tower</span>}
+        {ou.controls.length > 0 && <span className="chip" title={controlNames(ou)}>{plural(ou.controls.length, "control")}</span>}
         {editor && <OuActions ou={ou} editor={editor} />}
       </span>
       {ou.accounts.length > 0 && (
@@ -59,6 +61,10 @@ function AccountItem({ account, ou, editor }: { account: AccountInfo; ou: OuInfo
       {editor && <AccountActions account={account} ou={ou} editor={editor} />}
     </li>
   );
+}
+
+function controlNames(ou: OuInfo): string {
+  return ou.controls.map((control) => `${control.name} (${control.behavior.toLowerCase()})`).join("\n");
 }
 
 function svgDataUrl(svg: string): string {

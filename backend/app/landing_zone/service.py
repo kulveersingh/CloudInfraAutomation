@@ -11,7 +11,7 @@ from app.landing_zone.catalog.controls import CatalogError, ControlCatalogSnapsh
 from app.landing_zone.catalog.packs import PROFILE_PACKS, PackRegistry
 from app.landing_zone.catalog.resolver import EnabledControl, PackResolver
 from app.landing_zone.catalog.templates import IndustryTemplate, TemplateRegistry
-from app.landing_zone.cloudformation.bundle import LandingZoneBundle
+from app.landing_zone.cloudformation.bundle import LandingZoneBundle, StackSizeRule
 from app.landing_zone.cloudformation.guardrails import GuardrailPlan, ScpQuotaRule
 from app.landing_zone.design import AccountPlan, LandingZoneDesign, OrgCatalog, OuNode
 from app.landing_zone.designer import LandingZoneDesigner
@@ -163,19 +163,22 @@ class LandingZoneService:
 
     def _problems(self, design: LandingZoneDesign) -> list[str]:
         return [*design.edit_problems, *DesignValidator.default().problems(design),
-                *ScpQuotaRule().problems(GuardrailPlan.for_design(design))]
+                *ScpQuotaRule().problems(GuardrailPlan.for_design(design)),
+                *StackSizeRule().problems(design, self._catalog())]
 
     def _template_summary(self, template: IndustryTemplate) -> dict:
         answers = LandingZoneAnswers.model_validate({**PREVIEW_ORGANIZATION, **template.answers})
         design = self._design(answers, TreeEditor.parse(template.edits))
-        behaviors = Counter(enabled.control.behavior for controls in PackResolver.default().resolve(design).controls.values()
-                            for enabled in controls)
+        enabled = [item for items in PackResolver.default().resolve(design).controls.values() for item in items]
+        distinct = {item.control.id: item.control.behavior for item in enabled}
+        behaviors = Counter(distinct.values())
         return {"id": template.id, "version": template.version, "name": template.name, "industry": template.industry,
                 "description": template.description, "frameworks": list(template.frameworks),
                 "frameworks_verified": ControlCatalogSnapshot.default().mappings_refreshed is not None,
                 "environments": [environment.name for environment in answers.environments()],
                 "packs": answers.packs(), "ou_count": len(list(design.walk())),
-                "control_counts": {behavior: behaviors[behavior] for behavior in BEHAVIORS}}
+                "control_counts": {behavior: behaviors[behavior] for behavior in BEHAVIORS},
+                "enabled_controls": len(enabled)}
 
     def _explain(self, design: LandingZoneDesign) -> dict:
         renderer = OuDiagramRenderer()
