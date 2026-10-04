@@ -111,7 +111,8 @@ class GitPlumbing:
 
     def _parents(self) -> list[str]:
         head = subprocess.run(["git", "--git-dir", str(self._repository), "rev-parse", "--verify", "--quiet",
-                               f"refs/heads/{BRANCH}"], capture_output=True, text=True).stdout.strip()
+                               f"refs/heads/{BRANCH}"], capture_output=True, text=True,
+                              check=False).stdout.strip()
         return [head] if head else []
 
     def _git(self, environment: dict, *arguments: str, stdin: str | None = None) -> str:

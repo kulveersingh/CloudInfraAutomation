@@ -1,3 +1,5 @@
+from typing import ClassVar
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -38,7 +40,7 @@ class ReferenceData:
         ("eu-central-1", "Europe (Frankfurt)", True),
         ("ap-southeast-2", "Asia Pacific (Sydney)", False),
     )
-    ACCOUNT_PREFIXES = {"pf-payments": ("1", "2", "3", "4", "5"), "pf-retail": ("61", "62", "63", "64", "65"),
+    ACCOUNT_PREFIXES: ClassVar[dict[str, tuple[str, ...]]] = {"pf-payments": ("1", "2", "3", "4", "5"), "pf-retail": ("61", "62", "63", "64", "65"),
                         "pf-data": ("71", "72", "73", "74", "66")}
 
     def objects(self) -> list:

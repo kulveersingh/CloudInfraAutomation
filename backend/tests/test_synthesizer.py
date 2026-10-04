@@ -4,7 +4,13 @@ from app.synth.naming import ResourceNaming
 from app.synth.synthesizer import ENGINE_VERSION
 from tests.factories import dr_request_dict, request_dict, with_resources
 from tests.synth_helpers import (
-    dependency_graph, has_cycle, properties, resource, role_statements, statements_by_sid, synthesize,
+    dependency_graph,
+    has_cycle,
+    properties,
+    resource,
+    role_statements,
+    statements_by_sid,
+    synthesize,
 )
 
 UPLOADS = ResourceNaming("uploads")
@@ -217,6 +223,14 @@ def test_notification_suffix_filter():
 def test_function_may_read_triggering_prefix():
     assert {"Effect": "Allow", "Action": ["s3:GetObject"], "Resource": UPLOADS.bucket_arn("/incoming/*")} in \
         role_statements(synthesize(request_dict()), "ProcessorRole")
+
+
+def test_identical_grants_are_not_duplicated():
+    payload = request_dict(connections=[
+        {"kind": "event.notify", "source": "uploads", "target": "processor"},
+        {"kind": "iam.access", "source": "processor", "target": "uploads", "access": "read"}])
+    read_objects = {"Effect": "Allow", "Action": ["s3:GetObject"], "Resource": UPLOADS.bucket_arn("/*")}
+    assert role_statements(synthesize(payload), "ProcessorRole").count(read_objects) == 1
 
 
 def test_function_receives_bucket_name():

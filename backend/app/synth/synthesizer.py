@@ -1,4 +1,5 @@
 import json
+from typing import ClassVar
 
 from app.synth.binders.registry import BinderRegistry
 from app.synth.blocks.base import Block
@@ -13,14 +14,14 @@ GENERATOR_NAME = "cloudinfra-synth"
 class StackFoundation:
     """Parameters and conditions every generated template shares (environment, region role, activation)."""
 
-    PARAMETERS = {
+    PARAMETERS: ClassVar[dict[str, dict]] = {
         "ProjectName": {"Type": "String", "AllowedPattern": PROJECT_NAME_PATTERN},
         "EnvironmentName": {"Type": "String"},
         "ResilienceMode": {"Type": "String", "AllowedValues": ["single", "dr", "ha"], "Default": "single"},
         "RegionRole": {"Type": "String", "AllowedValues": ["primary", "secondary"], "Default": "primary"},
         "ActivationState": {"Type": "String", "AllowedValues": ["active", "standby"], "Default": "active"},
     }
-    CONDITIONS = {
+    CONDITIONS: ClassVar[dict[str, dict]] = {
         "IsActive": {"Fn::Equals": [{"Ref": "ActivationState"}, "active"]},
         "IsPrimary": {"Fn::Equals": [{"Ref": "RegionRole"}, "primary"]},
     }

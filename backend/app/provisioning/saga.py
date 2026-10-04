@@ -25,7 +25,7 @@ class Saga:
         for step in self._steps:
             try:
                 step.execute(context)
-            except Exception as error:  # any failure must trigger compensation
+            except Exception as error:  # noqa: BLE001 - any failure must trigger compensation
                 self._report(step.name, StepState.FAILED, str(error))
                 return self._roll_back(completed, context, str(error))
             self._report(step.name, StepState.SUCCEEDED, "")
@@ -40,7 +40,7 @@ class Saga:
     def _compensate(self, step: ProvisioningStep, context) -> bool:
         try:
             step.compensate(context)
-        except Exception as error:  # report and continue undoing the remaining steps
+        except Exception as error:  # noqa: BLE001 - report and keep undoing the remaining steps
             self._report(step.name, StepState.COMPENSATION_FAILED, str(error))
             return False
         self._report(step.name, StepState.COMPENSATED, "")

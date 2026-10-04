@@ -108,10 +108,10 @@ class TemplateLinter:
 class CfnLintRunner:
     """Runs the open-source cfn-lint and returns only error-level findings."""
 
-    REGIONS = ["us-east-1"]
+    REGIONS = ("us-east-1",)
 
     def errors(self, template_yaml: str) -> list[str]:
         from cfnlint.api import ManualArgs, lint
 
-        matches = lint(template_yaml, config=ManualArgs(regions=self.REGIONS))
+        matches = lint(template_yaml, config=ManualArgs(regions=list(self.REGIONS)))
         return [str(match) for match in matches if match.rule.severity == "error"]

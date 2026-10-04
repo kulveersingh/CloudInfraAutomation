@@ -17,7 +17,7 @@ class S3BucketBlock(Block, AccessTarget, NotificationSource):
     notification_principal = "s3.amazonaws.com"
 
     OBJECT_ACTIONS = AccessActions(read=["s3:GetObject"], write=["s3:PutObject", "s3:AbortMultipartUpload"])
-    LIST_ACTIONS = ["s3:ListBucket"]
+    LIST_ACTIONS = ("s3:ListBucket",)
 
     def __init__(self, spec, request):
         super().__init__(spec, request)

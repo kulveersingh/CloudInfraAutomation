@@ -1,5 +1,10 @@
 from app.synth.binders.base import Binder
-from app.synth.blocks.base import FunctionNotification, InvocableFunction, NotificationSource, RuntimePrincipal
+from app.synth.blocks.base import (
+    FunctionNotification,
+    InvocableFunction,
+    NotificationSource,
+    RuntimePrincipal,
+)
 
 
 class EventNotifyBinder(Binder):
