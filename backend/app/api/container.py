@@ -9,6 +9,8 @@ from app.landing_zone.service import LandingZoneService
 from app.networks.service import NetworkService
 from app.projects.service import ProjectService
 from app.provisioning.queue import JobQueue
+from app.readback.manifest import ManifestSigner
+from app.readback.reader import RepositoryReader
 from app.registry.service import RegistryService
 from app.releases.service import ReleaseService
 
@@ -22,9 +24,11 @@ class ServiceContainer:
         self.jobs = JobQueue(session)
         self.networks = NetworkService.for_session(session)
         adapters = AdapterFactory()
+        github, signer = adapters.github(settings), ManifestSigner.from_settings(settings)
         self.releases = ReleaseService.for_session(session, adapters.release_executor(settings))
-        self.landing_zone = LandingZoneService.for_session(session, adapters.github(settings),
-                                                           adapters.landing_zone_executor(settings), settings.github_owner)
+        self.landing_zone = LandingZoneService.for_session(session, github, adapters.landing_zone_executor(settings),
+                                                           settings.github_owner, signer)
+        self.read_back = RepositoryReader.default(github, settings.github_owner, signer)
 
     @classmethod
     def provide(cls, request: Request) -> Iterator["ServiceContainer"]:

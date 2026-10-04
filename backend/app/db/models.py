@@ -91,6 +91,7 @@ class Project(Base):
     resilience_mode: Mapped[str] = mapped_column(String(16))
     status: Mapped[str] = mapped_column(String(32))
     request: Mapped[dict] = mapped_column(JsonDocument)
+    commit_sha: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(default=utc_now)
 
 

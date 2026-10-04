@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import type { Identity, IndustryTemplate, LandingZoneDesign } from "../../api/types";
+import type { Identity, IndustryTemplate, LandingZoneDesign, LandingZoneReadBack } from "../../api/types";
 import { StatusMessage, type SaveStatus } from "../../components/Notices";
 import { LandingZoneDraft } from "../../landingZone/LandingZoneDraft";
 import { ApprovalsPanel } from "./ApprovalsPanel";
@@ -12,7 +12,7 @@ import { OrganizationStep } from "./steps/OrganizationStep";
 import { ReviewStep } from "./steps/ReviewStep";
 import { SandboxStep } from "./steps/SandboxStep";
 import { SecurityStep } from "./steps/SecurityStep";
-import { StartStep } from "./steps/StartStep";
+import { LANDING_ZONE_REPOSITORY, StartStep } from "./steps/StartStep";
 import type { StepProps } from "./steps/StepProps";
 
 const PLATFORM_ADMIN = "platform-admin";
@@ -77,13 +77,22 @@ function Questionnaire({ onSubmitted }: { onSubmitted: (design: LandingZoneDesig
   const [draft, setDraft] = useState(LandingZoneDraft.initial);
   const [template, setTemplate] = useState<IndustryTemplate>();
   const [step, setStep] = useState(0);
+  const [loaded, setLoaded] = useState<LandingZoneReadBack>();
+  const last = STEPS.length - 1;
   const startFrom = (chosen?: IndustryTemplate) => {
     setTemplate(chosen);
+    setLoaded(undefined);
     setDraft(chosen ? draft.withTemplate(chosen) : draft.fromScratch());
   };
-  const last = STEPS.length - 1;
+  const continueFrom = (readBack: LandingZoneReadBack) => {
+    setTemplate(undefined);
+    setLoaded(readBack);
+    setDraft(LandingZoneDraft.fromRequest(readBack.request!));
+    setStep(last);
+  };
   return (
     <>
+      {loaded && <LoadedFromRepository readBack={loaded} />}
       <nav className="steps" aria-label="Questionnaire steps">
         {STEPS.map((item, index) => (
           <button key={item.label} className={`step ${index === step ? "on" : ""}`} aria-current={index === step ? "step" : undefined}
@@ -93,11 +102,23 @@ function Questionnaire({ onSubmitted }: { onSubmitted: (design: LandingZoneDesig
         ))}
       </nav>
       <h2>{step === 0 ? STEPS[0].title : `${step}. ${STEPS[step].title}`}</h2>
-      {STEPS[step].render({ draft, onChange: setDraft, onSubmitted, template, onTemplate: startFrom })}
+      {STEPS[step].render({ draft, onChange: setDraft, onSubmitted, template, onTemplate: startFrom,
+        onRepository: continueFrom })}
       <div className="row">
         <button className="btn" disabled={step === 0} onClick={() => setStep(step - 1)}>Back</button>
         {step < last && <button className="btn pri" onClick={() => setStep(step + 1)}>Continue</button>}
       </div>
+    </>
+  );
+}
+
+function LoadedFromRepository({ readBack }: { readBack: LandingZoneReadBack }) {
+  return (
+    <>
+      <div role="status" className="notice ok">
+        Loaded design v{readBack.design.revision} from {LANDING_ZONE_REPOSITORY} at {readBack.commit_sha?.slice(0, 7)}.
+      </div>
+      {readBack.findings.map((finding) => <div key={finding.check} className="notice warn">{finding.message}</div>)}
     </>
   );
 }

@@ -89,6 +89,12 @@ def test_malformed_documents_fail(document):
         signer().verify(document)
 
 
+def test_unsupported_schema_fails():
+    document = {**signer().sign(manifest()), "schema": 2}
+    with pytest.raises(ManifestError, match="schema 2"):
+        signer().verify(document)
+
+
 def test_active_key_must_exist():
     with pytest.raises(ValueError, match="k2"):
         ManifestSigner({"k1": "secret"}, "k2")

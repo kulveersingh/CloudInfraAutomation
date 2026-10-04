@@ -72,6 +72,7 @@ class LandingZoneDesign:
     answers: LandingZoneAnswers
     root_ous: list[OuNode] = field(default_factory=list)
     edit_problems: list[str] = field(default_factory=list)
+    edits: list = field(default_factory=list)  # the TreeEdits applied, in order
 
     def walk(self) -> Iterator[OuNode]:
         yield from _walk(self.root_ous)

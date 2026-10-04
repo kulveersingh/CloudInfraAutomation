@@ -1,17 +1,30 @@
 import { useState } from "react";
 import { useApi } from "../../../api/ApiContext";
-import type { TemplateSummary } from "../../../api/types";
+import type { LandingZoneReadBack, TemplateSummary } from "../../../api/types";
 import { ErrorAlert } from "../../../components/Notices";
 import { useLoad } from "../../../hooks/useLoad";
 import { plural } from "../../../landingZone/plural";
 import type { StepProps } from "./StepProps";
 
 /** Industry templates fill in the questionnaire, OU structure and control packs; everything stays editable. */
-export function StartStep({ draft, onTemplate }: StepProps) {
+export function StartStep({ draft, onTemplate, onRepository }: StepProps) {
   const api = useApi();
   const templates = useLoad(() => api.landingZoneTemplates());
   const [error, setError] = useState<string>();
+  const [refused, setRefused] = useState<LandingZoneReadBack>();
   const chosen = draft.toAnswers().template?.id;
+
+  const editCurrent = async () => {
+    try {
+      setError(undefined);
+      setRefused(undefined);
+      const readBack = await api.landingZoneReadBack();
+      if (readBack.verified) onRepository(readBack);
+      else setRefused(readBack);
+    } catch (failure) {
+      setError((failure as Error).message);
+    }
+  };
 
   const choose = async (templateId: string) => {
     try {
@@ -27,7 +40,13 @@ export function StartStep({ draft, onTemplate }: StepProps) {
       <p className="sub">Start from an industry template, or from the platform's recommendations. You can change every
         answer, environment, OU and control pack afterwards.</p>
       <ErrorAlert message={templates.error ?? error} />
+      {refused && <RefusedRepository readBack={refused} />}
       <div className="choice templates">
+        <button type="button" className="opt" onClick={editCurrent}>
+          <b>Edit the current landing zone</b>
+          <span className="hint">Load the design committed to {LANDING_ZONE_REPOSITORY}. The platform checks it generated the
+            repository and that nobody edited it by hand.</span>
+        </button>
         <button type="button" className={`opt ${chosen ? "" : "on"}`} aria-pressed={!chosen} onClick={() => onTemplate()}>
           <b>Start from scratch</b>
           <span className="hint">The recommended five environments and the Strongly recommended controls.</span>
@@ -37,6 +56,27 @@ export function StartStep({ draft, onTemplate }: StepProps) {
         ))}
       </div>
     </>
+  );
+}
+
+export const LANDING_ZONE_REPOSITORY = "landing-zone-infra";
+
+function RefusedRepository({ readBack }: { readBack: LandingZoneReadBack }) {
+  return (
+    <section className="notice crit" aria-labelledby="refused-repository">
+      <b id="refused-repository">The landing zone repository can't be loaded</b>
+      {readBack.findings.map((finding) => (
+        <div key={finding.check}>
+          <p>{finding.message}</p>
+          {finding.files.map((file) => (
+            <div key={file.path}>
+              <code>{file.path}</code>
+              {file.diff && <pre className="file">{file.diff}</pre>}
+            </div>
+          ))}
+        </div>
+      ))}
+    </section>
   );
 }
 

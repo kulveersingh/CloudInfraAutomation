@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.adapters.ports import AwsPort, GitHubPort
 from app.db import models
 from app.networks.service import NetworkService
+from app.projects.readback import GENERATOR, INPUT_FILE, KIND, REVISION
 from app.projects.repository import ProjectRepository
 from app.projects.tags import TagSet
 from app.provisioning.queue import JobQueue
@@ -12,6 +13,7 @@ from app.provisioning.saga import Saga
 from app.provisioning.states import ProjectStatus
 from app.provisioning.steps import ProvisioningContext, ProvisioningPlanner
 from app.provisioning.topology import TopologyFactory
+from app.readback.manifest import ManifestSealer, ManifestSigner
 from app.registry.service import RegistryService
 from app.synth.binders.registry import BinderRegistry
 from app.synth.blocks.registry import BlockRegistry
@@ -26,7 +28,7 @@ class JobRunner:
     def __init__(self, queue: JobQueue, projects: ProjectRepository, registry: RegistryService,
                  synthesizer: TemplateSynthesizer, bundle: RepositoryBundle, topologies: TopologyFactory,
                  planner: ProvisioningPlanner, networks: NetworkService, github: GitHubPort, aws: AwsPort,
-                 owner: str):
+                 owner: str, sealer: ManifestSealer):
         self._queue = queue
         self._projects = projects
         self._registry = registry
@@ -38,20 +40,22 @@ class JobRunner:
         self._github = github
         self._aws = aws
         self._owner = owner
+        self._sealer = sealer
 
     @classmethod
-    def for_session(cls, session: Session, github: GitHubPort, aws: AwsPort, owner: str) -> "JobRunner":
+    def for_session(cls, session: Session, github: GitHubPort, aws: AwsPort, owner: str,
+                    signer: ManifestSigner) -> "JobRunner":
         return cls(JobQueue(session), ProjectRepository(session), RegistryService.for_session(session),
                    TemplateSynthesizer(BlockRegistry.default(), BinderRegistry.default()), RepositoryBundle.default(),
                    TopologyFactory.default(), ProvisioningPlanner(), NetworkService.for_session(session), github, aws,
-                   owner)
+                   owner, ManifestSealer(signer))
 
     def run(self, job: models.Job) -> None:
         request = ProjectRequest.model_validate(job.payload)
         context = self._context(job, request)
         outcome = Saga(self._planner.steps_for(context), partial(self._queue.record_step, job)).run(context)
         self._queue.finish(job, outcome.state, outcome.error)
-        self._projects.set_status(request.project_name, ProjectStatus.for_job_state(outcome.state))
+        self._projects.set_status(request.project_name, ProjectStatus.for_job_state(outcome.state), context.commit_sha)
 
     def _context(self, job: models.Job, request: ProjectRequest) -> ProvisioningContext:
         ownership = request.ownership
@@ -61,6 +65,11 @@ class JobRunner:
         topology = self._topologies.for_resilience(request.resilience)
         return ProvisioningContext(
             request_id=job.request_id, request=request, owner=self._owner,
-            files=self._bundle.render(request, self._synthesizer.synthesize(request)), accounts=accounts,
+            files=self._files(request), accounts=accounts,
             topology=topology, tags=TagSet(request, cost_center).as_dict(), github=self._github, aws=self._aws,
             networks=self._networks.resolve(request, topology, accounts))
+
+    def _files(self, request: ProjectRequest) -> dict[str, str]:
+        files = self._bundle.render(request, self._synthesizer.synthesize(request))
+        return self._sealer.seal(kind=KIND, id=request.project_name, revision=REVISION, generator=GENERATOR,
+                                 input=INPUT_FILE, files=files)

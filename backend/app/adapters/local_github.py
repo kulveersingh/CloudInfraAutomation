@@ -5,7 +5,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from app.adapters.ports import GitHubPort, RepositoryConflictError
+from app.adapters.ports import GitHubPort, RepositoryConflictError, RepositorySnapshot
 from app.config import Settings
 
 BRANCH = "main"
@@ -39,7 +39,7 @@ class LocalGitHub(GitHubPort):
         path.parent.mkdir(parents=True, exist_ok=True)
         subprocess.run(["git", "init", "--quiet", "--bare", "--initial-branch", BRANCH, str(path)], check=True)
         (path / MARKER_FILE).write_text(marker)
-        self._write_settings(path, {"repository": {}, "environments": {}})
+        self._write_settings(path, {"repository": {}, "environments": {}, "properties": {}})
         return True
 
     def delete_repository(self, owner: str, name: str) -> None:
@@ -64,6 +64,15 @@ class LocalGitHub(GitHubPort):
         repository = GitPlumbing(self._existing(owner, name))
         with tempfile.TemporaryDirectory() as work:
             return repository.commit(files, message, Path(work) / "index")
+
+    def read_files(self, owner: str, name: str) -> RepositorySnapshot:
+        return GitPlumbing(self._existing(owner, name)).snapshot()
+
+    def set_repository_properties(self, owner: str, name: str, properties: dict[str, str]) -> None:
+        self._update_settings(owner, name, "properties", dict(properties))
+
+    def repository_properties(self, owner: str, name: str) -> dict[str, str]:
+        return self._read_settings(self._existing(owner, name)).get("properties", {})
 
     def _resume(self, path: Path, marker: str) -> bool:
         if (path / MARKER_FILE).read_text() != marker:
@@ -109,13 +118,22 @@ class GitPlumbing:
         self._git(environment, "update-ref", f"refs/heads/{BRANCH}", commit)
         return commit
 
+    def snapshot(self) -> RepositorySnapshot:
+        parents = self._parents()
+        if not parents:
+            return RepositorySnapshot(commit_sha=None, files={})
+        environment = dict(os.environ)
+        paths = self._git(environment, "ls-tree", "-r", "-z", "--name-only", parents[0]).split("\0")
+        return RepositorySnapshot(commit_sha=parents[0], files={
+            path: self._git(environment, "show", f"{parents[0]}:{path}", strip=False) for path in paths if path})
+
     def _parents(self) -> list[str]:
         head = subprocess.run(["git", "--git-dir", str(self._repository), "rev-parse", "--verify", "--quiet",
                                f"refs/heads/{BRANCH}"], capture_output=True, text=True,
                               check=False).stdout.strip()
         return [head] if head else []
 
-    def _git(self, environment: dict, *arguments: str, stdin: str | None = None) -> str:
+    def _git(self, environment: dict, *arguments: str, stdin: str | None = None, strip: bool = True) -> str:
         completed = subprocess.run(["git", "--git-dir", str(self._repository), *arguments], input=stdin,
                                    capture_output=True, text=True, check=True, env=environment)
-        return completed.stdout.strip()
+        return completed.stdout.strip() if strip else completed.stdout

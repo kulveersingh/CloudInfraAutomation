@@ -26,6 +26,14 @@ class BootstrapRequest:
 
 
 @dataclass(frozen=True)
+class RepositorySnapshot:
+    """The files on the default branch and the commit they come from (None for a repository with no commits)."""
+
+    commit_sha: str | None
+    files: dict[str, str]
+
+
+@dataclass(frozen=True)
 class BootstrapOutputs:
     deploy_role_arn: str
     cfn_execution_role_arn: str
@@ -61,6 +69,18 @@ class GitHubPort(ABC):
 
     @abstractmethod
     def commit_files(self, owner: str, name: str, files: dict[str, str], message: str) -> str:
+        ...
+
+    @abstractmethod
+    def read_files(self, owner: str, name: str) -> RepositorySnapshot:
+        ...
+
+    @abstractmethod
+    def set_repository_properties(self, owner: str, name: str, properties: dict[str, str]) -> None:
+        """GitHub repository custom properties (topics on personal-account repositories)."""
+
+    @abstractmethod
+    def repository_properties(self, owner: str, name: str) -> dict[str, str]:
         ...
 
 

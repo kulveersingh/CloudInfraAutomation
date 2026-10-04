@@ -10,23 +10,26 @@ from app.config import Settings
 from app.db.database import Database
 from app.provisioning.queue import JobQueue
 from app.provisioning.runner import JobRunner
+from app.readback.manifest import ManifestSigner
 
 
 class Worker:
     """Claims and runs one queued job at a time. Runs as its own ECS service on AWS."""
 
-    def __init__(self, session_factory: sessionmaker, github: GitHubPort, aws: AwsPort, owner: str):
+    def __init__(self, session_factory: sessionmaker, github: GitHubPort, aws: AwsPort, owner: str,
+                 signer: ManifestSigner):
         self._session_factory = session_factory
         self._github = github
         self._aws = aws
         self._owner = owner
+        self._signer = signer
 
     def process_one(self) -> bool:
         with self._session_factory() as session:
             job = JobQueue(session).claim_next()
             if job is None:
                 return False
-            JobRunner.for_session(session, self._github, self._aws, self._owner).run(job)
+            JobRunner.for_session(session, self._github, self._aws, self._owner, self._signer).run(job)
             return True
 
 
@@ -38,7 +41,8 @@ class WorkerCommand:
     def run(self, max_iterations: int | None = None) -> None:
         adapters = AdapterFactory()
         worker = Worker(Database(self._settings.sqlalchemy_url()).session_factory, adapters.github(self._settings),
-                        adapters.aws(self._settings), self._settings.github_owner)
+                        adapters.aws(self._settings), self._settings.github_owner,
+                        ManifestSigner.from_settings(self._settings))
         for _ in self._iterations(max_iterations):
             if not worker.process_one():
                 self._sleep(self._settings.worker_poll_seconds)

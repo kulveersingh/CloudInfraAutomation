@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     aws_mode: str = "local"
     local_state_dir: str = "var"
     github_owner: str = "acme-platform"
+    # Keys that sign the manifest in every generated repository (§21.2). On AWS a Secrets Manager secret injects them;
+    # the local key is fixed and not secret.
+    manifest_signing_keys: dict[str, str] = {"local-dev": "local-development-key-not-secret"}
+    manifest_active_key: str = "local-dev"
     worker_poll_seconds: float = 2.0
     cors_origins: list[str] = ["http://localhost:5173", "http://localhost:8080"]
 

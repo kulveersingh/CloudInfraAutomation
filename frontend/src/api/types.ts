@@ -372,6 +372,25 @@ export interface LandingZoneDesign {
 
 export type LandingZoneDesignDetail = LandingZoneDesign & LandingZoneExplanation;
 
+export interface ReadBackFinding {
+  check: string;
+  severity: "blocking" | "warning";
+  message: string;
+  /** Files the finding is about; `diff` shows a hand edit when the platform can rebuild the original. */
+  files: Array<{ path: string; diff: string | null }>;
+}
+
+/** A design read back from a repository the platform generated; `request` is present only when verified. */
+export interface RepositoryReadBack<Request> {
+  verified: boolean;
+  commit_sha: string | null;
+  findings: ReadBackFinding[];
+  design: { kind: string; id: string; revision: number };
+  request: Request | null;
+}
+
+export type LandingZoneReadBack = RepositoryReadBack<LandingZoneRequest>;
+
 export interface Identity {
   name: string;
   label: string;
@@ -382,6 +401,7 @@ export interface PlatformApiPort {
   landingZoneTemplates(): Promise<TemplateSummary[]>;
   landingZoneTemplate(templateId: string): Promise<IndustryTemplate>;
   controlPacks(): Promise<ControlPackCatalog>;
+  landingZoneReadBack(): Promise<LandingZoneReadBack>;
   proposeLandingZone(request: LandingZoneRequest): Promise<LandingZoneProposal>;
   createLandingZoneDesign(request: LandingZoneRequest): Promise<LandingZoneDesign>;
   landingZoneDesigns(): Promise<LandingZoneDesign[]>;

@@ -18,16 +18,18 @@ from app.landing_zone.designer import LandingZoneDesigner
 from app.landing_zone.diagram import OuDiagramRenderer
 from app.landing_zone.edits import EditPermissions, TreeEdit, TreeEditor
 from app.landing_zone.executor import LandingZoneExecutor, LandingZoneOutputs
+from app.landing_zone.readback import GENERATOR, INPUT_FILE, KIND, REPOSITORY_NAME, LandingZoneSubject
 from app.landing_zone.repository import LandingZoneRepository
 from app.landing_zone.request import LandingZoneRequest
 from app.landing_zone.states import DesignStatus
 from app.landing_zone.validation import DesignAdvisor, DesignValidator
 from app.networks.models import NetworkInput
 from app.networks.service import NetworkService
+from app.readback.manifest import ManifestSealer, ManifestSigner
+from app.readback.subjects import ownership_properties
 from app.registry.service import RegistryService, require
 from app.releases.policy import Actor, Role
 
-REPOSITORY_NAME = "landing-zone-infra"
 REPOSITORY_MARKER = "landing-zone"
 BEHAVIORS = ("PREVENTIVE", "DETECTIVE", "PROACTIVE")
 # Placeholder identity used only to preview a template's structure before the customer names the organization.
@@ -52,21 +54,22 @@ class LandingZoneService:
     """The landing zone workflow: propose → draft → submit → approve (commit + apply + register networks) or reject."""
 
     def __init__(self, repository: LandingZoneRepository, registry: RegistryService, networks: NetworkService,
-                 github: GitHubPort, executor: LandingZoneExecutor, owner: str):
+                 github: GitHubPort, executor: LandingZoneExecutor, owner: str, signer: ManifestSigner):
         self._repository = repository
         self._registry = registry
         self._networks = networks
         self._github = github
         self._executor = executor
         self._owner = owner
+        self._sealer = ManifestSealer(signer)
         self._policy = LandingZonePolicy()
         self._designer = LandingZoneDesigner.default()
 
     @classmethod
-    def for_session(cls, session: Session, github: GitHubPort, executor: LandingZoneExecutor,
-                    owner: str) -> "LandingZoneService":
+    def for_session(cls, session: Session, github: GitHubPort, executor: LandingZoneExecutor, owner: str,
+                    signer: ManifestSigner) -> "LandingZoneService":
         return cls(LandingZoneRepository(session), RegistryService.for_session(session),
-                   NetworkService.for_session(session), github, executor, owner)
+                   NetworkService.for_session(session), github, executor, owner, signer)
 
     def propose(self, request: LandingZoneRequest, actor: Actor) -> dict:
         self._policy.require_admin(actor)
@@ -104,6 +107,12 @@ class LandingZoneService:
                            "controls": [_control_json(snapshot.get(control_id)) for control_id in pack.control_ids]}
                           for pack in PackRegistry.default().all()]}
 
+    def repository_subject(self, actor: Actor) -> LandingZoneSubject:
+        """The applied design to read back from landing-zone-infra (§21)."""
+        self._policy.require_admin(actor)
+        record = require(self._repository.latest_applied(), NotFoundError("No landing zone has been applied yet."))
+        return LandingZoneSubject(record, self._render)
+
     def designs(self, actor: Actor) -> list[dict]:
         self._policy.require_admin(actor)
         return [self._describe(record) for record in self._repository.all()]
@@ -131,7 +140,7 @@ class LandingZoneService:
         record = self._in_status(design_id, DesignStatus.PENDING_APPROVAL)
         self._policy.require_second_admin(actor, record)
         design = self._design_of(record)
-        record.commit_sha = self._commit(design, record.version, actor)
+        record.commit_sha = self._commit(design, record, actor)
         outputs = self._executor.apply(design)
         self._register_networks(design, outputs)
         record.status, record.decided_by, record.decision_comment = DesignStatus.APPLIED, actor.name, comment
@@ -156,7 +165,11 @@ class LandingZoneService:
     def _design(self, answers: LandingZoneAnswers, edits: list[TreeEdit]) -> LandingZoneDesign:
         design = self._designer.design(answers, self._catalog())
         design.edit_problems = TreeEditor().apply(design, edits)
+        design.edits = list(edits)
         return design
+
+    def _render(self, request: LandingZoneRequest) -> dict[str, str]:
+        return LandingZoneBundle.default().render(self._design(request.answers, request.edits), self._catalog())
 
     def _design_of(self, record: models.LandingZoneDesignRecord) -> LandingZoneDesign:
         return self._design(LandingZoneAnswers.model_validate(record.answers), TreeEditor.parse(record.edits))
@@ -196,11 +209,14 @@ class LandingZoneService:
             raise ConflictError(f"Design v{record.version} is {record.status}, not {status}.")
         return record
 
-    def _commit(self, design: LandingZoneDesign, version: int, actor: Actor) -> str:
+    def _commit(self, design: LandingZoneDesign, record: models.LandingZoneDesignRecord, actor: Actor) -> str:
+        design_id = str(record.id)
         self._github.create_repository(self._owner, REPOSITORY_NAME, marker=REPOSITORY_MARKER)
-        files = LandingZoneBundle.default().render(design, self._catalog())
+        self._github.set_repository_properties(self._owner, REPOSITORY_NAME, ownership_properties(KIND, design_id))
+        files = self._sealer.seal(kind=KIND, id=design_id, revision=record.version, generator=GENERATOR,
+                                  input=INPUT_FILE, files=LandingZoneBundle.default().render(design, self._catalog()))
         return self._github.commit_files(self._owner, REPOSITORY_NAME, files,
-                                         f"Landing zone design v{version} approved by {actor.name}")
+                                         f"Landing zone design v{record.version} approved by {actor.name}")
 
     def _register_networks(self, design: LandingZoneDesign, outputs: LandingZoneOutputs) -> None:
         organization = design.answers.organization_name

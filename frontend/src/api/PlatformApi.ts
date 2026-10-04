@@ -1,6 +1,7 @@
 import type {
   CatalogEntry, CloudFormationType, CostCenterChange, CostCenterSettings, EnvironmentInfo, Identity, JobStatus,
-  ControlPackCatalog, IndustryTemplate, LandingZoneDesign, LandingZoneDesignDetail, LandingZoneProposal, LandingZoneRequest,
+  ControlPackCatalog, IndustryTemplate, LandingZoneDesign, LandingZoneDesignDetail, LandingZoneProposal, LandingZoneReadBack,
+  LandingZoneRequest,
   TemplateSummary, NetworkInfo, NetworkInput,
   NetworkOption, NetworkSettings, PipelineStage, PlatformApiPort, Portfolio, PreviewResult, ProjectRequest, ProjectSummary,
   RegionInfo, Release,
@@ -37,6 +38,10 @@ export class PlatformApi implements PlatformApiPort {
   }
 
   controlPacks() { return this.send<ControlPackCatalog>("GET", "/v1/admin/landing-zone/control-packs"); }
+
+  landingZoneReadBack() {
+    return this.send<LandingZoneReadBack>("GET", "/v1/admin/landing-zone/repository:read-back");
+  }
 
   proposeLandingZone(request: LandingZoneRequest) {
     return this.send<LandingZoneProposal>("POST", "/v1/admin/landing-zone:propose", request);

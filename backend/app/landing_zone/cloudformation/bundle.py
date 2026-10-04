@@ -13,6 +13,7 @@ from app.landing_zone.cloudformation.structure import StructureStack
 from app.landing_zone.design import LandingZoneDesign, OrgCatalog, OuNode
 from app.landing_zone.designer import network_host_suffix
 from app.landing_zone.diagram import OuDiagramRenderer
+from app.landing_zone.edits import TreeEditor
 from app.synth.render import NoAliasDumper
 
 STACKS: list[StackRenderer] = [FoundationStack(), StructureStack(), AccountsStack(), NetworkStack(), BootstrapStack()]
@@ -41,7 +42,8 @@ class StackFiles(BundleFile):
 class DesignJson(BundleFile):
     def render(self, context):
         design = context.design
-        document = {"answers": design.answers.model_dump(mode="json"), "ous": [_ou_json(ou) for ou in design.root_ous]}
+        document = {"answers": design.answers.model_dump(mode="json"), "edits": TreeEditor.dump(design.edits),
+                    "ous": [_ou_json(ou) for ou in design.root_ous]}
         return {"design.json": json.dumps(document, indent=2) + "\n"}
 
 

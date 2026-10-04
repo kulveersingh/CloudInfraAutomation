@@ -15,6 +15,7 @@ class LandingZoneRouter:
         self.router.add_api_route(f"{BASE}/templates", self.templates, methods=["GET"])
         self.router.add_api_route(f"{BASE}/templates/{{template_id}}", self.template, methods=["GET"])
         self.router.add_api_route(f"{BASE}/control-packs", self.control_packs, methods=["GET"])
+        self.router.add_api_route(f"{BASE}/repository:read-back", self.read_back, methods=["GET"])
         self.router.add_api_route(f"{BASE}:propose", self.propose, methods=["POST"])
         self.router.add_api_route(f"{BASE}/designs", self.create, methods=["POST"], status_code=201)
         self.router.add_api_route(f"{BASE}/designs", self.designs, methods=["GET"])
@@ -32,6 +33,9 @@ class LandingZoneRouter:
 
     def control_packs(self, services: Services, actor: CurrentActor) -> dict:
         return services.landing_zone.control_packs(actor)
+
+    def read_back(self, services: Services, actor: CurrentActor) -> dict:
+        return services.read_back.read(services.landing_zone.repository_subject(actor)).as_dict()
 
     def propose(self, request: LandingZoneRequest, services: Services, actor: CurrentActor) -> dict:
         return services.landing_zone.propose(request, actor)

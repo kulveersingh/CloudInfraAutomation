@@ -1,4 +1,4 @@
-import type { IndustryTemplate, LandingZoneDesign } from "../../../api/types";
+import type { IndustryTemplate, LandingZoneDesign, LandingZoneReadBack } from "../../../api/types";
 import type { LandingZoneDraft } from "../../../landingZone/LandingZoneDraft";
 
 export interface StepProps {
@@ -9,4 +9,6 @@ export interface StepProps {
   template?: IndustryTemplate;
   /** Starts the design from a template, or from scratch when none is given. */
   onTemplate: (template?: IndustryTemplate) => void;
+  /** Continues from the design committed to the repository, once read back and verified. */
+  onRepository: (readBack: LandingZoneReadBack) => void;
 }

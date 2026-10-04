@@ -1,14 +1,15 @@
 from sqlalchemy.orm import Session
 
 from app.db import models
-from app.errors import ConflictError, ValidationFailedError
+from app.errors import ConflictError, NotFoundError, ValidationFailedError
 from app.networks.service import NetworkService
+from app.projects.readback import ProjectSubject
 from app.projects.repository import ProjectRepository
 from app.projects.tags import TagSet
 from app.provisioning.queue import JobQueue
 from app.provisioning.states import ProjectStatus
 from app.provisioning.topology import TopologyFactory
-from app.registry.service import RegistryService
+from app.registry.service import RegistryService, require
 from app.synth.binders.registry import BinderRegistry
 from app.synth.blocks.registry import BlockRegistry
 from app.synth.lint import LintError, TemplateLinter
@@ -63,6 +64,14 @@ class ProjectService:
         return [{"name": project.name, "portfolio_id": project.portfolio_id, "product_id": project.product_id,
                  "resilience_mode": project.resilience_mode, "status": project.status}
                 for project in self._projects.all()]
+
+    def repository_subject(self, project_name: str) -> ProjectSubject:
+        """The project to read back from its infrastructure repository (§21)."""
+        project = require(self._projects.get(project_name), NotFoundError(f"Unknown project '{project_name}'."))
+        return ProjectSubject(project, self._render)
+
+    def _render(self, request: ProjectRequest) -> dict[str, str]:
+        return self._bundle.render(request, self._synthesizer.synthesize(request))
 
     def _validate(self, request: ProjectRequest) -> None:
         try:

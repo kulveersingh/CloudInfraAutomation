@@ -79,6 +79,7 @@ class ProjectRouter:
         self.router.add_api_route("/projects:preview", self.preview, methods=["POST"])
         self.router.add_api_route("/projects", self.create, methods=["POST"], status_code=202)
         self.router.add_api_route("/projects", self.projects, methods=["GET"])
+        self.router.add_api_route("/projects/{project_name}/repository:read-back", self.read_back, methods=["GET"])
         self.router.add_api_route("/jobs/{job_id}", self.job, methods=["GET"])
 
     def preview(self, request: ProjectRequest, services: Services) -> dict:
@@ -92,6 +93,9 @@ class ProjectRouter:
 
     def projects(self, services: Services) -> list[dict]:
         return services.projects.projects()
+
+    def read_back(self, project_name: str, services: Services) -> dict:
+        return services.read_back.read(services.projects.repository_subject(project_name)).as_dict()
 
     def job(self, job_id: uuid.UUID, services: Services) -> dict:
         job = services.jobs.get(job_id)

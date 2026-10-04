@@ -61,6 +61,11 @@ export class LandingZoneDraft {
     }, []);
   }
 
+  /** A design read back from the repository; answers it predates take the recommendations. */
+  static fromRequest(request: LandingZoneRequest): LandingZoneDraft {
+    return new LandingZoneDraft({ ...LandingZoneDraft.initial().answers, ...request.answers }, request.edits);
+  }
+
   static environmentCatalog(): LandingZoneEnvironment[] {
     return ENVIRONMENT_CATALOG;
   }

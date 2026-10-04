@@ -3250,6 +3250,7 @@ A `RepositoryReader` runs an ordered chain of checks (one class each, Open/Close
 | `ManifestSignatureCheck` | The manifest is missing or unreadable, the key id is unknown, or the HMAC does not match | |
 | `RecordCheck` | Kind or id differ from the item asked for, or no database record matches the id and revision | |
 | `IntegrityCheck` | Any file listed in the manifest is missing or its hash differs (**hand edited**). For each such file the result includes a diff against the regenerated content, when the regenerated content still matches the manifest hash. | |
+| `InputCheck` | The input file no longer validates against today's model | |
 | `HeadCheck` | | The repository's HEAD is not the commit the platform recorded (commits that did not touch generated files) |
 | `RegenerationCheck` | | Regenerating from the input today gives different files (generator, registry or control catalog changed). Saving the change will update them. |
 
