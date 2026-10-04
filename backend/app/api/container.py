@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.adapters.factory import AdapterFactory
 from app.config import Settings
+from app.landing_zone.service import LandingZoneService
 from app.networks.service import NetworkService
 from app.projects.service import ProjectService
 from app.provisioning.queue import JobQueue
@@ -20,7 +21,10 @@ class ServiceContainer:
         self.projects = ProjectService.for_session(session)
         self.jobs = JobQueue(session)
         self.networks = NetworkService.for_session(session)
-        self.releases = ReleaseService.for_session(session, AdapterFactory().release_executor(settings))
+        adapters = AdapterFactory()
+        self.releases = ReleaseService.for_session(session, adapters.release_executor(settings))
+        self.landing_zone = LandingZoneService.for_session(session, adapters.github(settings),
+                                                           adapters.landing_zone_executor(settings), settings.github_owner)
 
     @classmethod
     def provide(cls, request: Request) -> Iterator["ServiceContainer"]:

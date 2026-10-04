@@ -45,7 +45,7 @@ def test_propose_includes_the_generated_files(client):
 
 def test_propose_names_accounts_after_registry_portfolios(client):
     prod = next(ou for ou in propose(client).json()["ous"] if ou["name"] == "PROD")
-    assert prod["accounts"] == ["acme-payments-prod", "acme-retail-prod", "acme-data-prod"]
+    assert prod["accounts"] == ["acme-data-prod", "acme-payments-prod", "acme-retail-prod"]
 
 
 def test_propose_rejects_invalid_answers(client):
@@ -178,3 +178,16 @@ def test_diagram_endpoint_serves_svg(client):
     design_id = create(client).json()["id"]
     response = client.get(f"{BASE}/designs/{design_id}/diagram.svg", headers=ALEX)
     assert (response.headers["content-type"].startswith("image/svg+xml"), response.text[:4]) == (True, "<svg")
+
+
+def test_submit_refuses_a_design_with_problems(client, monkeypatch):
+    from app.landing_zone.validation import DesignRule, DesignValidator
+
+    class AlwaysBroken(DesignRule):
+        def problems(self, design):
+            return ["Broken on purpose."]
+
+    monkeypatch.setattr(DesignValidator, "default", classmethod(lambda cls: cls([AlwaysBroken()])))
+    design_id = create(client).json()["id"]
+    response = client.post(f"{BASE}/designs/{design_id}:submit", headers=ALEX)
+    assert (response.status_code, response.json()["detail"]) == (422, "Broken on purpose.")

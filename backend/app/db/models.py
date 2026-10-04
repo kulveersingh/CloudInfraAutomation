@@ -173,3 +173,22 @@ class Network(Base):
     private_subnet_ids: Mapped[list] = mapped_column(JsonDocument)
     security_group_ids: Mapped[list] = mapped_column(JsonDocument)
     is_default: Mapped[bool] = mapped_column(default=False)
+
+
+class LandingZoneDesignRecord(Base):
+    """One version of the landing zone questionnaire answers and where it is in the approval workflow."""
+
+    __tablename__ = "landing_zone_designs"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    version: Mapped[int] = mapped_column(unique=True)
+    answers: Mapped[dict] = mapped_column(JsonDocument)
+    status: Mapped[str] = mapped_column(String(32))
+    created_by: Mapped[str] = mapped_column(String(128))
+    submitted_by: Mapped[str | None] = mapped_column(String(128))
+    decided_by: Mapped[str | None] = mapped_column(String(128))
+    decision_comment: Mapped[str | None] = mapped_column(Text)
+    repository: Mapped[str | None] = mapped_column(String(256))
+    commit_sha: Mapped[str | None] = mapped_column(String(64))
+    accounts: Mapped[dict | None] = mapped_column(JsonDocument)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now)

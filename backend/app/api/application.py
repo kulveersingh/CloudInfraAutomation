@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import sessionmaker
 
+from app.api.landing_zone_router import LandingZoneRouter
 from app.api.network_router import NetworkRouter
 from app.api.release_router import ReleaseRouter
 from app.api.routers import CatalogRouter, HealthRouter, ProjectRouter, RegistryRouter
@@ -44,4 +45,5 @@ class ApplicationFactory:
     def _routers(self) -> list:
         catalog = CatalogRouter(ServiceCatalog(BlockRegistry.default()), CloudFormationSchemaCatalog.bundled())
         releases = ReleaseRouter(simulation_enabled=self._settings.github_mode == LOCAL_MODE)
-        return [HealthRouter(), catalog, RegistryRouter(), ProjectRouter(), releases, NetworkRouter()]
+        return [HealthRouter(), catalog, RegistryRouter(), ProjectRouter(), releases, NetworkRouter(),
+                LandingZoneRouter()]

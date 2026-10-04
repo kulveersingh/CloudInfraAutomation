@@ -43,6 +43,16 @@ class NetworkService:
         self._networks.commit()
         return self.describe(network)
 
+    def register(self, network_id: str, network_input: NetworkInput) -> dict:
+        """Creates or replaces a network with a known id (used for networks the landing zone created)."""
+        existing = self._networks.get(network_id)
+        network = existing or models.Network(id=network_id)
+        self._apply(network, network_input)
+        if existing is None:
+            self._networks.add(network)
+        self._networks.commit()
+        return self.describe(network)
+
     def settings(self) -> dict:
         return {"attach_compute_by_default": self._registry.organization_settings().attach_compute_to_vpc}
 

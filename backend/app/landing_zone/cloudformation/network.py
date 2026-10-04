@@ -2,6 +2,7 @@ import ipaddress
 
 from app.landing_zone.cloudformation.base import StackContext, StackRenderer
 from app.landing_zone.cloudformation.references import pascal
+from app.landing_zone.design import LandingZoneDesign
 from app.landing_zone.ipam import IpamPlanner
 
 VPC_PREFIX = 16
@@ -26,9 +27,9 @@ def _tags(name: str) -> list[dict]:
 class NetworkLayout:
     """Address plan for the shared VPCs: one per environment OU plus Shared Services and Egress, per region."""
 
-    def __init__(self, context: StackContext):
-        answers = context.design.answers
-        self.environments = context.design.environment_ous()
+    def __init__(self, design: LandingZoneDesign):
+        answers = design.answers
+        self.environments = design.environment_ous()
         slots = [ou.key for ou in self.environments] + [SHARED_SLOT]
         self._plan = IpamPlanner().plan(answers.network.cidr, answers.governed_regions, slots)
         self.regions = answers.governed_regions
@@ -82,7 +83,7 @@ class NetworkStack(StackRenderer):
                    "Transit Gateway route table per environment, central egress and inspection.")
 
     def sections(self, context: StackContext) -> dict:
-        builder = _NetworkBuilder(context, NetworkLayout(context))
+        builder = _NetworkBuilder(context, NetworkLayout(context.design))
         return builder.build()
 
 
@@ -188,14 +189,22 @@ class _NetworkBuilder:
                 "TransitGatewayId": {"Ref": "TransitGateway"}}, [f"Attachment{key}"])
         if not self._central:
             self._local_egress(key, vpc)
+        group = f"OrgSecurityGroup{key}"
+        self._add(group, "AWS::EC2::SecurityGroup", {
+            "GroupDescription": f"Organization security group for {label}: open inside the environment range",
+            "VpcId": {"Ref": vpc}, "SecurityGroupIngress": [{
+                "IpProtocol": "-1", "CidrIp": {"Fn::GetAtt": [vpc, "CidrBlock"]},
+                "Description": f"Anything inside the {label} environment"}]})
+        shared = [*(f"subnet/${{{subnet}}}" for subnet in subnets), f"security-group/${{{group}}}"]
         self._add(f"Share{key}", "AWS::RAM::ResourceShare", {
-            "Name": f"{self._organization}-{key.lower()}-subnets", "AllowExternalPrincipals": False,
+            "Name": f"{self._organization}-{key.lower()}-network", "AllowExternalPrincipals": False,
             "Principals": [{"Ref": principal}],
-            "ResourceArns": [{"Fn::Sub": f"arn:${{AWS::Partition}}:ec2:${{AWS::Region}}:${{AWS::AccountId}}:subnet/${{{subnet}}}"}
-                             for subnet in subnets]})
+            "ResourceArns": [{"Fn::Sub": f"arn:${{AWS::Partition}}:ec2:${{AWS::Region}}:${{AWS::AccountId}}:{item}"}
+                             for item in shared]})
         self._outputs |= {f"{vpc}Id": {"Value": {"Ref": vpc}},
                           f"{vpc}PrivateSubnetIds": {"Value": {"Fn::Join": [",", [{"Ref": subnet} for subnet in subnets]]}},
-                          f"{vpc}Cidr": {"Value": {"Fn::GetAtt": [vpc, "CidrBlock"]}}}
+                          f"{vpc}Cidr": {"Value": {"Fn::GetAtt": [vpc, "CidrBlock"]}},
+                          f"{vpc}SecurityGroupId": {"Value": {"Ref": group}}}
 
     def _local_egress(self, key: str, vpc: str) -> None:
         public = f"PublicSubnet{key}"
