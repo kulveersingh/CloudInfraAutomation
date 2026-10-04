@@ -1,0 +1,63 @@
+# Local development stack.
+#   docker compose up -d db                 -> PostgreSQL only (run API/worker/UI from source)
+#   docker compose --profile full up --build -> everything in containers, mirroring the ECS services
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: cloudinfra
+      POSTGRES_PASSWORD: cloudinfra
+      POSTGRES_DB: cloudinfra
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cloudinfra -d cloudinfra"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  api:
+    profiles: ["full"]
+    build: ./backend
+    command: ["sh", "-c", "alembic upgrade head && python -m app.seed && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://cloudinfra:cloudinfra@db:5432/cloudinfra
+      GITHUB_MODE: local
+      AWS_MODE: local
+      LOCAL_STATE_DIR: /var/cloudinfra
+    volumes:
+      - localstate:/var/cloudinfra
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  worker:
+    profiles: ["full"]
+    build: ./backend
+    command: ["python", "-m", "app.provisioning.worker"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://cloudinfra:cloudinfra@db:5432/cloudinfra
+      GITHUB_MODE: local
+      AWS_MODE: local
+      LOCAL_STATE_DIR: /var/cloudinfra
+    volumes:
+      - localstate:/var/cloudinfra
+    depends_on:
+      db:
+        condition: service_healthy
+
+  ui:
+    profiles: ["full"]
+    build: ./frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+  localstate:
