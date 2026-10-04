@@ -238,4 +238,34 @@ describe("NewProjectPage", () => {
     await screen.findByText("Provisioning finished.");
     expect(vi.mocked(api.createProject).mock.calls[0][1]).toMatch(/^[0-9a-f-]{36}$/);
   });
+
+  it("starts with the organization's attach-by-default setting", async () => {
+    renderWizard(fakeApi({ networkSettings: vi.fn().mockResolvedValue({ attach_compute_by_default: false }) }));
+    await fillOwnership();
+    await goTo("Network");
+    expect(screen.getByLabelText("Attach compute to the organization VPC")).not.toBeChecked();
+  });
+
+  it("sends the network choice with the request", async () => {
+    const api = fakeApi();
+    renderWizard(api);
+    await fillOwnership();
+    await goTo("Services");
+    await user().click(screen.getByRole("button", { name: "Add S3 bucket" }));
+    await goTo("Environments");
+    await user().click(screen.getByLabelText("PROD"));
+    await goTo("Network");
+    await user().selectOptions(await screen.findByLabelText("Network for prod in us-east-1"), "net-prod-alt");
+    await goTo("Preview");
+    await user().click(screen.getByRole("button", { name: "Generate preview" }));
+    expect(vi.mocked(api.preview).mock.calls[0][0].network).toEqual({
+      attach_compute: true, selections: { "prod:us-east-1": "net-prod-alt" } });
+  });
+
+  it("shows the VPC per environment and region in the preview", async () => {
+    renderWizard();
+    await completeDraft();
+    await user().click(screen.getByRole("button", { name: "Generate preview" }));
+    expect(await screen.findByText("us-east-1: vpc-0aaa1111bbbb22223")).toBeInTheDocument();
+  });
 });

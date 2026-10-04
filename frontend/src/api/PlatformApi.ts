@@ -1,6 +1,6 @@
 import type {
   CatalogEntry, CloudFormationType, CostCenterChange, CostCenterSettings, EnvironmentInfo, Identity, JobStatus,
-  PipelineStage, PlatformApiPort, Portfolio, PreviewResult, ProjectRequest, ProjectSummary, RegionInfo, Release,
+  NetworkInfo, NetworkInput, NetworkOption, NetworkSettings, PipelineStage, PlatformApiPort, Portfolio, PreviewResult, ProjectRequest, ProjectSummary, RegionInfo, Release,
 } from "./types";
 
 type Fetcher = (input: string, init: RequestInit) => Promise<Response>;
@@ -23,6 +23,24 @@ export class PlatformApi implements PlatformApiPort {
 
   setActor(identity: Identity) {
     this.actorHeaders = { "X-Actor": identity.name, "X-Roles": identity.roles.join(",") };
+  }
+
+  networks() { return this.send<NetworkInfo[]>("GET", "/v1/admin/networks"); }
+
+  createNetwork(network: NetworkInput) { return this.send<NetworkInfo>("POST", "/v1/admin/networks", network); }
+
+  updateNetwork(networkId: string, network: NetworkInput) {
+    return this.send<NetworkInfo>("PUT", `/v1/admin/networks/${networkId}`, network);
+  }
+
+  networkSettings() { return this.send<NetworkSettings>("GET", "/v1/admin/network-settings"); }
+
+  updateNetworkSettings(settings: NetworkSettings) {
+    return this.send<NetworkSettings>("PUT", "/v1/admin/network-settings", settings);
+  }
+
+  networkOptions(portfolioId: string) {
+    return this.send<NetworkOption[]>("GET", `/v1/networks/options?portfolio_id=${encodeURIComponent(portfolioId)}`);
   }
 
   pipeline(projectName: string) { return this.send<PipelineStage[]>("GET", `/v1/projects/${projectName}/pipeline`); }

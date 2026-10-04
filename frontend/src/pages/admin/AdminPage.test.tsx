@@ -21,4 +21,10 @@ describe("AdminPage", () => {
     await userEvent.click(screen.getByRole("tab", { name: "Regions" }));
     expect(screen.getByRole("tab", { name: "Regions" })).toHaveAttribute("aria-selected", "true");
   });
+
+  it("switches to networks", async () => {
+    renderWithApi(<AdminPage />);
+    await userEvent.click(screen.getByRole("tab", { name: "Networks" }));
+    expect(await screen.findByLabelText("Attach compute to the organization VPC by default")).toBeInTheDocument();
+  });
 });
