@@ -1,6 +1,6 @@
 import { vi } from "vitest";
 import type {
-  AccountInfo, CatalogEntry, CostCenterSettings, EnvironmentInfo, JobStatus, LandingZoneDesign, LandingZoneDesignDetail,
+  AccountInfo, CatalogControlInfo, CatalogEntry, ControlPackCatalog, CostCenterSettings, IndustryTemplate, TemplateSummary, EnvironmentInfo, JobStatus, LandingZoneDesign, LandingZoneDesignDetail,
   LandingZoneProposal, NetworkInfo, NetworkOption, OuInfo, PipelineStage, PlatformApiPort, Portfolio, PreviewResult,
   ProjectSummary, RegionInfo, Release,
 } from "../api/types";
@@ -114,8 +114,13 @@ export function job(state: string, steps: JobStatus["steps"] = [], error: string
 
 const ou = (key: string, name: string, kind: string, extra: Partial<OuInfo> = {}): OuInfo => ({
   key, name, kind, environment: null, tier: null, created_by_control_tower: false, custom: false, domain: null,
-  allowed_edits: [], blocked_edits: {}, accounts: [], children: [], ...extra,
+  allowed_edits: [], blocked_edits: {}, accounts: [], controls: [], children: [], ...extra,
 });
+
+const ROOT_USER = { id: "5kvme4m5d2b4d7if2fs5yg2ui", name: "Disallow actions as a root user", behavior: "PREVENTIVE" as const,
+  severity: "HIGH" };
+const ROOT_MFA = { id: "24izmu4k16gv9tvd7sexnyrfy", name: "Detect whether MFA for the root user is enabled",
+  behavior: "DETECTIVE" as const, severity: "HIGH" };
 
 const account = (name: string, extra: Partial<AccountInfo> = {}): AccountInfo => ({
   name, enabled: true, added: false, allowed_edits: ["move", "disable"], ...extra,
@@ -129,6 +134,7 @@ export const OU_TREE: OuInfo[] = [
   ou("infrastructure", "Infrastructure", "infrastructure", { domain: "infrastructure", allowed_edits: CONTAINER,
     accounts: [fixed("acme-network")] }),
   ou("prod", "PROD", "environment", { environment: "prod", tier: "prod", domain: "prod", allowed_edits: CONTAINER,
+    controls: [{ ...ROOT_USER, packs: ["foundation"] }, { ...ROOT_MFA, packs: ["foundation"] }],
     accounts: [account("acme-payments-prod")], children: [
       ou("custom_payments", "Payments", "custom", { custom: true, domain: "prod",
         allowed_edits: [...CONTAINER, "rename", "move", "remove"] }),
@@ -144,7 +150,7 @@ export const OU_TREE: OuInfo[] = [
 const DIAGRAM = { svg: '<svg xmlns="http://www.w3.org/2000/svg"><text>PROD OU</text></svg>', mermaid: "flowchart TD" };
 
 export const PROPOSAL: LandingZoneProposal = {
-  ous: OU_TREE, problems: [], diagram: DIAGRAM,
+  ous: OU_TREE, problems: [], warnings: [], diagram: DIAGRAM,
   files: { "stacks/lz-structure.yaml": "Resources: {}\n", "README.md": "# acme landing zone\n" },
 };
 
@@ -158,8 +164,46 @@ export function landingZoneDesign(overrides: Partial<LandingZoneDesign> = {}): L
 }
 
 export function landingZoneDetail(overrides: Partial<LandingZoneDesign> = {}): LandingZoneDesignDetail {
-  return { ...landingZoneDesign(overrides), ous: OU_TREE, problems: [], diagram: DIAGRAM };
+  return { ...landingZoneDesign(overrides), ous: OU_TREE, problems: [], warnings: [], diagram: DIAGRAM };
 }
+
+const catalogControl = (control: typeof ROOT_USER, implementation: string): CatalogControlInfo => ({
+  ...control, implementation, frameworks: [] });
+
+export const PACK_CATALOG: ControlPackCatalog = {
+  mappings_refreshed: null,
+  profiles: { baseline: ["foundation"], recommended: ["foundation", "data-protection"],
+    regulated: ["foundation", "data-protection", "pci-cde"] },
+  packs: [
+    { id: "foundation", version: 1, name: "Foundation", description: "Root user and MFA basics.", selectors: ["workloads"],
+      optional: false, controls: [catalogControl(ROOT_USER, "SCP"), catalogControl(ROOT_MFA, "CONFIG_RULE")] },
+    { id: "data-protection", version: 1, name: "Data protection", description: "Encryption.", selectors: ["workloads"],
+      optional: false, controls: [catalogControl(ROOT_MFA, "CONFIG_RULE")] },
+    { id: "pci-cde", version: 1, name: "PCI cardholder data environment", description: "PCI OUs.",
+      selectors: ["compliance:PCI"], optional: true, controls: [{ ...catalogControl(ROOT_USER, "SCP"),
+        frameworks: ["PCI-DSS-v4.0"] }] },
+  ],
+};
+
+const SAAS_SUMMARY: TemplateSummary = {
+  id: "saas", version: 1, name: "SaaS & technology", industry: "Software and technology companies",
+  description: "Account-per-tenant SaaS.", frameworks: ["SSAE-18-SOC-2-Oct-2023", "CIS-v8.0"], frameworks_verified: false,
+  environments: ["Sandbox", "DEV", "STAGE", "PROD"], packs: ["foundation", "data-protection"], ou_count: 9,
+  control_counts: { PREVENTIVE: 12, DETECTIVE: 30, PROACTIVE: 8 },
+};
+
+export const TEMPLATES: TemplateSummary[] = [
+  { ...SAAS_SUMMARY, id: "financial-services", name: "Financial services", industry: "Banking, payments and insurance",
+    frameworks: ["PCI-DSS-v4.0"], frameworks_verified: true, packs: ["foundation", "data-protection", "pci-cde"] },
+  SAAS_SUMMARY,
+];
+
+export const SAAS_TEMPLATE: IndustryTemplate = {
+  ...SAAS_SUMMARY,
+  answers: { environment_ids: ["sandbox", "dev", "stage", "prod"], account_model: "product",
+    control_packs: ["foundation", "data-protection"] },
+  edits: [{ op: "add_ou", parent: "prod", name: "Tenants" }],
+};
 
 export function fakeApi(overrides: Partial<PlatformApiPort> = {}): PlatformApiPort {
   return {
@@ -180,6 +224,9 @@ export function fakeApi(overrides: Partial<PlatformApiPort> = {}): PlatformApiPo
     projects: vi.fn().mockResolvedValue(PROJECTS),
     job: vi.fn().mockResolvedValue(job("succeeded")),
     setActor: vi.fn(),
+    landingZoneTemplates: vi.fn().mockResolvedValue(TEMPLATES),
+    landingZoneTemplate: vi.fn().mockResolvedValue(SAAS_TEMPLATE),
+    controlPacks: vi.fn().mockResolvedValue(PACK_CATALOG),
     proposeLandingZone: vi.fn().mockResolvedValue(PROPOSAL),
     createLandingZoneDesign: vi.fn().mockResolvedValue(landingZoneDesign({ status: "draft", submitted_by: null })),
     landingZoneDesigns: vi.fn().mockResolvedValue([landingZoneDesign()]),

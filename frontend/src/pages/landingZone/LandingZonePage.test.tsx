@@ -19,6 +19,8 @@ async function goTo(step: string) {
 }
 
 async function fillOrganization() {
+  await screen.findByRole("heading", { name: "Start from a template" });
+  await goTo("Organization");
   await user().type(await screen.findByLabelText("Organization name"), "acme");
   await user().type(screen.getByLabelText("Management account email"), "aws@acme.example");
 }
@@ -43,18 +45,18 @@ describe("LandingZonePage", () => {
     expect(screen.getByText("Only platform admins can design the landing zone.")).toBeInTheDocument();
   });
 
-  it("opens on the organization step", async () => {
+  it("opens on the Start step", async () => {
     renderPage();
-    expect(await screen.findByRole("heading", { name: "1. Organization" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Start from a template" })).toBeInTheDocument();
   });
 
   it("moves through the steps with Continue and Back", async () => {
     renderPage();
-    await screen.findByLabelText("Organization name");
+    await screen.findByRole("heading", { name: "Start from a template" });
     await user().click(screen.getByRole("button", { name: "Continue" }));
-    expect(screen.getByRole("heading", { name: "2. Environments" })).toBeInTheDocument();
-    await user().click(screen.getByRole("button", { name: "Back" }));
     expect(screen.getByRole("heading", { name: "1. Organization" })).toBeInTheDocument();
+    await user().click(screen.getByRole("button", { name: "Back" }));
+    expect(screen.getByRole("heading", { name: "Start from a template" })).toBeInTheDocument();
   });
 
   it("governs any region and picks the home region", async () => {
@@ -84,7 +86,8 @@ describe("LandingZonePage", () => {
     await user().clear(screen.getByLabelText("Name for uat"));
     await user().type(screen.getByLabelText("Name for uat"), "ACCEPT");
     const answers = await propose(api);
-    expect([answers.environment_count, answers.environment_names]).toEqual([6, { uat: "ACCEPT" }]);
+    expect([answers.environment_ids, answers.environment_names]).toEqual(
+      [["sandbox", "dev", "test", "uat", "stage", "prod"], { uat: "ACCEPT" }]);
   });
 
   it("warns when Prod and NonProd parents are chosen", async () => {
@@ -260,6 +263,200 @@ describe("LandingZonePage", () => {
     await propose(api);
     await user().click(screen.getByRole("button", { name: "Request approval" }));
     expect(screen.getByRole("alert")).toHaveTextContent("forbidden");
+  });
+
+  describe("industry templates", () => {
+    async function chooseTemplate(name: string) {
+      await user().click(await screen.findByRole("button", { name: new RegExp(name) }));
+    }
+
+    it("lists the templates with their frameworks, environments and control counts", async () => {
+      renderPage();
+      const saas = await screen.findByRole("button", { name: /SaaS & technology/ });
+      expect([saas.textContent?.includes("SSAE-18-SOC-2-Oct-2023"), saas.textContent?.includes("Sandbox · DEV · STAGE · PROD"),
+        saas.textContent?.includes("50 controls"), saas.textContent?.includes("intended alignment (unverified)")])
+        .toEqual([true, true, true, true]);
+    });
+
+    it("marks frameworks verified once the catalog is refreshed", async () => {
+      renderPage();
+      expect((await screen.findByRole("button", { name: /Financial services/ })).textContent).not.toContain("unverified");
+    });
+
+    it("recommends starting from scratch when no template fits", async () => {
+      renderPage();
+      expect(await screen.findByRole("button", { name: /Start from scratch/ })).toHaveAttribute("aria-pressed", "true");
+    });
+
+    it("fills in the questionnaire and OU edits from the chosen template", async () => {
+      const api = fakeApi();
+      renderPage(api);
+      await chooseTemplate("SaaS & technology");
+      await fillOrganization();
+      await propose(api);
+      const request = lastRequest(api);
+      expect([vi.mocked(api.landingZoneTemplate).mock.calls[0][0], request.answers.template, request.answers.environment_ids,
+        request.edits]).toEqual(["saas", { id: "saas", version: 1 }, ["sandbox", "dev", "stage", "prod"],
+        [{ op: "add_ou", parent: "prod", name: "Tenants" }]]);
+    });
+
+    it("goes back to starting from scratch", async () => {
+      const api = fakeApi();
+      renderPage(api);
+      await chooseTemplate("SaaS & technology");
+      await screen.findByRole("button", { name: /SaaS & technology/, pressed: true });
+      await user().click(screen.getByRole("button", { name: /Start from scratch/ }));
+      await fillOrganization();
+      expect((await propose(api)).template).toBeNull();
+    });
+
+    it("shows the template and what changed from it on the Review step", async () => {
+      const api = fakeApi();
+      renderPage(api);
+      await chooseTemplate("SaaS & technology");
+      await fillOrganization();
+      await goTo("Environments");
+      await user().click(screen.getByLabelText("Include QA"));
+      await goTo("Review");
+      expect([screen.getByText("Based on SaaS & technology v1"), screen.getByText("Changed: Environments")]).toHaveLength(2);
+    });
+
+    it("resets to the template", async () => {
+      const api = fakeApi();
+      renderPage(api);
+      await chooseTemplate("SaaS & technology");
+      await fillOrganization();
+      await goTo("Environments");
+      await user().click(screen.getByLabelText("Include QA"));
+      await goTo("Review");
+      await user().click(screen.getByRole("button", { name: "Reset to template" }));
+      expect([screen.queryByText(/^Changed:/), (await propose(api)).organization_name]).toEqual([null, "acme"]);
+    });
+
+    it("shows template loading errors", async () => {
+      renderPage(fakeApi({ landingZoneTemplates: vi.fn().mockRejectedValue(new Error("catalog down")) }));
+      expect(await screen.findByRole("alert")).toHaveTextContent("catalog down");
+    });
+
+    it("shows template errors", async () => {
+      renderPage(fakeApi({ landingZoneTemplate: vi.fn().mockRejectedValue(new Error("gone")) }));
+      await chooseTemplate("SaaS & technology");
+      expect(await screen.findByRole("alert")).toHaveTextContent("gone");
+    });
+  });
+
+  describe("environment combinations", () => {
+    it("adds environments from the catalog", async () => {
+      const api = fakeApi();
+      renderPage(api);
+      await fillOrganization();
+      await goTo("Environments");
+      await user().click(screen.getByLabelText("Include QA"));
+      await user().click(screen.getByLabelText("Include PERF"));
+      expect((await propose(api)).environment_ids).toEqual(["sandbox", "dev", "qa", "test", "perf", "stage", "prod"]);
+    });
+
+    it("always includes STAGE and PROD", async () => {
+      renderPage();
+      await screen.findByRole("heading", { name: "Start from a template" });
+      await goTo("Environments");
+      expect([screen.getByLabelText("Include STAGE"), screen.getByLabelText("Include PROD")]).toEqual(
+        [expect.toBeDisabled(), expect.toBeDisabled()]);
+    });
+
+    it("shows no preset as chosen for a custom combination", async () => {
+      renderPage();
+      await screen.findByRole("heading", { name: "Start from a template" });
+      await goTo("Environments");
+      await user().click(screen.getByLabelText("Include QA"));
+      expect(screen.getAllByRole("button", { name: /environments/, pressed: true })).toHaveLength(0);
+    });
+  });
+
+  describe("control packs", () => {
+    async function openControls(api: PlatformApiPort = fakeApi()) {
+      renderPage(api);
+      await fillOrganization();
+      await goTo("Controls");
+      await screen.findByLabelText("Use Foundation");
+      return api;
+    }
+
+    it("shows the profile's packs as chosen", async () => {
+      await openControls();
+      expect([screen.getByLabelText("Use Foundation"), screen.getByLabelText("Use PCI cardholder data environment")])
+        .toEqual([expect.toBeChecked(), expect.not.toBeChecked()]);
+    });
+
+    it("describes each pack's targets, controls and frameworks", async () => {
+      await openControls();
+      const pci = screen.getByRole("group", { name: "PCI cardholder data environment" });
+      expect([within(pci).getByText("Targets: compliance:PCI"), within(pci).getByText("1 preventive · 0 detective · 0 proactive"),
+        within(pci).getByText("Frameworks: PCI-DSS-v4.0")]).toHaveLength(3);
+    });
+
+    it("says when framework mappings have not been refreshed", async () => {
+      await openControls();
+      const foundation = screen.getByRole("group", { name: "Foundation" });
+      expect(within(foundation).getByText("Frameworks: not refreshed yet")).toBeInTheDocument();
+    });
+
+    it("lists a pack's controls", async () => {
+      await openControls();
+      const foundation = screen.getByRole("group", { name: "Foundation" });
+      expect(within(foundation).getByText("Disallow actions as a root user")).toBeInTheDocument();
+    });
+
+    it("adds and removes packs", async () => {
+      const api = await openControls();
+      await user().click(screen.getByLabelText("Use PCI cardholder data environment"));
+      await user().click(screen.getByLabelText("Use Foundation"));
+      expect((await propose(api)).control_packs).toEqual(["data-protection", "pci-cde"]);
+    });
+
+    it("goes back to a profile's packs when a profile is chosen", async () => {
+      const api = await openControls();
+      await user().click(screen.getByLabelText("Use Foundation"));
+      await user().click(screen.getByRole("button", { name: /Regulated/ }));
+      expect([screen.getByLabelText("Use PCI cardholder data environment"), (await propose(api)).control_packs])
+        .toEqual([expect.toBeChecked(), null]);
+    });
+
+    it("warns when a template's pack is turned off", async () => {
+      renderPage();
+      await user().click(await screen.findByRole("button", { name: /SaaS & technology/ }));
+      await screen.findByRole("button", { name: /SaaS & technology/, pressed: true });
+      await goTo("Controls");
+      await user().click(await screen.findByLabelText("Use Foundation"));
+      expect(screen.getByText(/Foundation is part of the SaaS & technology template/)).toHaveTextContent(
+        "aligned with SSAE-18-SOC-2-Oct-2023, CIS-v8.0");
+    });
+
+    it("shows pack loading errors", async () => {
+      renderPage(fakeApi({ controlPacks: vi.fn().mockRejectedValue(new Error("no packs")) }));
+      await screen.findByRole("heading", { name: "Start from a template" });
+      await goTo("Controls");
+      expect(await screen.findByRole("alert")).toHaveTextContent("no packs");
+    });
+  });
+
+  describe("controls and warnings on the proposal", () => {
+    it("counts the controls on each OU", async () => {
+      const api = fakeApi();
+      renderPage(api);
+      await fillOrganization();
+      await propose(api);
+      expect(within(screen.getByRole("tree")).getByText("2 controls")).toBeInTheDocument();
+    });
+
+    it("shows warnings without blocking approval", async () => {
+      const api = fakeApi({ proposeLandingZone: vi.fn().mockResolvedValue({ ...PROPOSAL, warnings: ["Refresh the catalog."] }) });
+      renderPage(api);
+      await fillOrganization();
+      await propose(api);
+      expect([screen.getByText("Refresh the catalog."), screen.getByRole("button", { name: "Request approval" })]).toEqual(
+        [expect.anything(), expect.not.toBeDisabled()]);
+    });
   });
 
   describe("OU tree editor", () => {

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { SAAS_TEMPLATE } from "../test/fakes";
 import { LandingZoneDraft } from "./LandingZoneDraft";
 
 const FLOW = { source: "dev", destination: "test", protocol: "tcp" as const, port: 5432, reason: "Data refresh" };
@@ -9,7 +10,7 @@ const named = () => LandingZoneDraft.initial().withOrganization("acme", "aws@acm
 describe("LandingZoneDraft", () => {
   it("starts with the platform's recommendations", () => {
     const answers = LandingZoneDraft.initial().toAnswers();
-    expect([answers.environment_count, answers.grouping, answers.account_model, answers.controls_profile,
+    expect([answers.environment_ids.length, answers.grouping, answers.account_model, answers.controls_profile,
       answers.network.egress, answers.governed_regions]).toEqual(
       [5, "separate", "portfolio", "recommended", "central", ["us-east-1", "us-east-2"]]);
   });
@@ -25,12 +26,12 @@ describe("LandingZoneDraft", () => {
   });
 
   it("folds testing into DEV with four environments", () => {
-    expect(named().withEnvironmentCount(4).environments().map((environment) => environment.id)).toEqual(
+    expect(named().withEnvironmentPreset(4).environments().map((environment) => environment.id)).toEqual(
       ["sandbox", "dev", "stage", "prod"]);
   });
 
   it("adds UAT with six environments", () => {
-    expect(named().withEnvironmentCount(6).environments().map((environment) => environment.id)).toContain("uat");
+    expect(named().withEnvironmentPreset(6).environments().map((environment) => environment.id)).toContain("uat");
   });
 
   it("renames an environment", () => {
@@ -43,8 +44,8 @@ describe("LandingZoneDraft", () => {
   });
 
   it("dropping an environment drops its rename and flows", () => {
-    const draft = named().withEnvironmentCount(6).withEnvironmentName("uat", "ACCEPT")
-      .withFlow({ ...FLOW, destination: "uat" }).withFlow(FLOW).withEnvironmentCount(5);
+    const draft = named().withEnvironmentPreset(6).withEnvironmentName("uat", "ACCEPT")
+      .withFlow({ ...FLOW, destination: "uat" }).withFlow(FLOW).withEnvironmentPreset(5);
     expect([draft.toAnswers().environment_names, draft.toAnswers().network.flows]).toEqual([{}, [FLOW]]);
   });
 
@@ -102,6 +103,60 @@ describe("LandingZoneDraft", () => {
 
   it("undoes one tree edit", () => {
     expect(named().withEdit(ADD_OU).withEdit(DISABLE).withoutEdit(0).edits()).toEqual([DISABLE]);
+  });
+
+  it("adds any catalog environment in pipeline order", () => {
+    expect(named().withEnvironment("qa", true).withEnvironment("perf", true).toAnswers().environment_ids).toEqual(
+      ["sandbox", "dev", "qa", "test", "perf", "stage", "prod"]);
+  });
+
+  it("removes an environment with its renames and flows", () => {
+    const draft = named().withEnvironmentName("test", "INT").withFlow(FLOW).withEnvironment("test", false);
+    expect([draft.toAnswers().environment_ids, draft.toAnswers().environment_names, draft.toAnswers().network.flows])
+      .toEqual([["sandbox", "dev", "stage", "prod"], {}, []]);
+  });
+
+  it("always keeps STAGE and PROD", () => {
+    expect(named().withEnvironment("prod", false).toAnswers().environment_ids).toContain("prod");
+  });
+
+  it("knows which preset the environments match", () => {
+    expect([named().preset(), named().withEnvironmentPreset(4).preset(), named().withEnvironment("qa", true).preset()])
+      .toEqual([5, 4, undefined]);
+  });
+
+  it("lists the environment catalog", () => {
+    expect(LandingZoneDraft.environmentCatalog().map((environment) => environment.id)).toEqual(
+      ["sandbox", "dev", "qa", "test", "uat", "perf", "stage", "prod"]);
+  });
+
+  it("chooses control packs and goes back to the profile's packs", () => {
+    const chosen = named().withControlPacks(["foundation"]);
+    expect([chosen.toAnswers().control_packs, chosen.withProfile("regulated").toAnswers()]).toEqual(
+      [["foundation"], expect.objectContaining({ control_packs: null, controls_profile: "regulated" })]);
+  });
+
+  it("starts from a template, keeping the organization", () => {
+    const answers = named().withTemplate(SAAS_TEMPLATE).toRequest();
+    expect([answers.answers.organization_name, answers.answers.template, answers.answers.environment_ids,
+      answers.answers.grouping, answers.edits]).toEqual(["acme", { id: "saas", version: 1 },
+      ["sandbox", "dev", "stage", "prod"], "separate", SAAS_TEMPLATE.edits]);
+  });
+
+  it("starts from scratch, keeping the organization", () => {
+    const draft = named().withTemplate(SAAS_TEMPLATE).withEdit(ADD_OU).fromScratch();
+    expect([draft.toAnswers().organization_name, draft.toAnswers().template, draft.edits(), draft.preset()]).toEqual(
+      ["acme", null, [], 5]);
+  });
+
+  it("has no differences from the template it just started from", () => {
+    expect(named().withTemplate(SAAS_TEMPLATE).differencesFrom(SAAS_TEMPLATE)).toEqual([]);
+  });
+
+  it("names what differs from the template", () => {
+    const draft = named().withTemplate(SAAS_TEMPLATE).with({ grouping: "prod_nonprod" }).withEnvironment("qa", true)
+      .withEdit(DISABLE);
+    expect(draft.differencesFrom(SAAS_TEMPLATE)).toEqual(["Environments", "OU grouping", "OU structure"]);
   });
 
   it("keeps tree edits when an answer changes", () => {

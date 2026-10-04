@@ -196,7 +196,12 @@ export interface PipelineStage {
   release: Release | null;
 }
 
-export type EnvironmentCount = 4 | 5 | 6;
+export type EnvironmentPreset = 4 | 5 | 6;
+
+export interface TemplateReference {
+  id: string;
+  version: number;
+}
 
 export interface FlowException {
   source: string;
@@ -211,7 +216,8 @@ export interface LandingZoneAnswers {
   management_email: string;
   home_region: string;
   governed_regions: string[];
-  environment_count: EnvironmentCount;
+  template: TemplateReference | null;
+  environment_ids: string[];
   environment_names: Record<string, string>;
   grouping: "separate" | "prod_nonprod";
   account_model: "environment" | "portfolio" | "product";
@@ -229,7 +235,64 @@ export interface LandingZoneAnswers {
   };
   sandbox: { model: "team" | "developer"; monthly_budget_usd: number; expiry_days: number };
   optional_ous: string[];
-  controls_profile: "baseline" | "recommended" | "regulated";
+  controls_profile: ControlsProfile;
+  control_packs: string[] | null;
+  pack_parameters: Record<string, Record<string, string[]>>;
+}
+
+export type ControlsProfile = "baseline" | "recommended" | "regulated";
+export type ControlBehavior = "PREVENTIVE" | "DETECTIVE" | "PROACTIVE";
+
+export interface OuControl {
+  id: string;
+  name: string;
+  behavior: ControlBehavior;
+  severity: string;
+  packs: string[];
+}
+
+export interface CatalogControlInfo {
+  id: string;
+  name: string;
+  behavior: ControlBehavior;
+  severity: string;
+  implementation: string;
+  frameworks: string[];
+}
+
+export interface ControlPackInfo {
+  id: string;
+  version: number;
+  name: string;
+  description: string;
+  selectors: string[];
+  optional: boolean;
+  controls: CatalogControlInfo[];
+}
+
+export interface ControlPackCatalog {
+  mappings_refreshed: string | null;
+  profiles: Record<ControlsProfile, string[]>;
+  packs: ControlPackInfo[];
+}
+
+export interface TemplateSummary {
+  id: string;
+  version: number;
+  name: string;
+  industry: string;
+  description: string;
+  frameworks: string[];
+  frameworks_verified: boolean;
+  environments: string[];
+  packs: string[];
+  ou_count: number;
+  control_counts: Record<ControlBehavior, number>;
+}
+
+export interface IndustryTemplate extends TemplateSummary {
+  answers: Partial<LandingZoneAnswers>;
+  edits: TreeEdit[];
 }
 
 export type TreeEdit =
@@ -265,6 +328,7 @@ export interface OuInfo {
   allowed_edits: OuEdit[];
   blocked_edits: Partial<Record<OuEdit, string>>;
   accounts: AccountInfo[];
+  controls: OuControl[];
   children: OuInfo[];
 }
 
@@ -276,6 +340,7 @@ export interface LandingZoneRequest {
 export interface LandingZoneExplanation {
   ous: OuInfo[];
   problems: string[];
+  warnings: string[];
   diagram: { svg: string; mermaid: string };
 }
 
@@ -311,6 +376,9 @@ export interface Identity {
 }
 
 export interface PlatformApiPort {
+  landingZoneTemplates(): Promise<TemplateSummary[]>;
+  landingZoneTemplate(templateId: string): Promise<IndustryTemplate>;
+  controlPacks(): Promise<ControlPackCatalog>;
   proposeLandingZone(request: LandingZoneRequest): Promise<LandingZoneProposal>;
   createLandingZoneDesign(request: LandingZoneRequest): Promise<LandingZoneDesign>;
   landingZoneDesigns(): Promise<LandingZoneDesign[]>;

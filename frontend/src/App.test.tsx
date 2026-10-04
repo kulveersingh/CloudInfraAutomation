@@ -63,6 +63,6 @@ describe("App", () => {
     renderWithApi(<App />);
     await userEvent.selectOptions(screen.getByLabelText("Viewing as"), "riley");
     await userEvent.click(screen.getByRole("button", { name: "Landing zone" }));
-    expect(await screen.findByRole("heading", { name: "1. Organization" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Start from a template" })).toBeInTheDocument();
   });
 });

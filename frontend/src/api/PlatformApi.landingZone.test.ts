@@ -16,6 +16,24 @@ describe("PlatformApi landing zone", () => {
       method: "POST", body: JSON.stringify(REQUEST) }));
   });
 
+  it("lists industry templates", async () => {
+    const fetcher = respond([]);
+    await new PlatformApi("", fetcher).landingZoneTemplates();
+    expect(fetcher.mock.calls[0][0]).toBe("/v1/admin/landing-zone/templates");
+  });
+
+  it("reads a template", async () => {
+    const fetcher = respond();
+    await new PlatformApi("", fetcher).landingZoneTemplate("saas");
+    expect(fetcher.mock.calls[0][0]).toBe("/v1/admin/landing-zone/templates/saas");
+  });
+
+  it("lists control packs", async () => {
+    const fetcher = respond();
+    await new PlatformApi("", fetcher).controlPacks();
+    expect(fetcher.mock.calls[0][0]).toBe("/v1/admin/landing-zone/control-packs");
+  });
+
   it("saves a design", async () => {
     const fetcher = respond();
     await new PlatformApi("", fetcher).createLandingZoneDesign(REQUEST);
