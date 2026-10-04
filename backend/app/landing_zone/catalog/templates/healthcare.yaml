@@ -1,0 +1,22 @@
+id: healthcare
+version: 1
+name: Healthcare & life sciences
+industry: Providers, payers, pharma and medical devices
+description: >-
+  HIPAA- and GxP-scoped OUs, a VALIDATION environment for GxP qualification, and an isolated Research domain for
+  de-identified data, with the regulated control set.
+frameworks: [NIST-SP-800-53-r5, ISO-IEC-27001:2013-Annex-A]
+answers:
+  environment_ids: [sandbox, dev, test, uat, stage, prod]
+  environment_names: {uat: VALIDATION}
+  account_model: product
+  compliance: [HIPAA, GxP]
+  security_tooling: true
+  log_retention_days: 2555
+  network: {hub: true, egress: central, inspection: true}
+  optional_ous: [exceptions, suspended]
+  controls_profile: regulated
+  control_packs: [foundation, data-protection, network-hardening, logging-integrity, key-management,
+                  production-resilience]
+edits:
+  - {op: add_ou, parent: null, name: Research}

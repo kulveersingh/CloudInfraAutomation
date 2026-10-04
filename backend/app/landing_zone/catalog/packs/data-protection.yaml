@@ -1,0 +1,15 @@
+id: data-protection
+version: 1
+name: Data protection
+description: Encryption at rest and in transit for storage and databases.
+selectors:
+- workloads
+controls:
+- dkjyeuczqj3rnyhn9116p16pw
+- 97hes2glndlye96adkdcdeef4
+- chlzfpsllhs3knp1ixr773wa6
+- 7mo7a2h2ebsq71l8k6uzr96ou
+- e34kieahgkm0lggs5g0s412jt
+- d4wgeffz6izrb627c2yb8nq8d
+- 47j0mbl42qhyollch0c07aawc
+- b7p5zuz380l9pblepsai1u6an

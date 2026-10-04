@@ -1,0 +1,10 @@
+id: strict-residency
+version: 1
+name: Strict residency
+description: Also blocks S3 cross-Region replication and requires external key material. Breaks DR/HA S3 replication.
+selectors:
+- workloads
+controls:
+- 3zbcht7oxkzts9r1z20nz5lcw
+- d0dnxm99zg7gfsow9ei70qhea
+optional: true

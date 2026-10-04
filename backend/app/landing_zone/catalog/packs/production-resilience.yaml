@@ -1,0 +1,13 @@
+id: production-resilience
+version: 1
+name: Production resilience
+description: Multi-AZ databases, deletion protection, point-in-time recovery and backup plans.
+selectors:
+- production_tier
+controls:
+- avr20py8ssve39u69tyuxcanz
+- 1b4fdyb4pwzlryd3wds4nu754
+- 1cxi1br09glocqagbfwu2kgxu
+- 4docid6lj7n5tstdmm7btegt1
+- aqh482zxh1libhd8e5pff5r1w
+- dm91qhaj7bjtyrovbq0szj49u

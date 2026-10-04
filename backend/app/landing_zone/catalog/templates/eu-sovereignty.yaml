@@ -1,0 +1,21 @@
+id: eu-sovereignty
+version: 1
+name: EU data sovereignty
+industry: Organizations with EU data residency requirements
+description: >-
+  Workloads stay in EU Regions, enforced per OU by Region deny and by blocking cross-Region networking. GDPR has no
+  Control Catalog mapping; residency comes from the controls. Strict residency is offered but off by default.
+frameworks: [ISO-IEC-27001:2013-Annex-A, NIST-CSF-v1.1]
+answers:
+  home_region: eu-central-1
+  governed_regions: [eu-central-1, eu-west-1]
+  environment_ids: [sandbox, dev, test, stage, prod]
+  account_model: portfolio
+  security_tooling: true
+  log_retention_days: 730
+  network: {hub: true, egress: central, inspection: true}
+  optional_ous: [exceptions, suspended]
+  controls_profile: regulated
+  control_packs: [foundation, data-protection, network-hardening, logging-integrity, key-management,
+                  production-resilience, data-residency]
+edits: []

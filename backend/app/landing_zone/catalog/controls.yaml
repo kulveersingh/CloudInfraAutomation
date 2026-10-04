@@ -1,0 +1,271 @@
+# Control Catalog snapshot: the controls the packs use. Refresh with
+#   uv run --with boto3 python -m app.landing_zone.catalog.refresh
+# which also fills each control's framework mappings (ListControlMappings) and the id of the
+# CloudFormation-hooks prerequisite (CT.CLOUDFORMATION.PR.1) that proactive controls need.
+source: aws-samples/aws-control-tower-controls-cdk helpers/controlcatalog_list_controls.csv (ListControls export)
+mappings_refreshed: null
+prerequisites:
+  proactive: null
+controls:
+  5kvme4m5d2b4d7if2fs5yg2ui:
+    name: Disallow actions as a root user
+    behavior: PREVENTIVE
+    severity: HIGH
+    implementation: SCP
+  8ui9y3oace2513xarz8aqojl7:
+    name: Disallow creation of access keys for the root user
+    behavior: PREVENTIVE
+    severity: HIGH
+    implementation: SCP
+  24izmu4k16gv9tvd7sexnyrfy:
+    name: Detect whether MFA for the root user is enabled
+    behavior: DETECTIVE
+    severity: HIGH
+    implementation: CONFIG_RULE
+  1fvktjhpo9wdpt3pjb2wsz7nt:
+    name: Detect whether MFA is enabled for AWS IAM users of the AWS Console
+    behavior: DETECTIVE
+    severity: MEDIUM
+    implementation: CONFIG_RULE
+  6wmutsohbkwhfw6sf7cbt5e81:
+    name: Detect whether Amazon S3 settings to block public access are set as true for the account
+    behavior: DETECTIVE
+    severity: MEDIUM
+    implementation: CONFIG_RULE
+  4jc77cq1lcr7g64xywwypykv8:
+    name: Detect whether public access to Amazon RDS database instances is enabled
+    behavior: DETECTIVE
+    severity: HIGH
+    implementation: CONFIG_RULE
+  1h4eyqyyonp19dlrreqf1i3w0:
+    name: Detect whether public access to Amazon RDS database snapshots is enabled
+    behavior: DETECTIVE
+    severity: HIGH
+    implementation: CONFIG_RULE
+  6rilu41n0gb9w6mxrkyewoer4:
+    name: Detect whether unrestricted internet connection through SSH is allowed
+    behavior: DETECTIVE
+    severity: HIGH
+    implementation: CONFIG_RULE
+  clmlaa2in1wkntwekh7uw2jyx:
+    name: Disallow public sharing of Amazon Machine Images (AMIs)
+    behavior: PREVENTIVE
+    severity: MEDIUM
+    implementation: DECLARATIVE_POLICY
+  ek6wc2bmgzmho1kk6bn236mqt:
+    name: Disallow all public sharing of Amazon EBS snapshots
+    behavior: PREVENTIVE
+    severity: MEDIUM
+    implementation: DECLARATIVE_POLICY
+  dkjyeuczqj3rnyhn9116p16pw:
+    name: Require that an attached Amazon EBS volume is configured to encrypt data at rest
+    behavior: PREVENTIVE
+    severity: HIGH
+    implementation: SCP
+  97hes2glndlye96adkdcdeef4:
+    name: Require an Amazon EBS snapshot to be created from an encrypted EC2 volume
+    behavior: PREVENTIVE
+    severity: HIGH
+    implementation: SCP
+  chlzfpsllhs3knp1ixr773wa6:
+    name: Require that an Amazon EBS snapshot cannot be publicly restorable
+    behavior: PREVENTIVE
+    severity: HIGH
+    implementation: SCP
+  7mo7a2h2ebsq71l8k6uzr96ou:
+    name: Require encryption of data in transit for calls to Amazon S3 resources
+    behavior: PREVENTIVE
+    severity: HIGH
+    implementation: RCP
+  e34kieahgkm0lggs5g0s412jt:
+    name: Detect whether storage encryption is enabled for Amazon RDS database instances
+    behavior: DETECTIVE
+    severity: HIGH
+    implementation: CONFIG_RULE
+  d4wgeffz6izrb627c2yb8nq8d:
+    name: Checks if S3 buckets have default encryption enabled or have bucket policies that explicitly deny put-object requests
+      without server side encryption using AES-256 or AWS KMS
+    behavior: DETECTIVE
+    severity: MEDIUM
+    implementation: CONFIG_RULE
+  47j0mbl42qhyollch0c07aawc:
+    name: Require an Amazon RDS database instance to have encryption at rest configured
+    behavior: PROACTIVE
+    severity: MEDIUM
+    implementation: HOOK
+  b7p5zuz380l9pblepsai1u6an:
+    name: Require an Amazon S3 bucket to have server-side encryption configured using an AWS KMS key
+    behavior: PROACTIVE
+    severity: MEDIUM
+    implementation: HOOK
+  df2ta5ytg2zatj1q7y5e09u32:
+    name: Detect whether unrestricted incoming TCP traffic is allowed
+    behavior: DETECTIVE
+    severity: HIGH
+    implementation: CONFIG_RULE
+  e94oghk9gn3wb5xhpw9l53xr9:
+    name: Network ACLs should not allow ingress from 0.0.0.0/0 to port 22 or port 3389
+    behavior: DETECTIVE
+    severity: MEDIUM
+    implementation: SECURITY_HUB
+  cdn8m939ffm43gw43z7fzlmoj:
+    name: Require any Amazon EC2 network ACL to prevent ingress from 0.0.0.0/0 to port 22 or port 3389
+    behavior: PROACTIVE
+    severity: MEDIUM
+    implementation: HOOK
+  10au7g2tdfmykh2cunfbpbam1:
+    name: EC2 instances should use Instance Metadata Service Version 2 (IMDSv2)
+    behavior: DETECTIVE
+    severity: HIGH
+    implementation: SECURITY_HUB
+  2wsx5sll20kxurworrzvjn7by:
+    name: Require an Amazon EC2 launch template to have IMDSv2 configured
+    behavior: PROACTIVE
+    severity: HIGH
+    implementation: HOOK
+  ev4nb47hdhfom2ic1k0ljc7am:
+    name: Require any Amazon EC2 launch template not to auto-assign public IP addresses to network interfaces
+    behavior: PROACTIVE
+    severity: HIGH
+    implementation: HOOK
+  624yg0j9d8swiglwfc1m4kvnm:
+    name: CloudTrail log file validation should be enabled
+    behavior: DETECTIVE
+    severity: MEDIUM
+    implementation: SECURITY_HUB
+  cok7rgoujcdjcy6bjzgpvnq8w:
+    name: Require an AWS CloudTrail trail to have log file validation activated
+    behavior: PROACTIVE
+    severity: HIGH
+    implementation: HOOK
+  blnba8rkwuvh4lm6aczhfk3t6:
+    name: VPC flow logging should be enabled in all VPCs
+    behavior: DETECTIVE
+    severity: MEDIUM
+    implementation: SECURITY_HUB
+  ajlgwooddm54wepz191t6gd0a:
+    name: Require an ELB application or classic load balancer to have logging activated
+    behavior: PROACTIVE
+    severity: MEDIUM
+    implementation: HOOK
+  62smpoz33dsy0oa7u1iwa58lz:
+    name: GuardDuty should be enabled
+    behavior: DETECTIVE
+    severity: HIGH
+    implementation: SECURITY_HUB
+  bpnmuwwmpvn362b2l34xxrqfx:
+    name: Require all object uploads to Amazon S3 buckets to use server-side encryption with an AWS KMS key (SSE-KMS)
+    behavior: PREVENTIVE
+    severity: HIGH
+    implementation: RCP
+  beyhbq47poryf052dlel7oig5:
+    name: Require that an AWS KMS key is configured with the bypass policy lockout safety check enabled
+    behavior: PREVENTIVE
+    severity: HIGH
+    implementation: SCP
+  8tq2qsio9o9nliasf359rvnso:
+    name: Require an AWS KMS key policy to have a statement that limits creation of AWS KMS grants to AWS services
+    behavior: PREVENTIVE
+    severity: HIGH
+    implementation: SCP
+  esv514s4zvnxdunuijbgerpn3:
+    name: AWS KMS key rotation should be enabled
+    behavior: DETECTIVE
+    severity: MEDIUM
+    implementation: SECURITY_HUB
+  54a6rhgyml01y7vexkrn7bgd2:
+    name: Secrets Manager secrets should have automatic rotation enabled
+    behavior: DETECTIVE
+    severity: MEDIUM
+    implementation: SECURITY_HUB
+  avr20py8ssve39u69tyuxcanz:
+    name: Require that an Amazon RDS database instance is configured with multiple Availability Zones
+    behavior: PROACTIVE
+    severity: MEDIUM
+    implementation: HOOK
+  1b4fdyb4pwzlryd3wds4nu754:
+    name: RDS DB instances should be configured with multiple Availability Zones
+    behavior: DETECTIVE
+    severity: MEDIUM
+    implementation: SECURITY_HUB
+  1cxi1br09glocqagbfwu2kgxu:
+    name: Require any Amazon RDS instance to have deletion protection configured
+    behavior: PROACTIVE
+    severity: LOW
+    implementation: HOOK
+  4docid6lj7n5tstdmm7btegt1:
+    name: Require that point-in-time recovery for an Amazon DynamoDB table is activated
+    behavior: PROACTIVE
+    severity: MEDIUM
+    implementation: HOOK
+  aqh482zxh1libhd8e5pff5r1w:
+    name: Checks if Amazon Elastic Compute Cloud (Amazon EC2) instances are protected by a backup plan
+    behavior: DETECTIVE
+    severity: MEDIUM
+    implementation: CONFIG_RULE
+  dm91qhaj7bjtyrovbq0szj49u:
+    name: Checks if an Amazon DynamoDB table is present in AWS Backup plans
+    behavior: DETECTIVE
+    severity: MEDIUM
+    implementation: CONFIG_RULE
+  41ngl8m5c4eb1myoz0t707n7h:
+    name: Disallow internet access for an Amazon VPC instance managed by a customer
+    behavior: PREVENTIVE
+    severity: MEDIUM
+    implementation: SCP
+  5rlqt6yj6u0v0gb62pqdy4ae:
+    name: Disallow Amazon Virtual Private Network (VPN) connections
+    behavior: PREVENTIVE
+    severity: MEDIUM
+    implementation: SCP
+  5svkm0sfsp3chc06m683cygz:
+    name: Checks if an AWS CloudTrail multi-Region trail is enabled and logs all write S3 data events for your buckets
+    behavior: DETECTIVE
+    severity: MEDIUM
+    implementation: CONFIG_RULE
+  65l0pkpmktv0d9qw0c7gdhv5d:
+    name: Checks if an AWS CloudTrail multi-Region trail is enabled and logs all read S3 data events for your buckets
+    behavior: DETECTIVE
+    severity: MEDIUM
+    implementation: CONFIG_RULE
+  6qvep4e99ha6pgc0osehy0w4t:
+    name: Require an Amazon RDS DB parameter group to require Transport Layer Security (TLS) connections for supported engine
+      types
+    behavior: PROACTIVE
+    severity: MEDIUM
+    implementation: HOOK
+  3bsf69bolxub33ycbh9oiiphi:
+    name: Checks if Malware Protection is enabled for an Amazon GuardDuty detector in your account
+    behavior: DETECTIVE
+    severity: HIGH
+    implementation: CONFIG_RULE
+  ka8e3pkqefnjsxuyc26ji580:
+    name: Deny access to AWS based on the requested AWS Region for an organizational unit
+    behavior: PREVENTIVE
+    severity: MEDIUM
+    implementation: SCP
+    parameters:
+    - AllowedRegions
+    - ExemptedPrincipalArns
+    - ExemptedActions
+  dvuaav61i5cnfazfelmvn9m6k:
+    name: Disallow cross-region networking for Amazon EC2, Amazon CloudFront, and AWS Global Accelerator
+    behavior: PREVENTIVE
+    severity: MEDIUM
+    implementation: SCP
+  53u8m2z255npa7rldrk77vm5z:
+    name: Disallow the use of Amazon EC2 VM import and export
+    behavior: PREVENTIVE
+    severity: MEDIUM
+    implementation: SCP
+  3zbcht7oxkzts9r1z20nz5lcw:
+    name: Disallow cross region replication for S3 buckets
+    behavior: PREVENTIVE
+    severity: MEDIUM
+    implementation: SCP
+  d0dnxm99zg7gfsow9ei70qhea:
+    name: Require that an AWS KMS customer-managed key (CMK) is configured with key material originating from an external
+      key store (XKS)
+    behavior: PREVENTIVE
+    severity: HIGH
+    implementation: SCP

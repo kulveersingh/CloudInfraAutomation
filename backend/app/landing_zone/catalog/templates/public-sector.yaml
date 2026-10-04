@@ -1,0 +1,21 @@
+id: public-sector
+version: 1
+name: Public sector
+industry: Government agencies and education
+description: >-
+  NIST 800-53-aligned controls in US commercial Regions, with Region residency enforced per OU. FedRAMP High and
+  ITAR workloads need AWS GovCloud (US), which this template does not target.
+frameworks: [NIST-SP-800-53-r5, FedRAMP-r4, NIST-SP-800-171-r2]
+answers:
+  home_region: us-east-1
+  governed_regions: [us-east-1, us-west-2]
+  environment_ids: [sandbox, dev, test, stage, prod]
+  account_model: portfolio
+  security_tooling: true
+  log_retention_days: 2555
+  network: {hub: true, egress: central, inspection: true, on_premises: vpn}
+  optional_ous: [exceptions, suspended]
+  controls_profile: regulated
+  control_packs: [foundation, data-protection, network-hardening, logging-integrity, key-management,
+                  production-resilience, data-residency]
+edits: []

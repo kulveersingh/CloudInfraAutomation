@@ -1,0 +1,17 @@
+id: foundation
+version: 1
+name: Foundation
+description: Root user, MFA and public-exposure basics for every workload OU.
+selectors:
+- workloads
+controls:
+- 5kvme4m5d2b4d7if2fs5yg2ui
+- 8ui9y3oace2513xarz8aqojl7
+- 24izmu4k16gv9tvd7sexnyrfy
+- 1fvktjhpo9wdpt3pjb2wsz7nt
+- 6wmutsohbkwhfw6sf7cbt5e81
+- 4jc77cq1lcr7g64xywwypykv8
+- 1h4eyqyyonp19dlrreqf1i3w0
+- 6rilu41n0gb9w6mxrkyewoer4
+- clmlaa2in1wkntwekh7uw2jyx
+- ek6wc2bmgzmho1kk6bn236mqt

@@ -7,16 +7,17 @@ from cfnlint.api import ManualArgs, lint
 from app.landing_zone.cloudformation.bundle import STACK_FILES, LandingZoneBundle
 from app.landing_zone.cloudformation.guardrails import GuardrailPlan, ScpQuotaRule
 from app.landing_zone.designer import LandingZoneDesigner
+from app.landing_zone.catalog.templates import TemplateRegistry
 from tests.lz_factories import CATALOG, account_op, add_account, add_ou, answers, edited
 
 FLOW = {"source": "dev", "destination": "test", "protocol": "tcp", "port": 5432, "reason": "Data refresh"}
 VARIANTS = {
     "default": {},
-    "everything": {"environment_count": 6, "grouping": "prod_nonprod", "compliance": ["PCI", "HIPAA"],
+    "everything": {"environment_ids": ["sandbox", "dev", "qa", "test", "uat", "perf", "stage", "prod"], "grouping": "prod_nonprod", "compliance": ["PCI", "HIPAA"],
                    "infrastructure": ["network", "shared_services", "identity", "backup", "monitoring", "cicd"],
                    "optional_ous": ["exceptions", "suspended", "individual_business_users"],
                    "controls_profile": "regulated", "network": {"flows": [FLOW]}},
-    "four-environments-baseline": {"environment_count": 4, "controls_profile": "baseline",
+    "four-environments-baseline": {"environment_ids": ["sandbox", "dev", "stage", "prod"], "controls_profile": "baseline",
                                    "sandbox": {"model": "developer"}},
     "local-egress": {"network": {"egress": "local"}},
     "no-inspection": {"network": {"inspection": False}},
@@ -192,19 +193,35 @@ def test_child_ou_registration_waits_for_its_parent():
 
 
 def controls_on(template: dict, logical_ou: str) -> list[str]:
-    return [body["Properties"]["ControlIdentifier"]["Fn::Sub"].rsplit("/", 1)[-1]
+    return [body["Properties"]["ControlIdentifier"].rsplit("/", 1)[-1]
             for body in resources(template, "AWS::ControlTower::EnabledControl").values()
             if body["Properties"]["TargetIdentifier"] == {"Fn::GetAtt": [logical_ou, "Arn"]}]
 
 
-def test_recommended_controls_on_prod():
-    assert {"AWS-GR_RESTRICT_ROOT_USER", "AWS-GR_S3_BUCKET_PUBLIC_READ_PROHIBITED", "AWS-GR_RESTRICTED_SSH"} <= set(
-        controls_on(stack("lz-structure"), "OuProd"))
+ROOT_USER, ROOT_MFA, RDS_MULTI_AZ = "5kvme4m5d2b4d7if2fs5yg2ui", "24izmu4k16gv9tvd7sexnyrfy", "avr20py8ssve39u69tyuxcanz"
 
 
-def test_baseline_profile_has_fewer_controls():
-    assert controls_on(stack("lz-structure", controls_profile="baseline"), "OuDev") == [
-        "AWS-GR_RESTRICT_ROOT_USER", "AWS-GR_RESTRICT_ROOT_USER_ACCESS_KEYS"]
+def test_controls_use_global_control_catalog_identifiers():
+    identifiers = {body["Properties"]["ControlIdentifier"]
+                   for body in resources(stack("lz-structure"), "AWS::ControlTower::EnabledControl").values()}
+    assert f"arn:aws:controlcatalog:::control/{ROOT_USER}" in identifiers and not any(
+        "AWS-GR_" in identifier for identifier in identifiers)
+
+
+def test_recommended_profile_puts_its_packs_on_prod():
+    assert {ROOT_USER, ROOT_MFA, RDS_MULTI_AZ} <= set(controls_on(stack("lz-structure"), "OuProd"))
+
+
+def test_baseline_profile_has_only_the_foundation_pack():
+    assert len(controls_on(stack("lz-structure", controls_profile="baseline"), "OuDev")) == 10
+
+
+def test_parameterized_controls_pass_their_parameters():
+    template = stack("lz-structure", control_packs=["data-residency"])
+    deny = next(body for body in resources(template, "AWS::ControlTower::EnabledControl").values()
+                if body["Properties"]["ControlIdentifier"].endswith("ka8e3pkqefnjsxuyc26ji580")
+                and body["Properties"]["TargetIdentifier"] == {"Fn::GetAtt": ["OuProd", "Arn"]})
+    assert deny["Properties"]["Parameters"] == [{"Key": "AllowedRegions", "Value": ["us-east-1", "us-east-2"]}]
 
 
 def test_sandbox_controls_target_the_control_tower_ou():
@@ -317,16 +334,6 @@ def test_no_ou_exceeds_the_scp_quota_in_any_variant():
     for overrides in VARIANTS.values():
         design = LandingZoneDesigner.default().design(answers(**overrides), CATALOG)
         assert ScpQuotaRule().problems(GuardrailPlan.for_design(design)) == []
-
-
-def test_scp_quota_rule_reports_overloaded_ous():
-    design = LandingZoneDesigner.default().design(answers(), CATALOG)
-    plan = GuardrailPlan.for_design(design)
-    prod = design.ou_named("PROD")
-    for index in range(2):
-        plan.attach_scp(f"extra-{index}", prod)
-    assert ScpQuotaRule().problems(plan) == [
-        "OU 'PROD' would have 6 SCPs; AWS Organizations allows 5 including FullAWSAccess."]
 
 
 # ---- accounts ----
@@ -493,13 +500,18 @@ def test_root_level_custom_ou_gets_the_workload_baseline():
 
 
 def test_root_level_custom_ou_gets_the_profile_controls():
-    assert "AWS-GR_S3_BUCKET_PUBLIC_READ_PROHIBITED" in controls_on(stack("lz-structure", EDITS), "OuCustomDataLab")
+    assert ROOT_USER in controls_on(stack("lz-structure", EDITS), "OuCustomDataLab")
 
 
-def test_child_ous_inherit_instead_of_getting_their_own_guardrails():
+def test_child_ous_inherit_preventive_guardrails():
     template = stack("lz-structure", EDITS)
     names = [body["Properties"]["Name"] for body in resources(template, "AWS::Organizations::Policy").values()]
-    assert (controls_on(template, "OuCustomPayments"), [name for name in names if "payments" in name]) == ([], [])
+    assert (ROOT_USER in controls_on(template, "OuCustomPayments"), [name for name in names if "payments" in name]) == (
+        False, [])
+
+
+def test_child_ous_get_their_own_detective_controls():
+    assert ROOT_MFA in controls_on(stack("lz-structure", EDITS), "OuCustomPayments")
 
 
 def test_child_ou_is_created_under_its_environment():
@@ -526,3 +538,35 @@ def test_bootstrap_also_deploys_to_root_level_custom_ous():
     stack_set = next(iter(resources(stack("lz-bootstrap", EDITS), "AWS::CloudFormation::StackSet").values()))["Properties"]
     targets = stack_set["StackInstancesGroup"][0]["DeploymentTargets"]["OrganizationalUnitIds"]
     assert targets[-1] == {"Fn::ImportValue": "acme-lz-OuCustomDataLabId"}
+
+
+# ---- industry templates ----
+
+@pytest.mark.parametrize("template", [template.id for template in TemplateRegistry.default().all()])
+@pytest.mark.parametrize("name", list(STACK_FILES))
+def test_template_stack_has_no_cfn_lint_findings(template, name):
+    chosen = TemplateRegistry.default().get(template)
+    text = bundle(chosen.edits, **chosen.answers)[STACK_FILES[name]]
+    assert [str(match) for match in lint(text, config=ManualArgs(regions=["us-east-1", "us-east-2"]))] == []
+
+
+# ---- SCP quota with Control Tower controls ----
+
+def test_scp_quota_is_ten_including_control_tower_scps():
+    design = edited([])[0]
+    plan = GuardrailPlan.for_design(design, CATALOG)
+    for index in range(6):
+        plan.attach_scp(f"extra-{index}", design.ou_named("PROD"))
+    assert ScpQuotaRule().problems(plan) == [
+        "OU 'PROD' would have 11 SCPs; AWS Control Tower allows 10 including FullAWSAccess."]
+
+
+def test_control_tower_packs_its_scp_controls_five_to_a_policy():
+    design = edited([])[0]
+    assert GuardrailPlan.for_design(design, CATALOG).control_tower_scps(design.ou_named("PROD")) == 1
+
+
+def test_controls_document_lists_each_ous_controls():
+    document = bundle()["docs/controls.md"]
+    assert ("## PROD OU" in document, f"| `{ROOT_USER}` | Disallow actions as a root user | PREVENTIVE | HIGH | foundation |"
+            in document) == (True, True)

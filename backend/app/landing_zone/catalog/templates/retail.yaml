@@ -1,0 +1,17 @@
+id: retail
+version: 1
+name: Retail & e-commerce
+industry: Retail, e-commerce and consumer goods
+description: >-
+  Only the cardholder data environment is in the PCI OU, keeping the rest of retail out of PCI scope. QA and PERF
+  environments for peak-season testing, and an isolated Store Edge domain for in-store and IoT accounts.
+frameworks: [PCI-DSS-v4.0, CIS-AWS-Benchmark-v1.4]
+answers:
+  environment_ids: [sandbox, dev, qa, perf, stage, prod]
+  account_model: portfolio
+  compliance: [PCI]
+  sandbox: {model: developer, monthly_budget_usd: 200, expiry_days: 30}
+  controls_profile: recommended
+  control_packs: [foundation, data-protection, network-hardening, production-resilience, pci-cde]
+edits:
+  - {op: add_ou, parent: null, name: Store Edge}

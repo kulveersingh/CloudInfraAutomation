@@ -1,3 +1,5 @@
+import pytest
+
 from tests.lz_factories import account_op, add_account, add_ou, answers_dict
 
 ALEX = {"X-Actor": "alex", "X-Roles": "platform-admin"}
@@ -262,3 +264,62 @@ def test_submit_refuses_edits_that_no_longer_fit(client):
 def test_approval_does_not_create_disabled_accounts(client):
     applied = approve(client, submitted(client, [account_op("disable_account", "acme-retail-prod")])).json()
     assert ("acme-retail-prod" in applied["accounts"], "acme-payments-prod" in applied["accounts"]) == (False, True)
+
+
+# ---- industry templates and control packs ----
+
+def test_list_templates_with_their_summary(client):
+    templates = client.get(f"{BASE}/templates", headers=ALEX).json()
+    saas = next(template for template in templates if template["id"] == "saas")
+    assert ([template["id"] for template in templates], saas["environments"], saas["frameworks_verified"]) == (
+        ["financial-services", "healthcare", "public-sector", "retail", "saas", "eu-sovereignty"],
+        ["Sandbox", "DEV", "STAGE", "PROD"], False)
+
+
+def test_template_summary_counts_ous_and_controls_by_behavior(client):
+    saas = next(template for template in client.get(f"{BASE}/templates", headers=ALEX).json() if template["id"] == "saas")
+    assert (saas["ou_count"] > 0, sorted(saas["control_counts"])) == (True, ["DETECTIVE", "PREVENTIVE", "PROACTIVE"])
+
+
+def test_get_a_template(client):
+    saas = client.get(f"{BASE}/templates/saas", headers=ALEX).json()
+    assert (saas["version"], saas["answers"]["control_packs"][0], saas["edits"][0]["name"]) == (1, "foundation", "Tenants")
+
+
+def test_unknown_template(client):
+    assert client.get(f"{BASE}/templates/nope", headers=ALEX).status_code == 404
+
+
+def test_templates_require_a_platform_admin(client):
+    assert client.get(f"{BASE}/templates", headers=SAM).status_code == 403
+
+
+def test_list_control_packs_with_their_controls(client):
+    catalog = client.get(f"{BASE}/control-packs", headers=ALEX).json()
+    foundation = catalog["packs"][0]
+    assert (catalog["mappings_refreshed"], foundation["id"], foundation["selectors"], foundation["controls"][0]) == (
+        None, "foundation", ["workloads"],
+        {"id": "5kvme4m5d2b4d7if2fs5yg2ui", "name": "Disallow actions as a root user", "behavior": "PREVENTIVE",
+         "severity": "HIGH", "implementation": "SCP", "frameworks": []})
+
+
+def test_proposal_lists_the_controls_on_each_ou(client):
+    prod = ou_named(propose(client).json()["ous"], "PROD")
+    root_user = next(control for control in prod["controls"] if control["id"] == "5kvme4m5d2b4d7if2fs5yg2ui")
+    assert root_user == {"id": "5kvme4m5d2b4d7if2fs5yg2ui", "name": "Disallow actions as a root user",
+                         "behavior": "PREVENTIVE", "severity": "HIGH", "packs": ["foundation"]}
+
+
+def test_proposal_carries_warnings_that_do_not_block(client):
+    response = propose(client).json()
+    assert (response["problems"], len(response["warnings"])) == ([], 1)
+
+
+@pytest.mark.parametrize("template", ["financial-services", "healthcare", "public-sector", "retail", "saas",
+                                      "eu-sovereignty"])
+def test_every_template_proposes_through_the_api(client, template):
+    chosen = client.get(f"{BASE}/templates/{template}", headers=ALEX).json()
+    response = client.post(f"{BASE}:propose", headers=ALEX, json={
+        "answers": {**answers_dict(), **chosen["answers"], "template": {"id": template, "version": chosen["version"]}},
+        "edits": chosen["edits"]}).json()
+    assert response["problems"] == []

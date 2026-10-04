@@ -1,0 +1,23 @@
+id: financial-services
+version: 1
+name: Financial services
+industry: Banking, payments and insurance
+description: >-
+  Six isolated environments with business acceptance, a PCI cardholder data environment, vendor integrations in
+  their own isolation domain, and the regulated control set with seven-year log retention.
+frameworks: [PCI-DSS-v4.0, SSAE-18-SOC-2-Oct-2023, NIST-CSF-v1.1]
+answers:
+  environment_ids: [sandbox, dev, test, uat, stage, prod]
+  account_model: product
+  compliance: [PCI]
+  security_tooling: true
+  log_retention_days: 2555
+  infrastructure: [network, shared_services, identity, backup, monitoring]
+  network: {hub: true, egress: central, inspection: true, on_premises: direct_connect}
+  sandbox: {model: team, monthly_budget_usd: 300, expiry_days: 14}
+  optional_ous: [exceptions, suspended]
+  controls_profile: regulated
+  control_packs: [foundation, data-protection, network-hardening, logging-integrity, key-management,
+                  production-resilience, pci-cde]
+edits:
+  - {op: add_ou, parent: null, name: Third-party Integrations}

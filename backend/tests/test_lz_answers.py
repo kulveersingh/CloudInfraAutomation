@@ -15,14 +15,46 @@ def test_five_environments_by_default():
     assert [environment.name for environment in answers().environments()] == ["Sandbox", "DEV", "TEST", "STAGE", "PROD"]
 
 
+def ids(**overrides) -> list[str]:
+    return [environment.id for environment in answers(**overrides).environments()]
+
+
 def test_four_environments_fold_testing_into_dev():
-    assert [environment.id for environment in answers(environment_count=4).environments()] == [
-        "sandbox", "dev", "stage", "prod"]
+    assert ids(environment_ids=["sandbox", "dev", "stage", "prod"]) == ["sandbox", "dev", "stage", "prod"]
 
 
-def test_six_environments_add_uat():
-    assert [environment.id for environment in answers(environment_count=6).environments()] == [
-        "sandbox", "dev", "test", "uat", "stage", "prod"]
+def test_any_combination_from_the_environment_catalog():
+    assert [(environment.id, environment.tier) for environment in answers(
+        environment_ids=["dev", "qa", "perf", "stage", "prod"]).environments()] == [
+        ("dev", "nonprod"), ("qa", "nonprod"), ("perf", "nonprod"), ("stage", "prod"), ("prod", "prod")]
+
+
+def test_environments_follow_the_catalog_order():
+    assert ids(environment_ids=["prod", "uat", "stage", "dev"]) == ["dev", "uat", "stage", "prod"]
+
+
+def test_all_eight_catalog_environments():
+    assert len(ids(environment_ids=["sandbox", "dev", "qa", "test", "uat", "perf", "stage", "prod"])) == 8
+
+
+def test_legacy_environment_counts_map_to_their_preset():
+    assert ids(environment_count=6) == ["sandbox", "dev", "test", "uat", "stage", "prod"]
+
+
+def test_stage_and_prod_are_always_included():
+    assert invalid(environment_ids=["dev", "prod"])
+
+
+def test_at_least_one_non_production_environment():
+    assert invalid(environment_ids=["sandbox", "stage", "prod"])
+
+
+def test_unknown_environments_are_rejected():
+    assert invalid(environment_ids=["dev", "staging", "stage", "prod"])
+
+
+def test_environments_are_listed_once():
+    assert invalid(environment_ids=["dev", "dev", "stage", "prod"])
 
 
 def test_stage_and_prod_are_production_tier():
@@ -35,7 +67,7 @@ def test_environments_can_be_renamed():
     assert names == ["Sandbox", "DEV", "TEST", "QA", "PROD"]
 
 
-def test_other_environment_counts_are_rejected():
+def test_other_legacy_environment_counts_are_rejected():
     assert invalid(environment_count=3)
 
 
@@ -136,3 +168,33 @@ def test_flows_need_the_hub():
 
 def test_sandbox_budget_is_positive():
     assert invalid(sandbox={"monthly_budget_usd": 0})
+
+
+# ---- templates and control packs ----
+
+def test_control_packs_follow_the_controls_profile_by_default():
+    assert [answers(controls_profile=profile).packs() for profile in ("baseline", "recommended", "regulated")] == [
+        ["foundation"], ["foundation", "data-protection", "network-hardening", "production-resilience"],
+        ["foundation", "data-protection", "network-hardening", "production-resilience", "logging-integrity",
+         "key-management"]]
+
+
+def test_explicit_control_packs_replace_the_profile():
+    assert answers(control_packs=["foundation", "pci-cde"]).packs() == ["foundation", "pci-cde"]
+
+
+def test_unknown_control_packs_are_rejected():
+    assert invalid(control_packs=["foundation", "made-up"])
+
+
+def test_pack_parameters_must_name_a_chosen_pack():
+    assert invalid(pack_parameters={"data-residency": {"AllowedRegions": ["us-east-1"]}})
+
+
+def test_pack_parameters_for_a_chosen_pack():
+    chosen = answers(control_packs=["data-residency"], pack_parameters={"data-residency": {"AllowedRegions": ["us-east-1"]}})
+    assert chosen.pack_parameters == {"data-residency": {"AllowedRegions": ["us-east-1"]}}
+
+
+def test_the_template_a_design_started_from_is_recorded():
+    assert answers(template={"id": "saas", "version": 1}).template.id == "saas"
