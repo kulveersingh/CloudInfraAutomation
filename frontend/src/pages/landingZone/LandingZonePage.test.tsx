@@ -420,7 +420,7 @@ describe("LandingZonePage", () => {
       await user().click(await screen.findByRole("button", { name: "View v1" }));
       const changes = await screen.findByRole("list", { name: "Manual changes" });
       expect(within(changes).getAllByRole("listitem").map((item) => item.textContent)).toEqual([
-        "Added OU Data Lab at the root", "Renamed Payments to Billing", "Moved Payments under Cards",
+        "Added OU Data Lab at the root", "Renamed Payments to Billing", "Moved Billing under Cards",
         "Removed OU custom_old", "Added account billing-prod to PROD", "Enabled acme-retail-dev",
         "Removed acme-cards-prod", "Moved acme-payments-prod to Cards"]);
     });

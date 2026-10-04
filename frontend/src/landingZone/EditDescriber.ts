@@ -18,11 +18,29 @@ const DESCRIBERS: Describers = {
   move_account: (edit, name) => `Moved ${edit.account} to ${name(edit.ou)}`,
 };
 
+/** Mirrors the platform's key for an OU added in the editor ("Data Lab" → "custom_data_lab"). */
+function customKey(name: string): string {
+  return `custom_${name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "")}`;
+}
+
+/** The name an earlier edit gave the OU, if any: its latest rename, else the add that created it. */
+function nameFromEdits(key: string, earlier: TreeEdit[]): string | undefined {
+  for (const edit of [...earlier].reverse()) {
+    if (edit.op === "rename_ou" && edit.ou === key) return edit.name;
+    if (edit.op === "add_ou" && customKey(edit.name) === key) return edit.name;
+  }
+  return undefined;
+}
+
 export class EditDescriber {
   constructor(private readonly index: OuTreeIndex) {}
 
-  describe(edit: TreeEdit): string {
-    const describer = DESCRIBERS[edit.op] as (edit: TreeEdit, name: Name) => string;
-    return describer(edit, (key) => this.index.name(key));
+  /** Each change names OUs as they were at that point, so a later rename doesn't rewrite earlier changes. */
+  describeAll(edits: TreeEdit[]): string[] {
+    return edits.map((edit, position) => {
+      const describer = DESCRIBERS[edit.op] as (edit: TreeEdit, name: Name) => string;
+      const earlier = edits.slice(0, position);
+      return describer(edit, (key) => nameFromEdits(key, earlier) ?? this.index.name(key));
+    });
   }
 }
