@@ -155,6 +155,15 @@ td.mono{white-space:nowrap}
 .empty{padding:28px;text-align:center;color:var(--muted)}
 .split{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:16px;align-items:start}
 .diff-add{color:var(--ok)} .diff-del{color:var(--crit)}
+/* landing zone tree */
+.tree,.tree ul{list-style:none;margin:0;padding:0}
+.tree ul{margin-left:14px;padding-left:16px;border-left:1px solid var(--line-strong)}
+.tree li{position:relative;padding:5px 0}
+.tree ul>li::before{content:"";position:absolute;left:-16px;top:19px;width:14px;border-top:1px solid var(--line-strong)}
+.ou{display:inline-flex;flex-direction:column;gap:3px;border:1px solid var(--line);border-left:4px solid var(--line-strong);border-radius:var(--r);padding:6px 10px;background:var(--surface);max-width:100%}
+.ou .hint{display:flex;flex-wrap:wrap;gap:4px}
+.ou.root{border-left-color:var(--fg)} .ou.sec{border-left-color:var(--crit)} .ou.prod{border-left-color:var(--warn)}
+.ou.env{border-left-color:var(--accent)} .ou.sbx{border-left-color:var(--info)} .ou.sus{border-left-color:var(--faint)} .ou.parent{border-style:dashed}
 @media (max-width: 980px){
   .app{grid-template-columns:minmax(0,1fr)}
   .rail{position:static;height:auto;flex-direction:row;flex-wrap:wrap;align-items:center;padding:10px 16px;gap:10px}
@@ -341,6 +350,7 @@ const ROUTES = [
   {id:"developer", label:"Developer view", group:"Work"},
   {id:"resilience", label:"Resilience (DR/HA)", group:"Work"},
   {id:"admin", label:"Admin", group:"Platform"},
+  {id:"landing", label:"Landing zone", group:"Platform"},
 ];
 let state = {project:"invoice-ingest", approval:null, adminTab:"environments", shareTab:"catalog", devEnv:"dev", devRegion:"primary", releaseTab:"inbox"};
 function route(){ const h=(location.hash||"#projects").slice(1); return ROUTES.some(r=>r.id===h)?h:"projects"; }
@@ -354,7 +364,7 @@ function renderNav(){
 }
 function render(){
   renderNav();
-  const v=route(); const fn={projects:vProjects,new:vWizard,releases:vReleases,sharing:vSharing,developer:vDeveloper,resilience:vResilience,admin:vAdmin}[v];
+  const v=route(); const fn={projects:vProjects,new:vWizard,releases:vReleases,sharing:vSharing,developer:vDeveloper,resilience:vResilience,admin:vAdmin,landing:vLanding}[v];
   $("#view").innerHTML=fn();
 }
 window.addEventListener("hashchange", ()=>{render(); window.scrollTo(0,0);});
@@ -743,6 +753,269 @@ document.addEventListener("input", e=>{
 });
 function tick(){ if(!W.job) return; if(W.job.done<6){ setTimeout(()=>{ if(!W.job) return; W.job.done++; if(route()==="new") render(); tick(); }, matchMedia("(prefers-reduced-motion: reduce)").matches?300:900);} else { PROJECTS.unshift({id:W.name,pf:W.pf,pr:W.pr,mode:W.mode,primary:W.primary,secondary:W.mode==="single"?"":W.secondary,strategy:W.mode==="dr"?(W.strategy==="warm"?"Warm standby":"Pilot light"):"—",commit:"0c1d2e3",msg:"Initial generated infrastructure",stages:{sandbox:{s:"deployed",v:"0c1d2e3",g:"ppp"},dev:{s:"deployed",v:"0c1d2e3",g:"ppp"},test:{s:"deployed",v:"0c1d2e3",g:"ppp"},stage:{s:"awaiting",v:"0c1d2e3",g:"pppp"},prod:{s:"idle",v:"—",g:""}},apps:[{repo:"(none yet)",lang:"—",slot:"—",type:"—"}]}); APPROVALS.push({id:"rel-"+(1044+APPROVALS.length),kind:"release",project:W.name,env:"stage",requester:"Jordan Lee",age:"just now",gate:"passed",risk:"low",changes:W.resources.map(r=>({a:"Add",type:svcName(r.t),id:r.id,risk:"low",note:"New resource"})),evidence:{tests:"Generated checks passed",provenance:"Signed",drift:"New stack",analyzer:"No external access"}}); renderNav(); } }
 function runFailover(){ const st=()=>{ if(!FAILOVER||FAILOVER.step!=="run") return; if(FAILOVER.n<4){ FAILOVER.n++; if(route()==="resilience") render(); setTimeout(st, 800);} else { FAILOVER.step="done"; if(route()==="resilience") render(); } }; setTimeout(st,800); }
+
+/* ---------------- Landing zone (questionnaire → structure → approval) ---------------- */
+const LZ_ENV_PRESETS = {
+  4:[{id:"sandbox",name:"Sandbox",tier:"sandbox"},{id:"dev",name:"DEV",tier:"nonprod"},{id:"stage",name:"STAGE",tier:"prod"},{id:"prod",name:"PROD",tier:"prod"}],
+  5:[{id:"sandbox",name:"Sandbox",tier:"sandbox"},{id:"dev",name:"DEV",tier:"nonprod"},{id:"test",name:"TEST",tier:"nonprod"},{id:"stage",name:"STAGE",tier:"prod"},{id:"prod",name:"PROD",tier:"prod"}],
+  6:[{id:"sandbox",name:"Sandbox",tier:"sandbox"},{id:"dev",name:"DEV",tier:"nonprod"},{id:"test",name:"TEST",tier:"nonprod"},{id:"uat",name:"UAT",tier:"nonprod"},{id:"stage",name:"STAGE",tier:"prod"},{id:"prod",name:"PROD",tier:"prod"}],
+};
+const LZ_STEPS = ["Organization","Environments","Accounts","Security & compliance","Shared infrastructure","Network","Sandbox & other OUs","Controls","Review structure"];
+let LZ = {step:1, name:"acme", email:"aws-management@acme.example", home:"us-east-1", regions:["us-east-1","us-east-2"],
+  envCount:5, envs:LZ_ENV_PRESETS[5].map(e=>({...e})), grouping:"separate", accountModel:"portfolio",
+  compliance:[], tooling:true, retention:"365",
+  infra:{network:true, shared:true, identity:true, backup:true, monitoring:true, cicd:false},
+  hub:true, egress:"central", inspection:true, onprem:"none", cidr:"10.0.0.0/8",
+  flows:[], sbxModel:"team", sbxBudget:500, sbxTtl:30, optional:{exceptions:true, suspended:true, individual:false},
+  controls:"recommended", status:"draft", submittedBy:null};
+
+function lzEnvOus(){ return LZ.envs.map(e=>({...e, ou:`${e.name} OU`})); }
+function lzComplianceOus(){ return LZ.compliance.map(c=>({name:`${c} OU`, children:[`${c}-STAGE OU`,`${c}-PROD OU`]})); }
+function lzAccountsFor(env){
+  if(env.id==="sandbox") return LZ.sbxModel==="team"?["team-payments-sbx","team-retail-sbx","team-data-sbx"]:["dev-jlee-sbx","dev-spatel-sbx","… one per developer"];
+  if(LZ.accountModel==="env") return [`${env.id}-workloads`];
+  if(LZ.accountModel==="product") return REGISTRY.flatMap(p=>p.products.map(x=>`${x.id.replace("pr-","")}-${env.id}`));
+  return REGISTRY.map(p=>`${p.id.replace("pf-","")}-${env.id}`);
+}
+function lzSecurityAccounts(){ return ["Log Archive","Audit", ...(LZ.tooling?["Security Tooling"]:[])]; }
+function lzInfraAccounts(){ const m={network:"Network",shared:"Shared Services",identity:"Identity",backup:"Backup",monitoring:"Monitoring",cicd:"CI/CD Automations"}; return Object.entries(LZ.infra).filter(([,v])=>v).map(([k])=>m[k]); }
+function lzPools(){
+  // Non-overlapping IPAM pools: one /9 per region, then a /12 per environment (+ shared infrastructure).
+  const slots=[...LZ.envs.map(e=>e.name),"Shared infrastructure"];
+  return LZ.regions.map((r,ri)=>({region:r, pools:slots.map((s,i)=>({name:s, cidr:`10.${ri*128+i*16}.0.0/12`}))}));
+}
+function lzErrors(){
+  const e=[];
+  if(!/^[a-z][a-z0-9-]{1,30}$/.test(LZ.name)) e.push({s:1,m:"Organization name: 2–31 lowercase letters, digits or hyphens."});
+  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(LZ.email)) e.push({s:1,m:"Enter a valid management account email."});
+  if(LZ.regions.length<2) e.push({s:1,m:"Choose at least two governed regions so DR/HA pairs are possible."});
+  if(!LZ.regions.includes(LZ.home)) e.push({s:1,m:"The home region must be one of the governed regions."});
+  const names=LZ.envs.map(x=>x.name.trim().toUpperCase());
+  if(names.some(n=>!/^[A-Z][A-Z0-9-]{1,15}$/i.test(n))) e.push({s:2,m:"Environment names: 2–16 letters, digits or hyphens."});
+  if(new Set(names).size!==names.length) e.push({s:2,m:"Environment names must be unique."});
+  if(!LZ.infra.network && LZ.hub) e.push({s:5,m:"Hub-and-spoke networking needs the Network account."});
+  LZ.flows.forEach(f=>{ const s=LZ.envs.find(x=>x.id===f.from), d=LZ.envs.find(x=>x.id===f.to);
+    if(!s||!d) e.push({s:6,m:"A flow refers to an environment that no longer exists. Remove it."});
+    else if(s.tier==="sandbox"||d.tier==="sandbox") e.push({s:6,m:`Sandbox can't have flows to other environments (${s.name} → ${d.name}).`}); });
+  return e;
+}
+function vLanding(){
+  const errs=lzErrors();
+  const stepper=LZ_STEPS.map((s,i)=>`<button class="step ${LZ.step===i+1?"on":""} ${LZ.step>i+1?"done":""}" data-lz="step" data-n="${i+1}"><i>${LZ.step>i+1?"✓":i+1}</i>${s}</button>`).join("");
+  const body=[lzOrg,lzEnvs,lzAccounts,lzSecurity,lzInfra,lzNetwork,lzSandbox,lzControls,lzReview][LZ.step-1](errs);
+  const stepErr=errs.filter(x=>x.s===LZ.step).map(x=>`<div class="err">${esc(x.m)}</div>`).join("");
+  const last=LZ.step===LZ_STEPS.length;
+  return `
+  <div class="head"><div><h1>Landing zone</h1><p class="sub">Design a new AWS organization: answer the questions, review the proposed OU structure, then request approval. CloudFormation is generated only after a second platform admin approves.</p></div>
+    ${chip(LZ.status==="approved"?"ok":LZ.status==="pending"?"warn":"idle", LZ.status==="approved"?"Approved · generating CloudFormation":LZ.status==="pending"?"Awaiting second admin":"Draft")}</div>
+  ${can("admin")?"":`<div class="notice warn">You are viewing as ${esc(me())}. Only platform admins can submit a landing zone design. Switch to Alex Kim (Platform admin) at the top right to try submitting.</div>`}
+  <div class="steps">${stepper}</div>
+  <div class="panel"><div class="panel-b">${body}${stepErr}</div>
+    <div class="panel-h" style="border-top:1px solid var(--line);border-bottom:0">
+      <button class="btn" data-lz="prev" ${LZ.step===1?"disabled":""}>Back</button>
+      <span class="hint">${errs.length?`${errs.length} item${errs.length>1?"s":""} to fix before review`:"All answers valid"}</span>
+      ${last?`<button class="btn pri" data-lz="submit" ${errs.length||!can("admin")||LZ.status!=="draft"?"disabled":""}>Request approval to generate CloudFormation</button>`:`<button class="btn pri" data-lz="next">${LZ.step===LZ_STEPS.length-1?"Review structure":"Continue"}</button>`}
+    </div></div>`;
+}
+const lzOpt=(key,val,title,desc,rec)=>`<button class="opt ${LZ[key]===val?"on":""}" data-lz="set" data-k="${key}" data-v="${val}"><b>${title}${rec?` <span class="chip ok" style="margin-left:4px">Recommended</span>`:""}</b><span class="hint">${desc}</span></button>`;
+const lzCheck=(path,label,checked,hint,locked)=>`<label class="row" style="gap:8px;align-items:flex-start"><input type="checkbox" data-lz="toggle" data-p="${path}" ${checked?"checked":""} ${locked?"disabled":""}><span><b>${label}</b>${locked?` ${chip("idle","Always on")}`:""}${hint?`<br><span class="hint">${hint}</span>`:""}</span></label>`;
+
+function lzOrg(){
+  return `<h2>1. Organization</h2><p class="sub">This creates a new AWS Organization with all features and an AWS Control Tower landing zone in the management (payer) account.</p>
+  <div class="grid3">
+    <div class="field"><label for="lzName">Organization name</label><input type="text" id="lzName" value="${esc(LZ.name)}" data-lzi="name"><span class="hint">Prefix for account names and OU paths</span></div>
+    <div class="field"><label for="lzEmail">Management account email</label><input type="text" id="lzEmail" value="${esc(LZ.email)}" data-lzi="email"><span class="hint">A distribution list, not a person</span></div>
+    <div class="field"><label for="lzHome">Home region</label><select id="lzHome" data-lzc="home">${REGIONS.map(r=>`<option value="${r.id}" ${r.id===LZ.home?"selected":""}>${r.id} · ${r.name}</option>`).join("")}</select><span class="hint">Where Control Tower runs</span></div>
+  </div>
+  <div class="field"><span class="label">Governed regions</span><div class="row">${REGIONS.map(r=>`<label class="row" style="gap:6px"><input type="checkbox" data-lz="region" data-r="${r.id}" ${LZ.regions.includes(r.id)?"checked":""}> <span class="mono">${r.id}</span></label>`).join("")}</div>
+  <span class="hint">All other regions are denied by SCP. Any two governed regions can be a DR/HA pair. Default pair: us-east-1 / us-east-2.</span></div>`;
+}
+function lzEnvs(){
+  const rows=LZ.envs.map((e,i)=>`<tr><td><input type="text" id="lzEnv${i}" value="${esc(e.name)}" data-lzi="env" data-i="${i}" style="width:130px"></td><td>${chip(e.tier==="prod"?"warn":e.tier==="sandbox"?"info":"idle", e.tier==="prod"?"Production tier":e.tier==="sandbox"?"Sandbox":"Non-production")}</td><td class="mono">${e.name} OU</td><td class="hint">${e.tier==="prod"?"Reviewer approval before deployment":"Own accounts, no access to other environments"}</td></tr>`).join("");
+  return `<h2>2. Environments</h2>
+  <div class="field"><span class="label">How many environments?</span><div class="choice">
+    ${lzOpt("envCount",4,"4 environments","Sandbox · DEV · STAGE · PROD. Testing runs in DEV.")}
+    ${lzOpt("envCount",5,"5 environments","Sandbox · DEV · TEST · STAGE · PROD. Testing is isolated from development.",true)}
+    ${lzOpt("envCount",6,"6 environments","Sandbox · DEV · TEST · UAT · STAGE · PROD. Adds business acceptance (rename it below).")}
+  </div></div>
+  <div class="tbl-wrap"><table><thead><tr><th>Name</th><th>Tier</th><th>OU</th><th>Rule</th></tr></thead><tbody>${rows}</tbody></table></div>
+  <div class="notice">Every environment is <b>always its own OU</b> with its own accounts. Environments have no access to each other. Only networking flows you declare on the Network step are allowed, and they're inspected.</div>
+  <div class="field"><span class="label">Put the environment OUs under parent OUs?</span><div class="choice">
+    ${lzOpt("grouping","separate","Keep every environment separate","Each environment OU sits directly under the root and gets its own copy of the baseline policies. A policy change can't loosen production and non-production at the same time. This adds a security layer.",true)}
+    ${lzOpt("grouping","prodnonprod","Two parents: Prod and NonProd","Shared policies attach once to the parent and are inherited. Fewer attachments, but one parent change affects every environment under it.")}
+    <div></div>
+  </div></div>
+  ${LZ.grouping==="prodnonprod"?`<div class="notice warn">Not recommended. With shared parents, a single policy edit on NonProd or Prod changes several environments at once. The environment OUs themselves stay separate either way.</div>`:""}`;
+}
+function lzAccounts(){
+  const ex=lzEnvOus().find(e=>e.tier==="prod")||LZ.envs[0];
+  return `<h2>3. Accounts per environment</h2><p class="sub">Accounts are created through Control Tower Account Factory, already enrolled in their environment OU.</p>
+  <div class="choice">
+    ${lzOpt("accountModel","env","One account per environment","Simplest. Every product shares the environment's account and its service quotas.")}
+    ${lzOpt("accountModel","portfolio","One per portfolio per environment","An account boundary between portfolios. Tags isolate products and projects inside it.",true)}
+    ${lzOpt("accountModel","product","One per product per environment","The strongest isolation, but the most accounts. Suits regulated or very large products.")}
+  </div>
+  <div class="notice">Example for <b>${esc(ex.name)} OU</b>: ${lzAccountsFor(ex).map(a=>`<span class="tag">${esc(LZ.name)}-${esc(a)}</span>`).join(" ")}</div>`;
+}
+function lzSecurity(){
+  const comp=["PCI","HIPAA","GxP"];
+  return `<h2>4. Security (Cyber) and compliance</h2>
+  <div class="notice">There is always exactly <b>one Security OU</b>, created by Control Tower. It holds the Log Archive (CloudTrail and Config logs) and Audit (GuardDuty, Security Hub, Inspector and Macie delegated administrator) accounts.</div>
+  ${lzCheck("tooling","Add a Security Tooling account",LZ.tooling,"Separate account for SIEM forwarding, incident response tools and forensics")}
+  <div class="field" style="max-width:320px"><label for="lzRet">Central log retention</label><select id="lzRet" data-lzc="retention">${[["365","1 year (STAGE/PROD 7 years)"],["730","2 years"],["2555","7 years for all"]].map(([v,l])=>`<option value="${v}" ${LZ.retention===v?"selected":""}>${l}</option>`).join("")}</select></div>
+  <div class="field"><span class="label">Regulated workloads</span><div class="row">${comp.map(c=>`<label class="row" style="gap:6px"><input type="checkbox" data-lz="comp" data-c="${c}" ${LZ.compliance.includes(c)?"checked":""}> ${c}</label>`).join("")}</div>
+  <span class="hint">Each selected scope gets its own OU with STAGE and PROD child OUs, stricter controls and its Security Hub standard. For example, PCI workloads leave the general PROD OU and move into the PCI OU.</span></div>`;
+}
+function lzInfra(){
+  return `<h2>5. Shared infrastructure</h2><p class="sub">These accounts go in the Infrastructure OU. Environment accounts can reach them only through the routes on the Network step.</p>
+  <div class="grid2">
+    ${lzCheck("infra.network","Network",LZ.infra.network,"Transit Gateway, IPAM, central egress and inspection")}
+    ${lzCheck("infra.shared","Shared Services",LZ.infra.shared,"DNS resolver, artifact buckets, directory, the CloudInfra platform")}
+    ${lzCheck("infra.identity","Identity",LZ.infra.identity,"Directory integration for IAM Identity Center")}
+    ${lzCheck("infra.backup","Backup",LZ.infra.backup,"Central backup vaults with cross-region copy")}
+    ${lzCheck("infra.monitoring","Monitoring",LZ.infra.monitoring,"Cross-account CloudWatch dashboards and alarms")}
+    ${lzCheck("infra.cicd","CI/CD Automations (own OU)",LZ.infra.cicd,"Only if you run build agents in AWS. GitHub Actions with OIDC doesn't need this.")}
+  </div>`;
+}
+function lzNetwork(){
+  const envs=LZ.envs.filter(e=>e.tier!=="sandbox");
+  const flows=LZ.flows.map((f,i)=>{const s=LZ.envs.find(x=>x.id===f.from), d=LZ.envs.find(x=>x.id===f.to); const hi=d&&d.tier==="prod";
+    return `<tr><td><b>${esc(s?s.name:f.from)}</b> → <b>${esc(d?d.name:f.to)}</b></td><td class="mono">${esc(f.proto)}/${esc(f.port)}</td><td>${esc(f.reason)}</td><td>${chip(hi?"crit":"warn",hi?"High risk":"Medium")}</td><td class="hint">Inspected · expires in 90 days</td><td><button class="btn ghost" data-lz="flowDel" data-i="${i}">Remove</button></td></tr>`;}).join("");
+  return `<h2>6. Network</h2>
+  <div class="choice">
+    ${lzOpt("hub",true,"Hub and spoke (Transit Gateway)","A central Network account. Each environment VPC attaches to the hub.",true)}
+    ${lzOpt("hub",false,"Isolated VPCs only","No hub. Environments can't reach Shared Services privately.")}
+    <div></div></div>
+  <div class="grid3">
+    <div class="field"><label for="lzCidr">Organization CIDR</label><input type="text" id="lzCidr" value="${esc(LZ.cidr)}" data-lzi="cidr"><span class="hint">IPAM splits it into non-overlapping pools</span></div>
+    <div class="field"><label for="lzEgress">Internet egress</label><select id="lzEgress" data-lzc="egress"><option value="central" ${LZ.egress==="central"?"selected":""}>Central egress VPC (recommended)</option><option value="local" ${LZ.egress==="local"?"selected":""}>NAT in each VPC</option></select></div>
+    <div class="field"><label for="lzOnprem">On-premises connection</label><select id="lzOnprem" data-lzc="onprem">${[["none","None"],["vpn","Site-to-site VPN"],["dx","Direct Connect"]].map(([v,l])=>`<option value="${v}" ${LZ.onprem===v?"selected":""}>${l}</option>`).join("")}</select></div>
+  </div>
+  ${lzCheck("inspection","Inspect traffic with AWS Network Firewall",LZ.inspection,"Required for any cross-environment flow")}
+  <div class="field"><span class="label">Always allowed (one route table per environment)</span>
+  <div class="tbl-wrap"><table><thead><tr><th>From</th><th>To</th><th>What</th></tr></thead><tbody>
+    <tr><td>Each environment</td><td>Itself (its private range)</td><td>All ports within the environment, using the org security group</td></tr>
+    <tr><td>Each non-sandbox environment</td><td>Shared Services</td><td>DNS 53, artifacts and directory 443</td></tr>
+    <tr><td>Every environment</td><td>Egress / inspection VPC</td><td>Internet egress through the firewall</td></tr>
+    <tr><td>Sandbox</td><td>Egress only</td><td>No route to any other environment</td></tr>
+  </tbody></table></div></div>
+  <div class="field"><span class="label">Cross-environment exceptions (none by default)</span>
+  <div class="tbl-wrap"><table><thead><tr><th>Flow</th><th>Port</th><th>Reason</th><th>Risk</th><th>Control</th><th></th></tr></thead><tbody>${flows||`<tr><td colspan="6" class="empty">No cross-environment flows. Environments are fully isolated from each other.</td></tr>`}</tbody></table></div>
+  <div class="row"><select id="lzfFrom">${envs.map(e=>`<option value="${e.id}">${esc(e.name)}</option>`).join("")}</select><span>→</span>
+    <select id="lzfTo">${envs.map((e,i)=>`<option value="${e.id}" ${i===1?"selected":""}>${esc(e.name)}</option>`).join("")}</select>
+    <select id="lzfProto"><option>tcp</option><option>udp</option></select>
+    <input type="text" id="lzfPort" value="5432" style="width:80px" aria-label="Port">
+    <input type="text" id="lzfReason" value="Read-only data refresh" aria-label="Reason">
+    <button class="btn" data-lz="flowAdd">Add exception</button></div>
+  <span class="hint">Each exception is a single port, routed only through the inspection VPC, with an owner and an expiry. It needs approval with the design.</span></div>`;
+}
+function lzSandbox(){
+  return `<h2>7. Sandbox and other OUs</h2>
+  <div class="grid3">
+    <div class="field"><label for="lzSbx">Sandbox accounts</label><select id="lzSbx" data-lzc="sbxModel"><option value="team" ${LZ.sbxModel==="team"?"selected":""}>One per team</option><option value="developer" ${LZ.sbxModel==="developer"?"selected":""}>One per developer</option></select></div>
+    <div class="field"><label for="lzBudget">Monthly budget per account (USD)</label><input type="text" id="lzBudget" value="${LZ.sbxBudget}" data-lzi="sbxBudget"></div>
+    <div class="field"><label for="lzTtl">Resource expiry (days)</label><input type="text" id="lzTtl" value="${LZ.sbxTtl}" data-lzi="sbxTtl"><span class="hint">Nightly cleanup removes expired resources</span></div>
+  </div>
+  <div class="field"><span class="label">Other OUs</span>
+    ${lzCheck("ps","Policy Staging",true,"Policy and control changes are tested here before promotion",true)}
+    ${lzCheck("optional.exceptions","Exceptions",LZ.optional.exceptions,"For workloads that need an approved, time-limited exception to a control")}
+    ${lzCheck("optional.suspended","Suspended",LZ.optional.suspended,"Locked down (deny all except break-glass) for accounts being closed")}
+    ${lzCheck("optional.individual","Individual Business Users",LZ.optional.individual,"Non-workload accounts for business teams")}
+  </div>`;
+}
+function lzControls(){
+  return `<h2>8. Control Tower controls</h2><p class="sub">Starting profile. After review you can add or remove single controls per OU. Mandatory Control Tower controls are always on.</p>
+  <div class="choice">
+    ${lzOpt("controls","baseline","Baseline","Mandatory controls plus root-user restrictions.")}
+    ${lzOpt("controls","recommended","Strongly recommended","Baseline plus: no public S3 or RDS, encryption at rest, MFA, restricted SSH and ports, CloudTrail/Config tamper detection on production tiers.",true)}
+    ${lzOpt("controls","regulated","Regulated","Strongly recommended plus the Security Hub standards for your compliance scopes (e.g. PCI DSS), and stricter data perimeters.")}
+  </div>`;
+}
+function lzTree(){
+  const li=(label,sub,cls,children)=>`<li><span class="ou ${cls||""}"><b>${esc(label)}</b>${sub?`<span class="hint">${sub}</span>`:""}</span>${children&&children.length?`<ul>${children.join("")}</ul>`:""}</li>`;
+  const acc=list=>list.map(a=>`<span class="tag">${esc(a)}</span>`).join(" ");
+  const envNode=e=>li(`${e.name} OU`, acc(lzAccountsFor(e).slice(0,4).map(a=>`${LZ.name}-${a}`)), e.tier==="prod"?"prod":e.tier==="sandbox"?"sbx":"env");
+  const envs=lzEnvOus().filter(e=>e.tier!=="sandbox");
+  const workload = LZ.grouping==="separate" ? envs.map(envNode)
+    : [li("NonProd OU","shared non-production policies","parent",envs.filter(e=>e.tier==="nonprod").map(envNode)), li("Prod OU","shared production policies","parent",envs.filter(e=>e.tier==="prod").map(envNode))];
+  const nodes=[
+    li("Security OU (Cyber)", acc(lzSecurityAccounts()), "sec"),
+    li("Infrastructure OU", acc(lzInfraAccounts().filter(a=>a!=="CI/CD Automations"))),
+    ...LZ.envs.filter(e=>e.tier==="sandbox").map(envNode),
+    ...workload,
+    ...lzComplianceOus().map(c=>li(c.name,"stricter controls · own Security Hub standard","prod",c.children.map(x=>li(x,"","prod")))),
+    ...(LZ.infra.cicd?[li("Automations OU",acc(["CI/CD Automations"]))]:[]),
+    li("Policy Staging OU","test policy changes before promotion"),
+    ...(LZ.optional.exceptions?[li("Exceptions OU","approved, expiring exceptions")]:[]),
+    ...(LZ.optional.individual?[li("Individual Business Users OU","")]:[]),
+    ...(LZ.optional.suspended?[li("Suspended OU","deny all except break-glass","sus")]:[]),
+  ];
+  return `<ul class="tree"><li><span class="ou root"><b>Root · ${esc(LZ.name)} management (payer) account</b><span class="hint">AWS Organizations · Control Tower (${esc(LZ.home)}) · Account Factory · IAM Identity Center</span></span><ul>${nodes.join("")}</ul></li></ul>`;
+}
+function lzReview(errs){
+  const envs=LZ.envs.filter(e=>e.tier!=="sandbox");
+  const accountCount=lzSecurityAccounts().length+lzInfraAccounts().length+LZ.envs.reduce((n,e)=>n+(String(lzAccountsFor(e).at(-1)).startsWith("…")?3:lzAccountsFor(e).length),0);
+  const controls={baseline:6,recommended:14,regulated:22}[LZ.controls];
+  const ouCount=2+LZ.envs.length+(LZ.grouping==="separate"?0:2)+LZ.compliance.length*3+(LZ.infra.cicd?1:0)+1+Object.values(LZ.optional).filter(Boolean).length;
+  const pools=lzPools().map(r=>`<tr><td class="mono">${r.region}</td>${r.pools.map(p=>`<td><span class="hint">${esc(p.name)}</span><br><span class="mono">${p.cidr}</span></td>`).join("")}</tr>`).join("");
+  const routes=envs.map(e=>`<tr><td><b>rt-${esc(e.name.toLowerCase())}</b></td><td>${esc(e.name)} ↔ ${esc(e.name)}, Shared Services, egress${LZ.flows.filter(f=>f.from===e.id||f.to===e.id).map(f=>{const o=LZ.envs.find(x=>x.id===(f.from===e.id?f.to:f.from)); return `, <span class="chip warn">${esc(o?o.name:"?")} ${esc(f.proto)}/${esc(f.port)} via firewall</span>`;}).join("")}</td></tr>`).join("");
+  return `<div class="row"><h2>9. Review the proposed structure</h2><span class="spacer"></span>${errs.length?chip("crit",`${errs.length} answers to fix`):chip("ok","Ready for approval")}</div>
+  <div class="kpis">
+    <div class="panel kpi"><div class="v">${ouCount}</div><div class="k">Organizational units</div></div>
+    <div class="panel kpi"><div class="v">${accountCount}</div><div class="k">Accounts (Account Factory)</div></div>
+    <div class="panel kpi"><div class="v">${controls}</div><div class="k">Controls per workload OU</div></div>
+    <div class="panel kpi"><div class="v">${LZ.flows.length}</div><div class="k">Cross-environment exceptions</div></div>
+  </div>
+  ${LZ.grouping==="prodnonprod"?`<div class="notice warn">You chose Prod/NonProd parent OUs. We recommend keeping every environment separate for an extra security layer (step 2).</div>`:`<div class="notice ok">Every environment is a separate OU directly under the root, each with its own policies (recommended).</div>`}
+  <div class="split">
+    <div class="panel"><div class="panel-h"><h3>OU structure</h3><span class="hint">Environment OUs are fixed and isolated</span></div><div class="panel-b">${lzTree()}</div></div>
+    <div class="stack" style="display:flex;flex-direction:column;gap:16px">
+      <div class="panel"><div class="panel-h"><h3>Isolation per environment OU</h3></div><div class="panel-b" style="font-size:13px">
+        <div><b>Resource control policy:</b> resources accept only principals from the same environment OU, plus security, network and break-glass roles.</div>
+        <div><b>SCP:</b> no role assumption or RAM sharing outside the environment's own OU.</div>
+        <div><b>Network:</b> its own Transit Gateway route table, so no route to other environments.</div>
+        <div><b>Tags:</b> same-tag isolation between projects inside each account.</div></div></div>
+      <div class="panel"><div class="panel-h"><h3>CloudFormation to be generated after approval</h3></div><div class="panel-b"><div class="prog">
+        ${[["lz-foundation","Organization, Control Tower roles, Log Archive and Audit, landing zone"],["lz-structure","OUs, SCP/RCP/tag/backup policies, baselines, controls"],["lz-accounts","Account Factory accounts in their OUs"],["lz-network","StackSets: Transit Gateway, IPAM, egress, firewall, environment VPCs"],["lz-bootstrap","Account bootstrap StackSet (OIDC, shared policies)"]].map(([n,d],i)=>`<div><span class="dot ${LZ.status==="approved"&&i===0?"run":""}">${i+1}</span><span><b class="mono">${n}</b><br><span class="hint">${d}</span></span></div>`).join("")}
+      </div></div></div>
+    </div>
+  </div>
+  <div class="panel"><div class="panel-h"><h3>Transit Gateway route tables</h3><span class="hint">${LZ.hub?"Hub and spoke":"No hub selected"}</span></div><div class="tbl-wrap"><table><thead><tr><th>Route table</th><th>Reachable</th></tr></thead><tbody>${routes}<tr><td><b>rt-sandbox</b></td><td>Egress only</td></tr></tbody></table></div></div>
+  <div class="panel"><div class="panel-h"><h3>IPAM pools (${esc(LZ.cidr)})</h3><span class="hint">Non-overlapping per environment per region. VPCs are added to the network registry automatically.</span></div><div class="tbl-wrap"><table><tbody>${pools}</tbody></table></div></div>
+  ${LZ.status==="pending"?`<div class="notice warn row" style="justify-content:space-between">Submitted by ${esc(LZ.submittedBy)}. A <b>different</b> platform admin must approve before CloudFormation is generated. <button class="btn pri" data-lz="approve">Approve as Riley Chen (second admin, mock)</button></div>`:""}
+  ${LZ.status==="approved"?`<div class="notice ok">Approved by Riley Chen. Generating <span class="mono">landing-zone-infra</span> and opening the deployment through GitHub Actions, with reviewers required on the management account environment.</div>`:""}`;
+}
+function lzSetPath(path,val){ const [a,b]=path.split("."); if(b) LZ[a][b]=val; else LZ[a]=val; }
+document.addEventListener("click", e=>{
+  const t=e.target.closest("[data-lz]"); if(!t) return; const a=t.dataset.lz;
+  if(!(t.tagName==="INPUT")) e.preventDefault();
+  if(LZ.status!=="draft" && !["step","prev","next","approve"].includes(a)){ toast("The design is submitted. It is read-only until approved or rejected."); render(); return; }
+  switch(a){
+    case "step": LZ.step=+t.dataset.n; break;
+    case "prev": LZ.step=Math.max(1,LZ.step-1); break;
+    case "next": LZ.step=Math.min(LZ_STEPS.length,LZ.step+1); break;
+    case "set": { const k=t.dataset.k; let v=t.dataset.v; if(v==="true"||v==="false") v=v==="true"; else if(/^\d+$/.test(v)) v=+v;
+      LZ[k]=v; if(k==="envCount"){ LZ.envs=LZ_ENV_PRESETS[v].map(x=>({...x})); LZ.flows=LZ.flows.filter(f=>LZ.envs.some(x=>x.id===f.from)&&LZ.envs.some(x=>x.id===f.to)); } break; }
+    case "toggle": lzSetPath(t.dataset.p, t.checked); break;
+    case "region": LZ.regions = t.checked ? [...LZ.regions, t.dataset.r] : LZ.regions.filter(r=>r!==t.dataset.r); break;
+    case "comp": LZ.compliance = t.checked ? [...LZ.compliance, t.dataset.c] : LZ.compliance.filter(c=>c!==t.dataset.c); break;
+    case "flowAdd": { const f={from:$("#lzfFrom").value,to:$("#lzfTo").value,proto:$("#lzfProto").value,port:$("#lzfPort").value.trim(),reason:$("#lzfReason").value.trim()};
+      if(f.from===f.to){ toast("Traffic inside one environment is already allowed."); return; }
+      if(!/^\d{1,5}$/.test(f.port)||+f.port>65535){ toast("Enter a single port from 1 to 65535."); return; }
+      if(!f.reason){ toast("A reason is required."); return; }
+      LZ.flows.push(f); toast("Exception added. It's routed only through the inspection firewall."); break; }
+    case "flowDel": LZ.flows.splice(+t.dataset.i,1); break;
+    case "submit": LZ.status="pending"; LZ.submittedBy=me(); toast("Submitted. Waiting for a second platform admin."); break;
+    case "approve": LZ.status="approved"; toast("Approved. CloudFormation generation started (mock)."); break;
+  }
+  render();
+});
+document.addEventListener("change", e=>{ const t=e.target; const k=t.dataset.lzc; if(!k) return; if(LZ.status!=="draft"){ render(); return; } LZ[k]=t.value; render(); });
+document.addEventListener("input", e=>{
+  const t=e.target; const k=t.dataset.lzi; if(!k || LZ.status!=="draft") return;
+  if(k==="env") LZ.envs[+t.dataset.i].name=t.value.trim(); else if(k==="sbxBudget"||k==="sbxTtl") LZ[k]=t.value.replace(/\D/g,""); else LZ[k]=t.value.trim();
+  const pos=t.selectionStart; render(); const n=document.getElementById(t.id); if(n){ n.focus(); try{n.setSelectionRange(pos,pos);}catch(_){} }
+});
 
 /* role selector */
 const rs=$("#roleSel"); rs.innerHTML=Object.entries(ROLES).map(([k,r])=>`<option value="${k}" ${k===role?"selected":""}>${r.name} · ${r.title}</option>`).join("");

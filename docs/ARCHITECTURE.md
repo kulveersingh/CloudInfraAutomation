@@ -2613,7 +2613,7 @@ sequenceDiagram
 
 ## 20. Landing zone workflow: AWS Organizations OU structure with Control Tower controls
 
-**Status: design for review (rev 2). No code until approved.**
+**Status: design for review (rev 3). No code until approved.** Mock: the *Landing zone* page in `mock-ui/index.html`.
 
 **Inputs:**
 - AWS Prescriptive Guidance *OU structure in regulated AWS landing zones* (the attached document).
@@ -2629,7 +2629,7 @@ sequenceDiagram
 
 | # | Rule | Enforced by |
 |---|---|---|
-| R1 | **Sandbox, DEV, TEST, STAGE and PROD are always five separate OUs.** Each holds only its own environment's accounts. | `OuTreeValidator` rejects any design that merges, removes or nests one environment OU inside another. Admins can add environments (each gets its own OU), but never remove the five. |
+| R1 | **Every environment is always its own OU** and holds only its own environment's accounts. The customer picks 4, 5 (**recommended**: Sandbox, DEV, TEST, STAGE, PROD) or 6 environments in the questionnaire. | `OuTreeValidator` rejects any design that merges two environments into one OU or nests one environment OU inside another. |
 | R2 | **No access between environment OUs**, except for networking flows that are declared, isolated and inspected (§20.4) | Resource control policies (RCPs) and SCPs per environment OU (§20.5), plus transit gateway route-table isolation (§20.4) |
 | R3 | **Exactly one Security (Cyber) OU** with the Log Archive and Audit accounts, which hold GuardDuty, Security Hub and Config aggregation | Created by the Control Tower landing zone. The validator requires exactly one. |
 | R4 | Policies attach to **OUs only**, never to single accounts ("OUs are policy targets, not folders", from the attached guide) | Validator |
@@ -2642,9 +2642,9 @@ The UI asks these questions in order. Each answer is turned into OUs, accounts, 
 | Step | Question | Choices (default **bold**) | Effect on the design |
 |---|---|---|---|
 | 1. Organization | Organization name, management (payer) account email, home region, governed regions, DR region pair | Regions from the region registry (§10.9); **us-east-1 / us-east-2** | Landing zone manifest; region-deny SCP; IPAM regions |
-| 2. Environments | The five fixed environments are shown locked. Add more? (e.g. UAT, Perf, DR-test) | **None** | One extra OU per added environment, isolated like the others (R1, R2) |
+| 2. Environments | How many environments? | 4 (Sandbox, DEV, STAGE, PROD; testing runs in DEV) / **5 (Sandbox, DEV, TEST, STAGE, PROD), recommended** / 6 (adds UAT, renameable). Names are editable. | One isolated OU per environment (R1, R2). STAGE and PROD are production tier with reviewer approval. |
 | 3. Account model | How many accounts per environment? | **One per portfolio per environment** / one per environment / one per product per environment (D6) | Accounts vended into each environment OU |
-| 4. Grouping | Group environments under a parent for shared controls? | **Workloads → NonProd (DEV, TEST) and Prod (STAGE, PROD)** / flat / Qualified and Non-Qualified (the guide's phase 2) | Parent OUs carry shared controls. The environment OUs stay separate (R1). |
+| 4. Grouping (asked on the Environments step) | Put the environment OUs under two parent OUs (Prod and NonProd)? | **No: keep every environment OU separate, directly under the root (recommended)** / two parents, Prod and NonProd | **Separate (recommended):** every environment OU gets its own copy of the baseline policies, so one policy change can't loosen production and non-production at once. That is an extra security layer. The baseline is packed into one combined SCP to stay within the 5-SCPs-per-OU quota. **Parents:** shared policies attach once and are inherited; fewer attachments, larger blast radius per change. |
 | 5. Compliance | Any regulated workloads? | **None** / PCI DSS / HIPAA / GxP / other | Each selected scope adds its own OU (e.g. a **PCI OU** with PCI-STAGE and PCI-PROD child OUs, like the sample's PCI VPC) with stricter controls and Security Hub standards |
 | 6. Security (Cyber) | Security tooling account in addition to Log Archive and Audit? Delegated administrators? Log retention? | **Yes: Security Tooling account; GuardDuty, Security Hub, Inspector and Macie delegated to Audit; logs kept 365 days (STAGE/PROD 7 years)** | Accounts in the Security OU; delegated-admin settings; Control Tower logging config |
 | 7. Infrastructure | Which shared accounts? | **Network, Shared Services, Identity, Backup, Monitoring** · optional: CI/CD Automations | Infrastructure OU and its accounts |
@@ -2656,7 +2656,7 @@ The UI asks these questions in order. Each answer is turned into OUs, accounts, 
 
 The answers are stored as a versioned `LandingZoneQuestionnaire`. Re-running it with different answers produces a new design version and a diff (§20.7), never an in-place overwrite.
 
-### 20.3 Default proposed structure (all default answers)
+### 20.3 Default proposed structure (all default answers: 5 environments, kept separate)
 
 ```mermaid
 flowchart TD
@@ -2664,13 +2664,10 @@ flowchart TD
   ROOT --> SEC["Security OU (Cyber) — fixed<br/>Log Archive · Audit · Security Tooling"]
   ROOT --> INF["Infrastructure OU<br/>Network (Transit Gateway, IPAM, egress, inspection) · Shared Services · Identity · Backup · Monitoring"]
   ROOT --> SBX["Sandbox OU — fixed<br/>Sandbox accounts 1..n"]
-  ROOT --> WL["Workloads OU"]
-  WL --> NP["NonProd OU"]
-  NP --> DEV["DEV OU — fixed"]
-  NP --> TST["TEST OU — fixed"]
-  WL --> PR["Prod OU"]
-  PR --> STG["STAGE OU — fixed"]
-  PR --> PRD["PROD OU — fixed"]
+  ROOT --> DEV["DEV OU"]
+  ROOT --> TST["TEST OU"]
+  ROOT --> STG["STAGE OU"]
+  ROOT --> PRD["PROD OU"]
   ROOT --> PST["Policy Staging OU"]
   ROOT --> EXC["Exceptions OU"]
   ROOT --> SUS["Suspended OU"]
@@ -2727,7 +2724,7 @@ Admins pick controls from a catalog showing each control's behaviour (preventive
 | Root | AI services opt-out | Tag policy from the registry; region deny for governed regions |
 | Security | Mandatory Control Tower controls; protect logging and audit resources | Deny disabling GuardDuty, Security Hub, Config and CloudTrail |
 | Infrastructure | Disallow root user actions and access keys; restricted SSH and common ports | Only network admins can change transit gateway, IPAM and firewall resources |
-| Workloads (inherited) | Disallow root user actions and access keys; MFA for root and console users; S3 public read/write prohibited; RDS public access and snapshots prohibited; encrypted EBS and RDS storage | §4.7 SCPs: tag immutability, same-tag isolation, data perimeter |
+| Every environment OU (baseline, attached to each OU directly when kept separate) | Disallow root user actions and access keys; MFA for root and console users; S3 public read/write prohibited; RDS public access and snapshots prohibited; encrypted EBS and RDS storage | §4.7 SCPs: tag immutability, same-tag isolation, data perimeter |
 | Each environment OU | Inherited | §20.5 RCP and SCP |
 | STAGE and PROD | Plus: detect CloudTrail and Config tampering; deny deleting stacks and data stores except through the release executor | Backup policy (daily, cross-region copy to the DR pair) |
 | Sandbox | Root restrictions; S3 public prohibited | Expensive-service limits; expiry tag required; no transit gateway attachment except egress |
@@ -2800,9 +2797,9 @@ API (admin role required): `GET/PUT /v1/admin/landing-zone/questionnaire`, `POST
 | # | Decision | Status / recommendation |
 |---|---|---|
 | L1 | New or existing organization | **Decided:** new organization / new subscription |
-| L2 | Environment OUs | **Decided:** Sandbox, DEV, TEST, STAGE, PROD always separate and isolated; networking only, declared and inspected |
+| L2 | Environment OUs | **Decided:** every environment always its own isolated OU; networking only, declared and inspected |
 | L3 | Security OU | **Decided:** exactly one Security (Cyber) OU |
-| L4 | Default grouping (question 4) | Recommend **Workloads → NonProd / Prod**; the environment OUs stay separate either way |
+| L4 | Environment count and grouping | **Decided:** asked in the questionnaire (4, 5 or 6; 5 recommended). Recommendation shown in the UI: **keep every environment OU separate** (no Prod/NonProd parents) for an extra security layer |
 | L5 | Vend accounts with Account Factory | Recommend **yes** (needed for a new organization) |
 | L6 | IAM Identity Center managed by Control Tower | Recommend **yes**, with one permission set per role per environment OU |
 | L7 | Inspection for allowed cross-environment flows | Recommend **AWS Network Firewall** in the egress/inspection VPC |
