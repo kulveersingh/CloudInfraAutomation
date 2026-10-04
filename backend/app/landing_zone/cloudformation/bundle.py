@@ -68,9 +68,24 @@ class ApplyScript(BundleFile):
             'MANAGEMENT_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"',
             ('output() { aws cloudformation describe-stacks --region "$1" --stack-name "$2" '
             '--query "Stacks[0].Outputs[?OutputKey==\'$3\'].OutputValue" --output text; }'),
+            "# Templates over CloudFormation's 51,200-byte inline limit must come from S3: one private bucket per",
+            "# account and region.",
+            "template_bucket() {",
+            '  local bucket="cloudinfra-lz-templates-$(aws sts get-caller-identity --query Account --output text)-$1"',
+            '  if ! aws s3api head-bucket --bucket "$bucket" >/dev/null 2>&1; then',
+            '    if [ "$1" = "us-east-1" ]; then aws s3api create-bucket --bucket "$bucket" --region "$1" >/dev/null',
+            ('    else aws s3api create-bucket --bucket "$bucket" --region "$1" '
+            '--create-bucket-configuration LocationConstraint="$1" >/dev/null; fi'),
+            ('    aws s3api put-public-access-block --bucket "$bucket" --public-access-block-configuration '
+            'BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true'),
+            ('    aws s3api put-bucket-encryption --bucket "$bucket" --server-side-encryption-configuration '
+            '\'{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}\''),
+            "  fi",
+            '  echo "$bucket"',
+            "}",
             "",
             'echo "1/5 Organization, Control Tower roles, Log Archive, Audit and the landing zone"',
-            (f'aws cloudformation deploy --region "$REGION" --stack-name lz-foundation --template-file {STACK_FILES["lz-foundation"]} '
+            (f'aws cloudformation deploy --region "$REGION" --s3-bucket "$(template_bucket "$REGION")" --stack-name lz-foundation --template-file {STACK_FILES["lz-foundation"]} '
             "--capabilities CAPABILITY_NAMED_IAM --no-fail-on-empty-changeset"),
             'ORG_ID="$(output "$REGION" lz-foundation OrganizationId)"',
             'ROOT_ID="$(output "$REGION" lz-foundation RootId)"',
@@ -93,25 +108,25 @@ class ApplyScript(BundleFile):
             '--query "enabledBaselines[?baselineIdentifier==\'$(baseline_named IdentityCenterBaseline)\'].arn" --output text)"'),
             "",
             'echo "2/5 OUs, policies, baselines and controls"',
-            (f'aws cloudformation deploy --region "$REGION" --stack-name lz-structure --template-file {STACK_FILES["lz-structure"]} '
+            (f'aws cloudformation deploy --region "$REGION" --s3-bucket "$(template_bucket "$REGION")" --stack-name lz-structure --template-file {STACK_FILES["lz-structure"]} '
             '--no-fail-on-empty-changeset --parameter-overrides SecurityOuId="$SECURITY_OU_ID" SandboxOuId="$SANDBOX_OU_ID" '
             'ControlTowerBaselineArn="$BASELINE_ARN" IdentityCenterEnabledBaselineArn="$IDENTITY_CENTER_ARN"'),
             "",
             'echo "3/5 Accounts through Account Factory"',
-            (f'aws cloudformation deploy --region "$REGION" --stack-name lz-accounts --template-file {STACK_FILES["lz-accounts"]} '
+            (f'aws cloudformation deploy --region "$REGION" --s3-bucket "$(template_bucket "$REGION")" --stack-name lz-accounts --template-file {STACK_FILES["lz-accounts"]} '
             '--no-fail-on-empty-changeset --parameter-overrides SecurityOuId="$SECURITY_OU_ID" SandboxOuId="$SANDBOX_OU_ID"'),
             "",
             'echo "4/5 Network (shared VPCs, Transit Gateway, egress and inspection) in every governed region"',
             *self._network_parameters(context),
             *self._assume_network_host(context),
             f"for region in {regions}; do",
-            (f'  aws cloudformation deploy --region "$region" --stack-name lz-network --template-file {STACK_FILES["lz-network"]} '
+            (f'  aws cloudformation deploy --region "$region" --s3-bucket "$(template_bucket "$region")" --stack-name lz-network --template-file {STACK_FILES["lz-network"]} '
             '--no-fail-on-empty-changeset --parameter-overrides "${NETWORK_PARAMETERS[@]}"'),
             "done",
             "unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN",
             "",
             'echo "5/5 Account bootstrap StackSet"',
-            (f'aws cloudformation deploy --region "$REGION" --stack-name lz-bootstrap --template-file {STACK_FILES["lz-bootstrap"]} '
+            (f'aws cloudformation deploy --region "$REGION" --s3-bucket "$(template_bucket "$REGION")" --stack-name lz-bootstrap --template-file {STACK_FILES["lz-bootstrap"]} '
             '--no-fail-on-empty-changeset --parameter-overrides PlatformAccountId="$PLATFORM_ACCOUNT_ID" '
             'SandboxOuId="$SANDBOX_OU_ID"'),
             'echo "Landing zone applied."',

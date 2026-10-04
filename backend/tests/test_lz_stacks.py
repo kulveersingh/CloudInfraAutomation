@@ -87,6 +87,16 @@ def test_apply_script_deploys_the_stacks_in_order():
     assert positions == sorted(positions)
 
 
+def test_every_deploy_uploads_its_template_to_s3_because_large_stacks_exceed_51200_bytes():
+    deploys = [line for line in bundle()["scripts/apply.sh"].splitlines() if "aws cloudformation deploy" in line]
+    assert len(deploys) == 5 and all('--s3-bucket "$(template_bucket' in line for line in deploys)
+
+
+def test_template_bucket_is_private_and_encrypted():
+    script = bundle()["scripts/apply.sh"]
+    assert "put-public-access-block" in script and "put-bucket-encryption" in script
+
+
 def test_apply_script_assumes_the_network_account_role():
     assert "role/AWSControlTowerExecution" in bundle()["scripts/apply.sh"]
 
