@@ -959,6 +959,9 @@ function lzReview(errs){
   const ouCount=2+LZ.envs.length+(LZ.grouping==="separate"?0:2)+LZ.compliance.length*3+(LZ.infra.cicd?1:0)+1+Object.values(LZ.optional).filter(Boolean).length;
   const pools=lzPools().map(r=>`<tr><td class="mono">${r.region}</td>${r.pools.map(p=>`<td><span class="hint">${esc(p.name)}</span><br><span class="mono">${p.cidr}</span></td>`).join("")}</tr>`).join("");
   const routes=envs.map(e=>`<tr><td><b>rt-${esc(e.name.toLowerCase())}</b></td><td>${esc(e.name)} ↔ ${esc(e.name)}, Shared Services, egress${LZ.flows.filter(f=>f.from===e.id||f.to===e.id).map(f=>{const o=LZ.envs.find(x=>x.id===(f.from===e.id?f.to:f.from)); return `, <span class="chip warn">${esc(o?o.name:"?")} ${esc(f.proto)}/${esc(f.port)} via firewall</span>`;}).join("")}</td></tr>`).join("");
+  if(LZ.status==="approved") return `<div class="row"><h2>Landing zone approved</h2><span class="spacer"></span>${chip("ok","Generating CloudFormation")}</div>
+  <div class="notice ok">Approved by Riley Chen. Generating <span class="mono">landing-zone-infra</span> and opening the deployment through GitHub Actions, with reviewers required on the management account environment.</div>
+  ${lzDiagramPanel()}`;
   return `<div class="row"><h2>9. Review the proposed structure</h2><span class="spacer"></span>${errs.length?chip("crit",`${errs.length} answers to fix`):chip("ok","Ready for approval")}</div>
   <div class="kpis">
     <div class="panel kpi"><div class="v">${ouCount}</div><div class="k">Organizational units</div></div>
@@ -985,11 +988,66 @@ function lzReview(errs){
   ${LZ.status==="pending"?`<div class="notice warn row" style="justify-content:space-between">Submitted by ${esc(LZ.submittedBy)}. A <b>different</b> platform admin must approve before CloudFormation is generated. <button class="btn pri" data-lz="approve">Approve as Riley Chen (second admin, mock)</button></div>`:""}
   ${LZ.status==="approved"?`<div class="notice ok">Approved by Riley Chen. Generating <span class="mono">landing-zone-infra</span> and opening the deployment through GitHub Actions, with reviewers required on the management account environment.</div>`:""}`;
 }
+function lzModel(){
+  // The approved design: the root plus two rows of top-level OUs (foundation, then environments).
+  const n=(label,kind,items=[],children=[])=>({label,kind,items,children});
+  const envNode=e=>n(`${e.name} OU`, e.tier==="prod"?"prod":e.tier==="sandbox"?"sbx":"env", lzAccountsFor(e).slice(0,3).map(a=>`${LZ.name}-${a}`));
+  const envs=LZ.envs.filter(e=>e.tier!=="sandbox");
+  const workload = LZ.grouping==="separate" ? envs.map(envNode)
+    : [n("NonProd OU","parent",[],envs.filter(e=>e.tier==="nonprod").map(envNode)), n("Prod OU","parent",[],envs.filter(e=>e.tier==="prod").map(envNode))];
+  return {root:n(`Root · ${LZ.name}`,"root",["Management / payer","Control Tower "+LZ.home]), rows:[
+    {title:"Foundation", nodes:[n("Security OU (Cyber)","sec",lzSecurityAccounts()), n("Infrastructure OU","infra",lzInfraAccounts().filter(a=>a!=="CI/CD Automations")),
+      ...(LZ.infra.cicd?[n("Automations OU","infra",["CI/CD Automations"])]:[]), n("Policy Staging OU","other",["policy tests"]),
+      ...(LZ.optional.exceptions?[n("Exceptions OU","other",["expiring exceptions"])]:[]), ...(LZ.optional.individual?[n("Business Users OU","other")]:[]),
+      ...(LZ.optional.suspended?[n("Suspended OU","sus",["deny all"])]:[])]},
+    {title:"Environments (isolated)", nodes:[...LZ.envs.filter(e=>e.tier==="sandbox").map(envNode), ...workload,
+      ...lzComplianceOus().map(c=>n(c.name,"prod",[],c.children.map(x=>n(x,"prod"))))]},
+  ]};
+}
+function lzSvg(){
+  const W=168, GAP=14, LINE=15, PAD=10, VGAP=40, LEFT=24;
+  const colors={root:"#16222B",sec:"#B3261E",infra:"#2C5AA0",sbx:"#2C5AA0",env:"#0B6E79",prod:"#B26A00",parent:"#53636E",other:"#7C8B95",sus:"#7C8B95"};
+  const height=nd=>PAD*2+18+nd.items.length*LINE;
+  const {root,rows}=lzModel();
+  const box=(nd,x,y,h)=>{ const c=colors[nd.kind]; return `<g><rect x="${x}" y="${y}" width="${W}" height="${h}" rx="6" fill="#FFFFFF" stroke="${c}" stroke-width="1.5" ${nd.kind==="parent"?'stroke-dasharray="5 3"':""}/>`
+    +`<rect x="${x}" y="${y}" width="5" height="${h}" rx="2" fill="${c}"/>`
+    +`<text x="${x+PAD+2}" y="${y+PAD+12}" font-family="IBM Plex Sans,Arial,sans-serif" font-size="12.5" font-weight="600" fill="#16222B">${esc(nd.label)}</text>`
+    +nd.items.map((it,i)=>`<text x="${x+PAD+2}" y="${y+PAD+12+LINE*(i+1)}" font-family="IBM Plex Mono,monospace" font-size="10.5" fill="#53636E">${esc(it.length>25?it.slice(0,24)+"…":it)}</text>`).join("")+`</g>`; };
+  // Lay out each row as a small forest; parents are centred over their children.
+  const laid=rows.map(r=>{ let next=0; const lv=[];
+    const place=(nd,d)=>{ nd.d=d; lv[d]=Math.max(lv[d]||0,height(nd)); if(!nd.children.length){ nd.x=next; next+=W+GAP; } else { nd.children.forEach(c=>place(c,d+1)); nd.x=(nd.children[0].x+nd.children.at(-1).x)/2; } };
+    r.nodes.forEach(nd=>place(nd,0)); return {...r, width:next-GAP, lv}; });
+  const width=Math.max(...laid.map(r=>r.width))+LEFT*2;
+  const rootH=height(root), rootX=(width-W)/2, trunkX=width/2;
+  const sideX=10; let y=20+rootH+VGAP, out="", firstBus=0, lastBus=0;
+  laid.forEach(r=>{
+    const off=(width-r.width)/2, busY=y+18; firstBus=firstBus||busY; lastBus=busY;
+    out+=`<text x="${LEFT}" y="${y+6}" font-family="IBM Plex Sans,Arial,sans-serif" font-size="11" font-weight="600" letter-spacing="1" fill="#7C8B95">${esc(r.title.toUpperCase())}</text>`;
+    const tops=r.nodes.map(nd=>off+nd.x+W/2);
+    out+=`<path d="M${sideX} ${busY} H${Math.max(trunkX,...tops)}" stroke="#B4BFC6" stroke-width="1.5"/>`;
+    const yOf=d=>busY+16+r.lv.slice(0,d).reduce((a,h)=>a+h+VGAP,0);
+    const draw=nd=>{ const x=off+nd.x, yy=yOf(nd.d), h=height(nd);
+      if(nd.d===0) out+=`<path d="M${x+W/2} ${busY} V${yy}" stroke="#B4BFC6" stroke-width="1.5"/>`;
+      nd.children.forEach(ch=>{ const mid=yy+r.lv[nd.d]+VGAP/2; out+=`<path d="M${x+W/2} ${yy+h} V${mid} H${off+ch.x+W/2} V${yOf(ch.d)}" fill="none" stroke="#B4BFC6" stroke-width="1.5"/>`; draw(ch); });
+      out+=box(nd,x,yy,h); };
+    r.nodes.forEach(draw);
+    y=yOf(r.lv.length)+12;
+  });
+  const total=y+8;
+  const trunk=`<path d="M${trunkX} ${20+rootH} V${firstBus}" stroke="#B4BFC6" stroke-width="1.5"/><path d="M${sideX} ${firstBus} V${lastBus}" stroke="#B4BFC6" stroke-width="1.5"/>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${total}" viewBox="0 0 ${width} ${total}" style="max-width:100%;height:auto;display:block;margin:auto" role="img" aria-label="Approved OU structure for ${esc(LZ.name)}"><rect width="100%" height="100%" fill="#F3F5F6"/>${trunk}${box(root,rootX,20,rootH)}${out}</svg>`;
+}
+function lzDiagramPanel(){
+  return `<div class="panel"><div class="panel-h"><h3>Approved OU structure: ${esc(LZ.name)}</h3>
+    <div class="row"><span class="hint">Version 1 · approved by Riley Chen · committed as <span class="mono">docs/ou-structure.svg</span> in landing-zone-infra</span>
+    <button class="btn" data-lz="dlSvg">Download SVG</button></div></div>
+    <div class="panel-b" style="overflow-x:auto;padding:0">${lzSvg()}</div></div>`;
+}
 function lzSetPath(path,val){ const [a,b]=path.split("."); if(b) LZ[a][b]=val; else LZ[a]=val; }
 document.addEventListener("click", e=>{
   const t=e.target.closest("[data-lz]"); if(!t) return; const a=t.dataset.lz;
   if(!(t.tagName==="INPUT")) e.preventDefault();
-  if(LZ.status!=="draft" && !["step","prev","next","approve"].includes(a)){ toast("The design is submitted. It is read-only until approved or rejected."); render(); return; }
+  if(LZ.status!=="draft" && !["step","prev","next","approve","dlSvg"].includes(a)){ toast("The design is submitted. It is read-only until approved or rejected."); render(); return; }
   switch(a){
     case "step": LZ.step=+t.dataset.n; break;
     case "prev": LZ.step=Math.max(1,LZ.step-1); break;
@@ -1007,6 +1065,7 @@ document.addEventListener("click", e=>{
     case "flowDel": LZ.flows.splice(+t.dataset.i,1); break;
     case "submit": LZ.status="pending"; LZ.submittedBy=me(); toast("Submitted. Waiting for a second platform admin."); break;
     case "approve": LZ.status="approved"; toast("Approved. CloudFormation generation started (mock)."); break;
+    case "dlSvg": { const a=document.createElement("a"); a.href="data:image/svg+xml;charset=utf-8,"+encodeURIComponent(lzSvg()); a.download=`${LZ.name}-ou-structure.svg`; document.body.appendChild(a); a.click(); a.remove(); return; }
   }
   render();
 });

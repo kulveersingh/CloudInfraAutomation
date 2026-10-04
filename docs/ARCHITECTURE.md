@@ -2762,6 +2762,13 @@ The design is applied as **ordered CloudFormation stacks**, kept separate becaus
 | 4 | `lz-network` | `AWS::CloudFormation::StackSet`s: the Network account (transit gateway, route tables, IPAM and pools, egress/inspection VPC, Network Firewall, `AWS::RAM::ResourceShare` to the environment OU ARNs), and workload accounts per environment OU (VPC from IPAM, subnets, transit gateway attachment, route table association) |
 | 5 | `lz-bootstrap` | Service-managed `AWS::CloudFormation::StackSet` for the §5.4 account bootstrap, auto-deployed to the Workloads and Sandbox OUs |
 
+**Approved structure diagram.** When a design is approved, the final stage of the workflow shows the selected OU structure as a diagram:
+- The root, then a *Foundation* row (Security, Infrastructure, Policy Staging, Exceptions, Suspended and so on) and an *Environments (isolated)* row, with each OU's accounts.
+- Parent OUs (if chosen) and compliance child OUs appear nested under them.
+- An `OuDiagramRenderer` builds it from the approved design version as SVG plus a Mermaid source.
+- It is committed to `landing-zone-infra` as `docs/ou-structure.svg` and `docs/ou-structure.mmd`, and can be downloaded from the UI.
+- It is redrawn for every approved version, so the diagram always matches what was deployed.
+
 After stack 4, the platform reads the StackSet outputs and **fills the environment, account and network registries** (§5.5, §10). The project wizard is then ready to use without manual setup.
 
 **Approvals** reuse the release policy (§8): a platform admin submits, a different admin approves, and high-risk plans need two approvers. Stacks are applied through GitHub Actions from a `landing-zone-infra` repository, with a GitHub environment that requires reviewers, using the same pattern as §8.
@@ -2787,6 +2794,7 @@ After stack 4, the platform reads the StackSet outputs and **fills the environme
 | `IpamPlanner` | Splits the top-level CIDR into non-overlapping pools per environment per region | New allocation strategies |
 | `StackRenderer` per stack + **element builders** | Foundation, Structure, Accounts, Network, Bootstrap; builders for OU, policy (one subclass per policy type), baseline, control (batched), account, transit gateway route domain, VPC | New builders registered in a registry, as with blocks (§6) |
 | `ControlCatalog` port | Lists controls and baselines. Local fake for tests; AWS adapter later. | New sources |
+| `OuDiagramRenderer` (SVG, Mermaid) | Approved design → structure diagram shown at the final stage and committed to the repo | New output formats |
 | `LandingZoneRun` saga, `Verifier` rules | §20.7 order with compensation; §20.8 checks | New step and check classes |
 | Adapters | `OrganizationsPort`, `ControlTowerPort`, `NetworkPort`. **Local mode** keeps an in-memory organization and network, so the whole workflow runs on Docker Desktop with no AWS account. | AWS adapters later |
 
