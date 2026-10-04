@@ -58,4 +58,11 @@ describe("App", () => {
     renderWithApi(<App />);
     expect(screen.getByRole("button", { name: "Projects" })).toHaveAttribute("aria-current", "page");
   });
+
+  it("navigates to the landing zone as a platform admin", async () => {
+    renderWithApi(<App />);
+    await userEvent.selectOptions(screen.getByLabelText("Viewing as"), "riley");
+    await userEvent.click(screen.getByRole("button", { name: "Landing zone" }));
+    expect(await screen.findByRole("heading", { name: "1. Organization" })).toBeInTheDocument();
+  });
 });

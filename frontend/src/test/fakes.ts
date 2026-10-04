@@ -1,8 +1,10 @@
 import { vi } from "vitest";
 import type {
-  CatalogEntry, CostCenterSettings, EnvironmentInfo, JobStatus, NetworkInfo, NetworkOption, PipelineStage,
-  PlatformApiPort, Portfolio, PreviewResult, ProjectSummary, RegionInfo, Release,
+  CatalogEntry, CostCenterSettings, EnvironmentInfo, JobStatus, LandingZoneDesign, LandingZoneDesignDetail,
+  LandingZoneProposal, NetworkInfo, NetworkOption, OuInfo, PipelineStage, PlatformApiPort, Portfolio, PreviewResult,
+  ProjectSummary, RegionInfo, Release,
 } from "../api/types";
+import { LandingZoneDraft } from "../landingZone/LandingZoneDraft";
 
 export const PORTFOLIOS: Portfolio[] = [
   {
@@ -110,6 +112,37 @@ export function job(state: string, steps: JobStatus["steps"] = [], error: string
   return { id: "job-1", project_name: "demo-app", state, error, steps };
 }
 
+const ou = (key: string, name: string, kind: string, extra: Partial<OuInfo> = {}): OuInfo => ({
+  key, name, kind, environment: null, tier: null, created_by_control_tower: false, accounts: [], children: [], ...extra,
+});
+
+export const OU_TREE: OuInfo[] = [
+  ou("security", "Security", "security", { created_by_control_tower: true, accounts: ["acme-log-archive", "acme-audit"] }),
+  ou("infrastructure", "Infrastructure", "infrastructure", { accounts: ["acme-network"] }),
+  ou("prod", "PROD", "environment", { environment: "prod", tier: "prod", accounts: ["acme-payments-prod"] }),
+  ou("parent_nonprod", "NonProd", "parent", { children: [ou("dev", "DEV", "environment", { environment: "dev" })] }),
+];
+
+const DIAGRAM = { svg: '<svg xmlns="http://www.w3.org/2000/svg"><text>PROD OU</text></svg>', mermaid: "flowchart TD" };
+
+export const PROPOSAL: LandingZoneProposal = {
+  ous: OU_TREE, problems: [], diagram: DIAGRAM,
+  files: { "stacks/lz-structure.yaml": "Resources: {}\n", "README.md": "# acme landing zone\n" },
+};
+
+export function landingZoneDesign(overrides: Partial<LandingZoneDesign> = {}): LandingZoneDesign {
+  return {
+    id: "lz-1", version: 1, status: "pending_approval", organization_name: "acme",
+    answers: LandingZoneDraft.initial().withOrganization("acme", "aws@acme.example").toAnswers(),
+    created_by: "alex", submitted_by: "alex", decided_by: null, decision_comment: null, repository: null,
+    commit_sha: null, accounts: {}, created_at: "2026-10-04T08:00:00", ...overrides,
+  };
+}
+
+export function landingZoneDetail(overrides: Partial<LandingZoneDesign> = {}): LandingZoneDesignDetail {
+  return { ...landingZoneDesign(overrides), ous: OU_TREE, problems: [], diagram: DIAGRAM };
+}
+
 export function fakeApi(overrides: Partial<PlatformApiPort> = {}): PlatformApiPort {
   return {
     orgRegistry: vi.fn().mockResolvedValue(PORTFOLIOS),
@@ -129,6 +162,15 @@ export function fakeApi(overrides: Partial<PlatformApiPort> = {}): PlatformApiPo
     projects: vi.fn().mockResolvedValue(PROJECTS),
     job: vi.fn().mockResolvedValue(job("succeeded")),
     setActor: vi.fn(),
+    proposeLandingZone: vi.fn().mockResolvedValue(PROPOSAL),
+    createLandingZoneDesign: vi.fn().mockResolvedValue(landingZoneDesign({ status: "draft", submitted_by: null })),
+    landingZoneDesigns: vi.fn().mockResolvedValue([landingZoneDesign()]),
+    landingZoneDesign: vi.fn().mockImplementation(async (id: string) => landingZoneDetail({ id })),
+    submitLandingZoneDesign: vi.fn().mockResolvedValue(landingZoneDesign()),
+    approveLandingZoneDesign: vi.fn().mockResolvedValue(landingZoneDesign({
+      status: "applied", decided_by: "riley", repository: "acme-platform/landing-zone-infra",
+      commit_sha: "a".repeat(40), accounts: { "acme-payments-prod": "123456789012" } })),
+    rejectLandingZoneDesign: vi.fn().mockResolvedValue(landingZoneDesign({ status: "rejected", decided_by: "riley" })),
     networks: vi.fn().mockResolvedValue([network(), network({ id: "net-dev-use1", account_id: "222222222222",
       is_default: false })]),
     createNetwork: vi.fn().mockImplementation(async (input) => ({ id: "net-new", ...input })),

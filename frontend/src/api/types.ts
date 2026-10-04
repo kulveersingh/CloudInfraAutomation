@@ -196,6 +196,83 @@ export interface PipelineStage {
   release: Release | null;
 }
 
+export type EnvironmentCount = 4 | 5 | 6;
+
+export interface FlowException {
+  source: string;
+  destination: string;
+  protocol: "tcp" | "udp";
+  port: number;
+  reason: string;
+}
+
+export interface LandingZoneAnswers {
+  organization_name: string;
+  management_email: string;
+  home_region: string;
+  governed_regions: string[];
+  environment_count: EnvironmentCount;
+  environment_names: Record<string, string>;
+  grouping: "separate" | "prod_nonprod";
+  account_model: "environment" | "portfolio" | "product";
+  compliance: string[];
+  security_tooling: boolean;
+  log_retention_days: number;
+  infrastructure: string[];
+  network: {
+    hub: boolean;
+    egress: "central" | "local";
+    inspection: boolean;
+    on_premises: "none" | "vpn" | "direct_connect";
+    cidr: string;
+    flows: FlowException[];
+  };
+  sandbox: { model: "team" | "developer"; monthly_budget_usd: number; expiry_days: number };
+  optional_ous: string[];
+  controls_profile: "baseline" | "recommended" | "regulated";
+}
+
+export interface OuInfo {
+  key: string;
+  name: string;
+  kind: string;
+  environment: string | null;
+  tier: string | null;
+  created_by_control_tower: boolean;
+  accounts: string[];
+  children: OuInfo[];
+}
+
+export interface LandingZoneExplanation {
+  ous: OuInfo[];
+  problems: string[];
+  diagram: { svg: string; mermaid: string };
+}
+
+export interface LandingZoneProposal extends LandingZoneExplanation {
+  files: Record<string, string>;
+}
+
+export type LandingZoneStatus = "draft" | "pending_approval" | "applied" | "rejected";
+
+export interface LandingZoneDesign {
+  id: string;
+  version: number;
+  status: LandingZoneStatus;
+  organization_name: string;
+  answers: LandingZoneAnswers;
+  created_by: string;
+  submitted_by: string | null;
+  decided_by: string | null;
+  decision_comment: string | null;
+  repository: string | null;
+  commit_sha: string | null;
+  accounts: Record<string, string>;
+  created_at: string;
+}
+
+export type LandingZoneDesignDetail = LandingZoneDesign & LandingZoneExplanation;
+
 export interface Identity {
   name: string;
   label: string;
@@ -203,6 +280,13 @@ export interface Identity {
 }
 
 export interface PlatformApiPort {
+  proposeLandingZone(answers: LandingZoneAnswers): Promise<LandingZoneProposal>;
+  createLandingZoneDesign(answers: LandingZoneAnswers): Promise<LandingZoneDesign>;
+  landingZoneDesigns(): Promise<LandingZoneDesign[]>;
+  landingZoneDesign(designId: string): Promise<LandingZoneDesignDetail>;
+  submitLandingZoneDesign(designId: string): Promise<LandingZoneDesign>;
+  approveLandingZoneDesign(designId: string, comment: string): Promise<LandingZoneDesign>;
+  rejectLandingZoneDesign(designId: string, comment: string): Promise<LandingZoneDesign>;
   networks(): Promise<NetworkInfo[]>;
   createNetwork(network: NetworkInput): Promise<NetworkInfo>;
   updateNetwork(networkId: string, network: NetworkInput): Promise<NetworkInfo>;
