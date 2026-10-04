@@ -126,3 +126,33 @@ class AuditEntry(Base):
     action: Mapped[str] = mapped_column(String(128))
     details: Mapped[dict] = mapped_column(JsonDocument)
     created_at: Mapped[datetime] = mapped_column(default=utc_now)
+
+
+class Release(Base):
+    __tablename__ = "releases"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    project_name: Mapped[str] = mapped_column(String(64), index=True)
+    environment_id: Mapped[str] = mapped_column(String(16))
+    commit_sha: Mapped[str] = mapped_column(String(64))
+    artifact_digest: Mapped[str] = mapped_column(String(128))
+    changes: Mapped[list] = mapped_column(JsonDocument)
+    evidence: Mapped[dict] = mapped_column(JsonDocument)
+    risk: Mapped[str] = mapped_column(String(16))
+    gate_findings: Mapped[list] = mapped_column(JsonDocument)
+    state: Mapped[str] = mapped_column(String(32))
+    requested_by: Mapped[str] = mapped_column(String(128))
+    execution_detail: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now)
+
+
+class ReleaseDecision(Base):
+    __tablename__ = "release_decisions"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    release_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("releases.id"))
+    actor: Mapped[str] = mapped_column(String(128))
+    kind: Mapped[str] = mapped_column(String(32))
+    comment: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(default=utc_now)

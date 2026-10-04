@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import sessionmaker
 
+from app.api.release_router import ReleaseRouter
 from app.api.routers import CatalogRouter, HealthRouter, ProjectRouter, RegistryRouter
 from app.config import Settings
 from app.db.database import Database
@@ -13,6 +14,7 @@ from app.synth.catalog import ServiceCatalog
 from app.synth.synthesizer import ENGINE_VERSION
 
 TITLE = "CloudInfra Platform API"
+LOCAL_MODE = "local"
 
 
 class ErrorTranslator:
@@ -30,6 +32,7 @@ class ApplicationFactory:
     def create(self) -> FastAPI:
         app = FastAPI(title=TITLE, version=ENGINE_VERSION)
         app.state.session_factory = self._session_factory
+        app.state.settings = self._settings
         app.add_middleware(CORSMiddleware, allow_origins=self._settings.cors_origins, allow_methods=["*"],
                            allow_headers=["*"])
         app.add_exception_handler(DomainError, ErrorTranslator().domain_error)
@@ -39,4 +42,5 @@ class ApplicationFactory:
 
     def _routers(self) -> list:
         catalog = CatalogRouter(ServiceCatalog(BlockRegistry.default()), CloudFormationSchemaCatalog.bundled())
-        return [HealthRouter(), catalog, RegistryRouter(), ProjectRouter()]
+        releases = ReleaseRouter(simulation_enabled=self._settings.github_mode == LOCAL_MODE)
+        return [HealthRouter(), catalog, RegistryRouter(), ProjectRouter(), releases]

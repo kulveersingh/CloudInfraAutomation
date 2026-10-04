@@ -12,6 +12,10 @@ class BadRequestError(DomainError):
     status_code = 400
 
 
+class ForbiddenError(DomainError):
+    status_code = 403
+
+
 class NotFoundError(DomainError):
     status_code = 404
 

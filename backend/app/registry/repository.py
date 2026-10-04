@@ -27,6 +27,9 @@ class RegistryRepository:
     def environments(self) -> list[models.Environment]:
         return list(self._session.scalars(select(models.Environment).order_by(models.Environment.position)))
 
+    def environment(self, environment_id: str) -> models.Environment | None:
+        return self._session.get(models.Environment, environment_id)
+
     def environment_ids(self) -> set[str]:
         return {environment.id for environment in self.environments()}
 
