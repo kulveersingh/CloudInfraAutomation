@@ -74,3 +74,10 @@ def test_conditions_used_by_other_conditions_are_kept():
     template.add_condition("IsActivePrimary", {"Fn::And": [{"Condition": "IsActive"}, {"Fn::Equals": ["b", "b"]}]})
     template.add_output("Name", {"Value": "x", "Condition": "IsActivePrimary"})
     assert set(template.to_dict()["Conditions"]) == {"IsActive", "IsActivePrimary"}
+
+
+def test_references_to_undefined_conditions_are_ignored():
+    template = Template()
+    template.add_condition("IsActive", {"Fn::Equals": ["a", "a"]})
+    template.add_resource("Queue", {"Type": "AWS::SQS::Queue", "Condition": "IsElsewhere"})
+    assert "Conditions" not in template.to_dict()

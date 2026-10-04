@@ -43,9 +43,13 @@ def test_is_active_condition():
         "Fn::Equals": [{"Ref": "ActivationState"}, "active"]}
 
 
-def test_is_primary_condition():
-    assert synthesize(request_dict())["Conditions"]["IsPrimary"] == {
-        "Fn::Equals": [{"Ref": "RegionRole"}, "primary"]}
+def test_is_primary_condition_when_a_global_table_needs_it():
+    payload = dr_request_dict(resources=[{"id": "orders", "type": "dynamodb.table"}], connections=[])
+    assert synthesize(payload)["Conditions"]["IsPrimary"] == {"Fn::Equals": [{"Ref": "RegionRole"}, "primary"]}
+
+
+def test_is_primary_condition_is_omitted_when_unused():
+    assert "IsPrimary" not in synthesize(request_dict())["Conditions"]
 
 
 def test_generator_metadata():

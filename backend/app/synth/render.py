@@ -16,9 +16,16 @@ class FileRenderer(ABC):
         ...
 
 
+class NoAliasDumper(yaml.SafeDumper):
+    """CloudFormation rejects YAML anchors and aliases, so repeated values are always written out in full."""
+
+    def ignore_aliases(self, data):
+        return True
+
+
 class TemplateYamlRenderer(FileRenderer):
     def render(self, request, template):
-        return {"template.yaml": yaml.safe_dump(template, sort_keys=False, width=120)}
+        return {"template.yaml": yaml.dump(template, Dumper=NoAliasDumper, sort_keys=False, width=120)}
 
 
 class InfraJsonRenderer(FileRenderer):

@@ -177,7 +177,7 @@ Resources:
           Essential: true
           PortMappings: [{ContainerPort: 8000}]
           Command: ["sh", "-c", "alembic upgrade head && python -m app.seed && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
-          Environment: &backend_environment
+          Environment:
             - {Name: DATABASE_HOST, Value: {"Fn::GetAtt": [DatabaseCluster, Endpoint.Address]}}
             - {Name: DATABASE_PORT, Value: {"Fn::GetAtt": [DatabaseCluster, Endpoint.Port]}}
             - {Name: DATABASE_NAME, Value: cloudinfra}
@@ -185,7 +185,7 @@ Resources:
             - {Name: GITHUB_MODE, Value: {Ref: GitHubMode}}
             - {Name: AWS_MODE, Value: {Ref: AwsMode}}
             - {Name: LOCAL_STATE_DIR, Value: /tmp/cloudinfra}
-          Secrets: &backend_secrets
+          Secrets:
             - Name: DATABASE_PASSWORD
               ValueFrom: {"Fn::Sub": "${DatabaseCluster.MasterUserSecret.SecretArn}:password::"}
           LogConfiguration:
@@ -211,8 +211,18 @@ Resources:
           Image: {Ref: BackendImage}
           Essential: true
           Command: ["python", "-m", "app.provisioning.worker"]
-          Environment: *backend_environment
-          Secrets: *backend_secrets
+          # Same settings as the API container (CloudFormation does not accept YAML aliases).
+          Environment:
+            - {Name: DATABASE_HOST, Value: {"Fn::GetAtt": [DatabaseCluster, Endpoint.Address]}}
+            - {Name: DATABASE_PORT, Value: {"Fn::GetAtt": [DatabaseCluster, Endpoint.Port]}}
+            - {Name: DATABASE_NAME, Value: cloudinfra}
+            - {Name: DATABASE_USER, Value: cloudinfra_admin}
+            - {Name: GITHUB_MODE, Value: {Ref: GitHubMode}}
+            - {Name: AWS_MODE, Value: {Ref: AwsMode}}
+            - {Name: LOCAL_STATE_DIR, Value: /tmp/cloudinfra}
+          Secrets:
+            - Name: DATABASE_PASSWORD
+              ValueFrom: {"Fn::Sub": "${DatabaseCluster.MasterUserSecret.SecretArn}:password::"}
           LogConfiguration:
             LogDriver: awslogs
             Options:

@@ -43,8 +43,51 @@ class Template:
 
     def to_dict(self) -> dict:
         sections = {"AWSTemplateFormatVersion": self.FORMAT_VERSION, "Description": self.DESCRIPTION}
-        optional = {"Metadata": self._metadata, "Parameters": self._parameters, "Conditions": self._conditions}
+        optional = {"Metadata": self._metadata, "Parameters": self._parameters, "Conditions": self._used_conditions()}
         sections.update({name: body for name, body in optional.items() if body})
         sections["Resources"] = self._resources
         sections.update({"Outputs": self._outputs} if self._outputs else {})
         return copy.deepcopy(sections)
+
+    def _used_conditions(self) -> dict:
+        """Conditions referenced from resources or outputs, directly or through other conditions."""
+        used = ConditionReferences(self._conditions).reachable_from([self._resources, self._outputs])
+        return {name: body for name, body in self._conditions.items() if name in used}
+
+
+class ConditionReferences:
+    """Finds condition names used via a "Condition" key or as the first argument of Fn::If."""
+
+    def __init__(self, conditions: dict):
+        self._conditions = conditions
+
+    def reachable_from(self, roots: list) -> set[str]:
+        used: set[str] = set()
+        pending = self._direct(roots)
+        while pending:
+            name = pending.pop()
+            if name in used or name not in self._conditions:
+                continue
+            used.add(name)
+            pending |= self._direct([self._conditions[name]])
+        return used
+
+    def _direct(self, nodes: list) -> set[str]:
+        found: set[str] = set()
+        stack = list(nodes)
+        while stack:
+            node = stack.pop()
+            if isinstance(node, dict):
+                found |= self._named(node)
+                stack.extend(node.values())
+            elif isinstance(node, list):
+                stack.extend(node)
+        return found
+
+    @staticmethod
+    def _named(node: dict) -> set[str]:
+        names = {node["Condition"]} if isinstance(node.get("Condition"), str) else set()
+        condition_if = node.get("Fn::If")
+        if isinstance(condition_if, list) and condition_if and isinstance(condition_if[0], str):
+            names.add(condition_if[0])
+        return names

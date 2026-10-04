@@ -69,7 +69,7 @@ class ContractParameter:
         resources = {resource_id: {"type": block.type_name, **block.contract_entry()}
                      for resource_id, block in self._blocks.items()}
         return {"contractVersion": "1", "project": "${ProjectName}", "environment": "${EnvironmentName}",
-                "region": "${AWS::Region}", "regionRole": "${RegionRole}", "activationState": "${ActivationState}",
+                "region": "${AWS::Region}", "resilienceMode": "${ResilienceMode}", "regionRole": "${RegionRole}", "activationState": "${ActivationState}",
                 "resources": resources}
 
 
