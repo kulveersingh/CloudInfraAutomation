@@ -376,6 +376,17 @@ def test_environment_subnets_are_shared_with_their_ou_only():
     assert share["Principals"] == [{"Ref": "OuProdArn"}] and share["AllowExternalPrincipals"] is False
 
 
+def test_environment_vpc_has_an_org_security_group_for_its_own_range():
+    group = properties(stack("lz-network"), "OrgSecurityGroupProd")
+    assert group["SecurityGroupIngress"] == [{"IpProtocol": "-1", "CidrIp": {"Fn::GetAtt": ["VpcProd", "CidrBlock"]},
+                                              "Description": "Anything inside the PROD environment"}]
+
+
+def test_org_security_group_is_shared_with_the_environment_ou():
+    arns = properties(stack("lz-network"), "ShareProd")["ResourceArns"]
+    assert {"Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:security-group/${OrgSecurityGroupProd}"} in arns
+
+
 def test_each_environment_has_its_own_transit_gateway_route_table():
     tables = resources(stack("lz-network"), "AWS::EC2::TransitGatewayRouteTable")
     assert {"RouteTableSandbox", "RouteTableDev", "RouteTableProd", "RouteTableShared"} <= set(tables)
@@ -431,7 +442,7 @@ def test_without_a_hub_there_is_no_transit_gateway():
 
 def test_network_outputs_vpc_and_subnets_for_the_registry():
     outputs = stack("lz-network")["Outputs"]
-    assert {"VpcProdId", "VpcProdPrivateSubnetIds", "VpcProdCidr"} <= set(outputs)
+    assert {"VpcProdId", "VpcProdPrivateSubnetIds", "VpcProdCidr", "VpcProdSecurityGroupId"} <= set(outputs)
 
 
 # ---- bootstrap ----
