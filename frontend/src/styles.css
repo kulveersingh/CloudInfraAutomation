@@ -122,6 +122,6 @@ tr.risk-medium td:first-child { box-shadow: inset 3px 0 0 var(--warn); }
 .split > * { min-width: 0; }
 .panel-h { align-items: flex-start; }
 .panel-h .chip { align-self: flex-start; white-space: nowrap; }
-table[aria-label="Change set"] td.mono { overflow-wrap: anywhere; }
+table[aria-label="Change set"] td.mono { overflow-wrap: anywhere; white-space: normal; }
 table[aria-label="Change set"] td:first-child, .chip { white-space: nowrap; }
 td.mono, td.num { white-space: nowrap; }
