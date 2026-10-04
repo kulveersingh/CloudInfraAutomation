@@ -107,7 +107,7 @@ class SeedCommand:
         self._settings = settings
 
     def run(self) -> None:
-        with Database(self._settings.database_url).session_factory() as session:
+        with Database(self._settings.sqlalchemy_url()).session_factory() as session:
             ReferenceDataSeeder(session).seed()
 
 

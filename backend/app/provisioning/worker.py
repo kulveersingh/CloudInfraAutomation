@@ -37,7 +37,7 @@ class WorkerCommand:
 
     def run(self, max_iterations: int | None = None) -> None:
         adapters = AdapterFactory()
-        worker = Worker(Database(self._settings.database_url).session_factory, adapters.github(self._settings),
+        worker = Worker(Database(self._settings.sqlalchemy_url()).session_factory, adapters.github(self._settings),
                         adapters.aws(self._settings), self._settings.github_owner)
         for _ in self._iterations(max_iterations):
             if not worker.process_one():

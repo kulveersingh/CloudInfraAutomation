@@ -25,7 +25,7 @@ class ErrorTranslator:
 class ApplicationFactory:
     def __init__(self, settings: Settings, session_factory: sessionmaker | None = None):
         self._settings = settings
-        self._session_factory = session_factory or Database(settings.database_url).session_factory
+        self._session_factory = session_factory or Database(settings.sqlalchemy_url()).session_factory
 
     def create(self) -> FastAPI:
         app = FastAPI(title=TITLE, version=ENGINE_VERSION)
