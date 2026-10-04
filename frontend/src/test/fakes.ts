@@ -1,7 +1,7 @@
 import { vi } from "vitest";
 import type {
-  CatalogEntry, CostCenterSettings, EnvironmentInfo, JobStatus, PlatformApiPort, Portfolio, PreviewResult,
-  ProjectSummary, RegionInfo,
+  CatalogEntry, CostCenterSettings, EnvironmentInfo, JobStatus, PipelineStage, PlatformApiPort, Portfolio,
+  PreviewResult, ProjectSummary, RegionInfo, Release,
 } from "../api/types";
 
 export const PORTFOLIOS: Portfolio[] = [
@@ -62,6 +62,30 @@ export const PROJECTS: ProjectSummary[] = [
     status: "active" },
 ];
 
+export function release(overrides: Partial<Release> = {}): Release {
+  return {
+    id: "rel-1", project_name: "invoice-ingest", environment: "stage", commit_sha: "4f78c64a1b2c",
+    artifact_digest: "sha256:aaaa", risk: "medium", state: "awaiting_approval", requested_by: "jordan",
+    changes: [
+      { action: "Add", logical_id: "ArchiveBucket", resource_type: "AWS::S3::Bucket", replacement: false, risk: "low" },
+      { action: "Modify", logical_id: "ProcessorRole", resource_type: "AWS::IAM::Role", replacement: false,
+        risk: "medium" },
+    ],
+    evidence: { tests_passed: true, critical_vulnerabilities: 0, high_vulnerabilities: 0, signed: true },
+    gate_findings: [], execution_detail: null, created_at: "2026-10-03T20:00:00", decisions: [],
+    ...overrides,
+  };
+}
+
+export function pipeline(stageRelease: Release | null = release()): PipelineStage[] {
+  return [
+    { environment: "dev", name: "DEV", requires_approval: false, release: release({ id: "rel-0", environment: "dev",
+      state: "deployed" }) },
+    { environment: "stage", name: "QA/STAGE", requires_approval: true, release: stageRelease },
+    { environment: "prod", name: "PROD", requires_approval: true, release: null },
+  ];
+}
+
 export function job(state: string, steps: JobStatus["steps"] = [], error: string | null = null): JobStatus {
   return { id: "job-1", project_name: "demo-app", state, error, steps };
 }
@@ -84,6 +108,15 @@ export function fakeApi(overrides: Partial<PlatformApiPort> = {}): PlatformApiPo
     createProject: vi.fn().mockResolvedValue({ job_id: "job-1" }),
     projects: vi.fn().mockResolvedValue(PROJECTS),
     job: vi.fn().mockResolvedValue(job("succeeded")),
+    setActor: vi.fn(),
+    pipeline: vi.fn().mockResolvedValue(pipeline()),
+    inbox: vi.fn().mockResolvedValue([release()]),
+    simulateRelease: vi.fn().mockResolvedValue(release({ id: "rel-2" })),
+    approveRelease: vi.fn().mockResolvedValue(release({ state: "deployed",
+      execution_detail: "Release executor applied change set cs-4f78c64a1b2c in stage.",
+      decisions: [{ actor: "sam", kind: "approve", comment: "ok", created_at: "2026-10-03T20:05:00" }] })),
+    rejectRelease: vi.fn().mockResolvedValue(release({ state: "rejected" })),
+    approveOverride: vi.fn().mockResolvedValue(release({ state: "awaiting_approval" })),
     ...overrides,
   };
 }

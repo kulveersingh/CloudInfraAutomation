@@ -36,6 +36,24 @@ describe("App", () => {
     expect(await screen.findByRole("heading", { name: "New project" })).toBeInTheDocument();
   });
 
+  it("navigates to the release console", async () => {
+    renderWithApi(<App />);
+    await userEvent.click(screen.getByRole("button", { name: "Release console" }));
+    expect(await screen.findByRole("heading", { name: "Release console" })).toBeInTheDocument();
+  });
+
+  it("starts as a reviewer and tells the API", () => {
+    const { api } = renderWithApi(<App />);
+    expect(api.setActor).toHaveBeenCalledWith(expect.objectContaining({ name: "sam" }));
+  });
+
+  it("switches the acting identity", async () => {
+    const { api } = renderWithApi(<App />);
+    await userEvent.selectOptions(screen.getByLabelText("Viewing as"), "alex");
+    expect(api.setActor).toHaveBeenLastCalledWith(expect.objectContaining({ name: "alex",
+      roles: ["platform-admin", "reviewer"] }));
+  });
+
   it("marks the current page", () => {
     renderWithApi(<App />);
     expect(screen.getByRole("button", { name: "Projects" })).toHaveAttribute("aria-current", "page");

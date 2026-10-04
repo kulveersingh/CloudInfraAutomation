@@ -129,7 +129,59 @@ export interface JobStatus {
   steps: JobStep[];
 }
 
+export interface ReleaseChange {
+  action: "Add" | "Modify" | "Remove";
+  logical_id: string;
+  resource_type: string;
+  replacement: boolean;
+  risk: "low" | "medium" | "high";
+}
+
+export interface ReleaseDecision {
+  actor: string;
+  kind: string;
+  comment: string;
+  created_at: string;
+}
+
+export interface Release {
+  id: string;
+  project_name: string;
+  environment: string;
+  commit_sha: string;
+  artifact_digest: string;
+  risk: "low" | "medium" | "high";
+  changes: ReleaseChange[];
+  evidence: { tests_passed: boolean; critical_vulnerabilities: number; high_vulnerabilities: number; signed: boolean };
+  gate_findings: string[];
+  state: string;
+  requested_by: string;
+  execution_detail: string | null;
+  created_at: string;
+  decisions: ReleaseDecision[];
+}
+
+export interface PipelineStage {
+  environment: string;
+  name: string;
+  requires_approval: boolean;
+  release: Release | null;
+}
+
+export interface Identity {
+  name: string;
+  label: string;
+  roles: string[];
+}
+
 export interface PlatformApiPort {
+  setActor(identity: Identity): void;
+  pipeline(projectName: string): Promise<PipelineStage[]>;
+  inbox(): Promise<Release[]>;
+  simulateRelease(projectName: string, environment: string, highRisk: boolean): Promise<Release>;
+  approveRelease(releaseId: string, comment: string): Promise<Release>;
+  rejectRelease(releaseId: string, comment: string): Promise<Release>;
+  approveOverride(releaseId: string, comment: string): Promise<Release>;
   orgRegistry(): Promise<Portfolio[]>;
   environments(): Promise<EnvironmentInfo[]>;
   regions(): Promise<RegionInfo[]>;
