@@ -46,6 +46,7 @@
 17. [Decisions needed from you](#17-decisions-needed-from-you)
 18. [Implementation phases](#18-implementation-phases)
 19. [Appendix A: Approval and workflow diagrams](#19-appendix-a-approval-and-workflow-diagrams)
+20. [Landing zone workflow: AWS Organizations OU structure with Control Tower controls](#20-landing-zone-workflow-aws-organizations-ou-structure-with-control-tower-controls)
 
 ---
 
@@ -61,7 +62,7 @@
 
 ### Non-goals (v1)
 - Free-form CloudFormation authoring. Users compose from a catalog that covers **every project-scoped AWS resource type** (curated Tier 1 + schema-driven Tier 2, §6.8); account- and organization-wide resources are excluded.
-- Creating new AWS accounts. The account landing zone (AWS Organizations / Control Tower) already exists; the platform only *uses* its accounts.
+- Creating new AWS accounts from the project wizard. The landing zone (AWS Organizations OUs, Control Tower controls, policies) is managed by a **separate admin-only workflow** (§20); projects only *use* its accounts.
 - Editing the Portfolio/Product lists in this UI. They come from the org registry (§4.2), which is the master; maintained in the platform admin screen or imported via CSV/REST.
 
 ### Design principles
@@ -896,7 +897,7 @@ flowchart TD
   ROOT --> SUS["Suspended OU"]
 ```
 
-Separate OUs per environment let each environment have its own SCPs (environment lock, classification, sandbox budget/cleanup, prod deletion protection).
+The full landing-zone OU structure (Qualified / Non-Qualified workloads, Policy Staging, Exceptions, Graveyard) and its Control Tower controls are designed in §20; this diagram shows only the environment OUs. Separate OUs per environment let each environment have its own SCPs (environment lock, classification, sandbox budget/cleanup, prod deletion protection).
 
 ### 5.2 Account granularity: options
 
@@ -2607,3 +2608,184 @@ sequenceDiagram
   EX-->>AP: status
 ```
 
+
+---
+
+## 20. Landing zone workflow: AWS Organizations OU structure with Control Tower controls
+
+**Status: design for review. No code until approved.**
+
+Sources:
+- AWS Prescriptive Guidance, *OU structure in regulated AWS landing zones: an example from the pharmaceutical industry*, the attached document. This design uses its phase-2 structure.
+- AWS Prescriptive Guidance, *Designing a Control Tower landing zone: account structure and OUs*.
+
+This is a **separate workflow** in the application, independent of the project wizard:
+- It is used only by platform admins.
+- It produces one CloudFormation repository, `landing-zone-infra`, deployed to the **management account**.
+- Project templates still refuse Organizations, Control Tower and SSO types (§6, Tier 2). The landing zone is the only place they appear.
+
+### 20.1 Principles taken from the attached guide
+
+| Guide principle | How this design applies it |
+|---|---|
+| "Don't mistake OUs for folders; consider them a target for policies." | OUs are grouped by **policy set** (qualified vs non-qualified, environment tier), **not by line of business**. Portfolios and products stay tags (§4), not OUs. |
+| Respect inheritance; avoid account-level policies and exceptions | Policies and controls attach to **OUs only**. The generator rejects account-level attachments. Exceptions go in the Exceptions OU, never in per-account overrides. |
+| Landing zone design evolves (phase 1 → phase 2) | The OU tree is **versioned data** in the platform, not hand-written YAML. A new version is planned, diffed, approved and applied like a release. |
+| Migrate side by side: new empty OUs first, policies, then controls, then move accounts | The apply order is fixed (§20.5): OUs → Organizations policies → Control Tower baselines and controls → account moves. |
+| Move accounts in batches of about 5 (never more than 10); Control Tower runs at most 5 re-enrolments at once | Account moves run as batches. The batch size is configurable from 1 to 10 (default 5), with at most 5 concurrent re-enrolments. Each batch is verified (§20.6) before the next starts. |
+| Migrate Organizations policies before Control Tower controls | Policies are applied as step 2 and controls as step 3, each verified separately. |
+| Test policy changes before applying them broadly (Control Tower guide: Policy Staging OU) | Every policy or control change goes to the **Policy Staging OU first**. It is promoted to the target OU only after verification and approval, the same way a release is promoted from STAGE to PROD. |
+
+### 20.2 Default OU structure
+
+This is phase 2 of the attached guide, combined with the Control Tower recommended OUs. The default is seeded, and admins can change every element in the UI.
+
+```mermaid
+flowchart TD
+  ROOT["Root (management account)<br/>Control Tower · Organizations · Account Factory"]
+  ROOT --> SEC["Security OU (Control Tower)<br/>Log Archive · Audit (GuardDuty, Security Hub)"]
+  ROOT --> INF["Infrastructure Platform OU<br/>Network · Shared Services · Identity · Backup · Monitoring · CloudInfra Platform"]
+  ROOT --> SBX["Sandbox OU (Control Tower)"]
+  ROOT --> WL["Workloads OU"]
+  WL --> Q["Qualified OU<br/>stringent change control"]
+  Q --> QSTG["QA/STAGE OU"]
+  Q --> QPRD["PROD OU"]
+  WL --> NQ["Non-Qualified OU"]
+  NQ --> NDEV["DEV OU"]
+  NQ --> NTST["TEST OU"]
+  ROOT --> AUT["Automations OU<br/>CI/CD, deployment tooling"]
+  ROOT --> PST["Policy Staging OU"]
+  ROOT --> EXC["Exceptions OU"]
+  ROOT --> TRN["Transitional OU"]
+  ROOT --> GRV["Graveyard OU<br/>(Suspended)"]
+```
+
+| OU | Purpose (from the guides) | Mapping to this platform |
+|---|---|---|
+| Security | Log Archive and Audit; GuardDuty and Security Hub in Audit | Created by the `AWS::ControlTower::LandingZone` manifest |
+| Infrastructure Platform | Networking, shared automation, foundation accounts | Network account (the org VPCs that §10's network registry points to), Shared Services (artifact buckets), the CloudInfra Platform account (ECS + Aurora) |
+| Sandbox | Experiments with lighter governance | The **Sandbox** environment |
+| Workloads → **Qualified** | Workloads needing stringent change management, qualification and validation | **QA/STAGE** and **PROD** environments. Same rule set as the release-console approvals. |
+| Workloads → **Non-Qualified** | Workloads with no GxP requirement or not business-critical | **DEV** and **TEST** environments |
+| Automations | Shared CI/CD resources for workload automation | Deployment tooling accounts |
+| Policy Staging | Try policy and control changes safely | Target of every change before promotion (§20.5) |
+| Exceptions | Workloads needing what policies would otherwise prevent, for example public S3 | Accounts here need an approved exception record with an owner and an expiry date |
+| Transitional | Holding area for accounts joining the landing zone | Imported accounts wait here until they are verified |
+| Graveyard (Suspended) | Accounts to delete; locked down | Deny-all SCP except a break-glass role. Projects can't target accounts here. |
+
+**Environment link.** Each configurable environment (§5.5) gains an `ou_id`:
+- Account bindings may only use accounts that are in that environment's OU.
+- The provisioner checks this before bootstrapping, so a PROD binding can never point at a Sandbox account.
+- Adding a sixth environment in the admin screen offers to create a matching child OU (Qualified or Non-Qualified).
+
+### 20.3 What the generated CloudFormation contains
+
+Every element is a native CloudFormation resource, so no custom resources are needed.
+
+| Element | CloudFormation type | Notes |
+|---|---|---|
+| Organization (all features) | `AWS::Organizations::Organization` | Imported if it already exists |
+| Control Tower prerequisite roles | `AWS::IAM::Role` × 4 | `AWSControlTowerAdmin`, `AWSControlTowerCloudTrailRole`, `AWSControlTowerStackSetRole`, `AWSControlTowerConfigAggregatorRoleForOrganizations`. Skipped if they already exist. |
+| Log Archive and Audit accounts | `AWS::Organizations::Account` | Or existing account IDs entered by the admin |
+| Landing zone | `AWS::ControlTower::LandingZone` | Manifest sets: governed regions (from the region registry, §10.9), Security and Sandbox OU names, centralized logging retention, IAM Identity Center access management, and the landing zone version. **Region deny** is derived from the enabled regions. |
+| OUs (nested) | `AWS::Organizations::OrganizationalUnit` | `ParentId` chains the tree. Generated from the OU tree data. |
+| OU registration with Control Tower | `AWS::ControlTower::EnabledBaseline` | `AWSControlTowerBaseline` per OU, so accounts in it are governed. The baseline identifier and version come from the Control Tower API at plan time, not hard-coded. |
+| Control Tower controls | `AWS::ControlTower::EnabledControl` | One per (control, OU), with `ControlIdentifier` and `TargetIdentifier` = OU ARN, plus parameters where the control takes them |
+| SCPs | `AWS::Organizations::Policy` `SERVICE_CONTROL_POLICY` | The §4.7 guardrails (tag immutability, same-tag isolation, data perimeter, region allow-list) plus per-OU policies |
+| Tag policies | `AWS::Organizations::Policy` `TAG_POLICY` | Generated from the registry (§4.7): portfolios, products, cost centers |
+| Backup policies | `AWS::Organizations::Policy` `BACKUP_POLICY` | Qualified OU: daily backups with a cross-region copy to the DR region pair |
+| AI opt-out policy | `AWS::Organizations::Policy` `AISERVICES_OPT_OUT_POLICY` | Root |
+| Account bootstrap StackSet | `AWS::CloudFormation::StackSet` (service-managed, auto-deploy) | The §5.4 bootstrap, targeted at the Workloads OU |
+| New workload accounts | `AWS::ServiceCatalog::CloudFormationProvisionedProduct` of the Control Tower **Account Factory** product | Accounts are created enrolled in the chosen OU. Optional, behind an approval. |
+
+**Control Tower rate limits.** Control Tower runs a limited number of control and baseline operations at once. The generator chains `EnabledControl` and `EnabledBaseline` resources with `DependsOn` in configurable batches, so a large control set does not fail with throttling.
+
+### 20.4 Default controls per OU (editable catalog)
+
+Admins choose controls from a catalog shown in the UI, with each control's behaviour (preventive, detective or proactive) and severity.
+- Mandatory Control Tower controls are always on and shown read-only.
+- Control identifiers are checked against the Control Tower `ListControls` API when the plan is created, so an unknown or retired control fails the plan, not the deployment.
+
+| OU | Default elective and strongly recommended controls (examples) | Extra Organizations policies |
+|---|---|---|
+| Workloads (inherited by all children) | Disallow root user actions and root access keys; MFA for root and console users; S3 public read/write prohibited; RDS public access and public snapshots prohibited; encrypted EBS volumes and RDS storage | §4.7 SCPs: tag immutability, same-tag isolation, data perimeter, region allow-list |
+| Qualified (STAGE, PROD) | Everything above, plus restricted SSH and common ports, and detection of CloudTrail and Config tampering | Deny deleting stacks and data stores except through the release executor; Backup policy; deny `restricted` data outside approved regions |
+| Non-Qualified (DEV, TEST) | Inherited Workloads controls | Data classification no higher than confidential |
+| Sandbox | Lighter: root restrictions, S3 public prohibited | Expensive-service limits; TTL cleanup tag required |
+| Exceptions | Inherited, **minus** the specific exempted control | Every exemption needs an owner, reason and expiry, and is reviewed when it expires |
+| Graveyard | n/a | Deny all except break-glass |
+| Policy Staging | Mirrors the **candidate** set being tested | Candidate policies |
+
+### 20.5 Workflow in the application
+
+```mermaid
+stateDiagram-v2
+  [*] --> Draft: admin edits OU tree / controls / policies
+  Draft --> Planned: Plan (generate template, validate controls, diff vs live)
+  Planned --> StagingApproval: Submit
+  StagingApproval --> Staging: second admin approves
+  Staging --> Verifying: apply to Policy Staging OU
+  Verifying --> PromotionApproval: drift-free, controls Succeeded
+  Verifying --> Failed: verification failed
+  PromotionApproval --> Applying: second admin approves (no self-approval)
+  Applying --> MovingAccounts: OUs → policies → baselines/controls
+  MovingAccounts --> Completed: batches verified
+  Applying --> Failed
+  MovingAccounts --> Failed
+  Failed --> Draft: fix and re-plan
+  StagingApproval --> Rejected
+  PromotionApproval --> Rejected
+```
+
+**Screens.** A new **"Landing zone"** item in the navigation, visible to platform admins only.
+1. **OU tree:** add, rename, move and remove OUs, and link environments to OUs. Removing an OU that still has accounts is blocked.
+2. **Controls:** per OU, the inherited controls (read-only) and the directly enabled ones, with behaviour and severity filters.
+3. **Policies:** SCP, tag, backup and AI opt-out policies with a JSON editor, validated with IAM Access Analyzer policy checks at plan time.
+4. **Accounts:** current OU, target OU, enrolment state, plus the batch plan for moves.
+5. **Plan and diff:** the generated template, plus a human diff ("+2 OUs, +14 controls, SCP *region allow-list* changed: +eu-west-1"). The risk level reuses the release risk classifier: removing a control or SCP, or moving an account out of Qualified, is always **high**.
+6. **Run:** step progress (the same saga UI as project provisioning) and a verification report.
+
+**Approvals** reuse the release policy (§8): a platform admin submits, a different platform admin approves, and there's no self-approval. High-risk plans need two approvers.
+
+**Apply order** follows the guide's migration lessons. Each step is verified before the next one:
+1. OUs, created side by side and empty.
+2. Organizations policies (SCP, tag, backup, AI opt-out).
+3. Control Tower baselines (OU registration), then controls, in batches.
+4. Account moves in batches of up to 5 (maximum 10). Each account is re-enrolled through Account Factory, with at most 5 concurrent operations.
+
+### 20.6 Verification (automated, replacing the guide's manual spot checks)
+
+| Check | Source |
+|---|---|
+| Stack in `*_COMPLETE` and drift-free | CloudFormation stack status and drift detection |
+| Every enabled control is `Succeeded`, and every baseline is enabled on its OU | Control Tower `ListEnabledControls`, `GetEnabledBaseline` |
+| Policy attachments match the plan, with no account-level attachments | Organizations `ListTargetsForPolicy` |
+| Moved accounts are in the target OU and enrolled, not *tainted* or *unknown* | Organizations `ListParents` + Control Tower / Service Catalog provisioned product status |
+| No errors in the management account's CloudTrail during the batch | CloudTrail `LookupEvents` for failed Organizations or Control Tower calls |
+| Landing zone not drifted | Control Tower `GetLandingZone` drift status |
+
+### 20.7 Backend design (object-oriented, open for extension)
+
+| Component | Responsibility | Extension point |
+|---|---|---|
+| `LandingZoneDesign` (domain model) | OU tree, environment links, control assignments, policies, governed regions, version | n/a |
+| `OuTreeValidator` rules | Unique names, maximum depth 5 (an Organizations limit), at most 5 SCPs per OU (an Organizations quota; the guide warns about this), no account-level attachments, Security/Sandbox present, environment-to-OU mapping complete | New rule classes |
+| `LandingZoneSynthesizer` + **element builders** | Turns the design into a template: `OrganizationBuilder`, `ControlTowerLandingZoneBuilder`, `OrganizationalUnitBuilder`, `BaselineBuilder`, `ControlBuilder` (batched `DependsOn`), `PolicyBuilder` (one subclass per policy type), `AccountFactoryBuilder` | New builder per element type; registry like the block registry (§6) |
+| `ControlCatalog` port | Lists controls and baselines. Local fake for tests; the AWS adapter calls Control Tower. | New catalog sources |
+| `LandingZoneDiff` | Live state vs plan → human diff + risk inputs | n/a |
+| `LandingZoneRun` saga | Steps from §20.5 with compensation (detach new policies, disable new controls, move accounts back) | New step classes |
+| `Verifier` rules | Checks from §20.6 | New verifier classes |
+| Adapters | `OrganizationsPort`, `ControlTowerPort`. **Local mode** keeps an in-memory organization, so the whole workflow runs on Docker Desktop with no AWS account. | AWS adapters later |
+
+API (admin role required): `GET/PUT /v1/admin/landing-zone/design`, `POST /v1/admin/landing-zone:plan`, `GET /v1/admin/landing-zone/plans/{id}`, `POST …/plans/{id}:submit|approve|reject`, `GET /v1/admin/landing-zone/runs/{id}`, `GET /v1/admin/landing-zone/controls`.
+
+### 20.8 Decisions needed
+
+| # | Decision | Recommendation |
+|---|---|---|
+| L1 | Greenfield or existing organization? | Support both. Import existing OUs, accounts and policies into Draft, and place unknown accounts in **Transitional**. |
+| L2 | Phase-2 split (Qualified / Non-Qualified) or Control Tower's simple Prod / NonProd split? | **Qualified / Non-Qualified**, following the attached guide; it lines up with our STAGE/PROD approval gates |
+| L3 | Create new accounts here (Account Factory) or only place existing ones? | Phase 1: place and move existing accounts only. Phase 2: Account Factory vending behind approval. |
+| L4 | IAM Identity Center managed by Control Tower? | Yes (the manifest's access management on) |
+| L5 | Apply through GitHub Actions (OIDC to the management account) like projects, or directly by the platform? | **GitHub Actions** with a GitHub environment requiring reviewers, using the same pipeline pattern as §8. The platform role in the management account can only *plan*. |
+| L6 | Landing Zone Accelerator, AFT or CfCT add-ons? | None. Native CloudFormation types cover this, in line with the open-source / AWS-only rule. CfCT-style lifecycle hooks can come later. |
