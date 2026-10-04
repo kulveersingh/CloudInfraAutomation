@@ -23,3 +23,24 @@ def answers_dict(**overrides) -> dict:
 
 def answers(**overrides) -> LandingZoneAnswers:
     return LandingZoneAnswers.model_validate(answers_dict(**overrides))
+
+
+def edited(edits: list[dict], **overrides):
+    """The designer's proposal with the editor's changes applied; returns the design and the edit problems."""
+    from app.landing_zone.designer import LandingZoneDesigner
+    from app.landing_zone.edits import TreeEditor
+
+    design = LandingZoneDesigner.default().design(answers(**overrides), CATALOG)
+    return design, TreeEditor().apply(design, TreeEditor.parse(edits))
+
+
+def add_ou(name: str, parent: str | None = "prod") -> dict:
+    return {"op": "add_ou", "parent": parent, "name": name}
+
+
+def add_account(suffix: str, ou: str) -> dict:
+    return {"op": "add_account", "ou": ou, "suffix": suffix}
+
+
+def account_op(op: str, account: str, **fields) -> dict:
+    return {"op": op, "account": account, **fields}

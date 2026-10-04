@@ -2,7 +2,7 @@ import re
 
 from app.landing_zone.designer import LandingZoneDesigner
 from app.landing_zone.executor import LocalLandingZoneExecutor
-from tests.lz_factories import CATALOG, answers
+from tests.lz_factories import CATALOG, account_op, add_ou, answers, edited
 
 
 def apply(tmp_path, **overrides):
@@ -52,3 +52,19 @@ def test_runs_are_recorded(tmp_path):
 
 def test_empty_history(tmp_path):
     assert LocalLandingZoneExecutor(tmp_path).history() == []
+
+
+def apply_edited(tmp_path, edits):
+    return LocalLandingZoneExecutor(tmp_path).apply(edited(edits)[0])
+
+
+def test_accounts_in_child_ous_share_the_environment_network(tmp_path):
+    edits = [add_ou("Payments"), account_op("move_account", "acme-payments-prod", ou="custom_payments")]
+    prod = next(network for network in apply_edited(tmp_path, edits).networks if network.environment == "prod")
+    assert prod.account_names == ["acme-retail-prod", "acme-payments-prod"]
+
+
+def test_disabled_accounts_get_no_id_and_no_network(tmp_path):
+    outputs = apply_edited(tmp_path, [account_op("disable_account", "acme-retail-prod")])
+    names = [name for network in outputs.networks for name in network.account_names]
+    assert ("acme-retail-prod" in outputs.accounts, "acme-retail-prod" in names) == (False, False)

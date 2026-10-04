@@ -1,4 +1,4 @@
-from app.landing_zone.design import LandingZoneDesign, OuNode
+from app.landing_zone.design import AccountPlan, LandingZoneDesign, OuNode
 from app.landing_zone.designer import LandingZoneDesigner
 from app.landing_zone.validation import DesignValidator
 from tests.lz_factories import CATALOG, answers
@@ -56,3 +56,16 @@ def test_depth_is_limited_to_five_levels():
         parent.children.append(child)
         parent = child
     assert problems(structure) == ["OU 'Deep 4' is 6 levels deep; AWS Organizations allows 5."]
+
+
+def test_account_names_are_unique():
+    structure = design()
+    structure.ou_named("DEV").accounts.append(AccountPlan(name="acme-retail-prod", email="x@acme.example"))
+    assert problems(structure) == ["Account name 'acme-retail-prod' is used more than once."]
+
+
+def test_accounts_stay_in_their_isolation_domain():
+    structure = design()
+    retail = structure.ou_named("PROD").accounts.pop()
+    structure.ou_named("DEV").accounts.append(retail)
+    assert problems(structure) == ["Account 'acme-retail-prod' belongs to isolation domain 'prod' but is in OU 'DEV'."]

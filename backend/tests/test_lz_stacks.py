@@ -7,7 +7,7 @@ from cfnlint.api import ManualArgs, lint
 from app.landing_zone.cloudformation.bundle import STACK_FILES, LandingZoneBundle
 from app.landing_zone.cloudformation.guardrails import GuardrailPlan, ScpQuotaRule
 from app.landing_zone.designer import LandingZoneDesigner
-from tests.lz_factories import CATALOG, answers
+from tests.lz_factories import CATALOG, account_op, add_account, add_ou, answers, edited
 
 FLOW = {"source": "dev", "destination": "test", "protocol": "tcp", "port": 5432, "reason": "Data refresh"}
 VARIANTS = {
@@ -25,13 +25,18 @@ VARIANTS = {
 }
 
 
-def bundle(**overrides) -> dict[str, str]:
-    design = LandingZoneDesigner.default().design(answers(**overrides), CATALOG)
+EDITS = [add_ou("Data Lab", parent=None), add_account("data-lab", "custom_data_lab"), add_ou("Payments"),
+         account_op("move_account", "acme-payments-prod", ou="custom_payments"),
+         account_op("disable_account", "acme-retail-prod")]
+
+
+def bundle(edits: list[dict] | None = None, **overrides) -> dict[str, str]:
+    design = edited(edits or [], **overrides)[0]
     return LandingZoneBundle.default().render(design, CATALOG)
 
 
-def stack(name: str, **overrides) -> dict:
-    return yaml.safe_load(bundle(**overrides)[STACK_FILES[name]])
+def stack(name: str, edits: list[dict] | None = None, **overrides) -> dict:
+    return yaml.safe_load(bundle(edits, **overrides)[STACK_FILES[name]])
 
 
 def resources(template: dict, type_name: str) -> dict:
@@ -53,6 +58,12 @@ def policy_named(template: dict, name: str) -> dict:
 @pytest.mark.parametrize("name", list(STACK_FILES))
 def test_stack_has_no_cfn_lint_findings(variant, name):
     text = bundle(**VARIANTS[variant])[STACK_FILES[name]]
+    assert [str(match) for match in lint(text, config=ManualArgs(regions=["us-east-1", "us-east-2"]))] == []
+
+
+@pytest.mark.parametrize("name", list(STACK_FILES))
+def test_edited_stack_has_no_cfn_lint_findings(name):
+    text = bundle(EDITS)[STACK_FILES[name]]
     assert [str(match) for match in lint(text, config=ManualArgs(regions=["us-east-1", "us-east-2"]))] == []
 
 
@@ -320,8 +331,8 @@ def test_scp_quota_rule_reports_overloaded_ous():
 
 # ---- accounts ----
 
-def account_products(**overrides) -> dict:
-    return resources(stack("lz-accounts", **overrides), "AWS::ServiceCatalog::CloudFormationProvisionedProduct")
+def account_products(edits: list[dict] | None = None, **overrides) -> dict:
+    return resources(stack("lz-accounts", edits, **overrides), "AWS::ServiceCatalog::CloudFormationProvisionedProduct")
 
 
 def provisioning(body: dict) -> dict:
@@ -463,3 +474,49 @@ def test_bootstrap_template_creates_the_github_oidc_provider():
 def test_bootstrap_inner_template_has_no_cfn_lint_findings():
     stack_set = next(iter(resources(stack("lz-bootstrap"), "AWS::CloudFormation::StackSet").values()))["Properties"]
     assert [str(match) for match in lint(stack_set["TemplateBody"], config=ManualArgs(regions=["us-east-1"]))] == []
+
+
+# ---- the editor's changes ----
+
+def test_root_level_custom_ou_gets_its_own_isolation_scp():
+    assert policy_named(stack("lz-structure", EDITS), "acme-isolation-custom_data_lab")["TargetIds"] == [
+        {"Ref": "OuCustomDataLab"}]
+
+
+def test_root_level_custom_ou_gets_its_own_resource_perimeter():
+    assert policy_named(stack("lz-structure", EDITS), "acme-resource-perimeter-custom_data_lab")["TargetIds"] == [
+        {"Ref": "OuCustomDataLab"}]
+
+
+def test_root_level_custom_ou_gets_the_workload_baseline():
+    assert {"Ref": "OuCustomDataLab"} in policy_named(stack("lz-structure", EDITS), "acme-workload-baseline")["TargetIds"]
+
+
+def test_root_level_custom_ou_gets_the_profile_controls():
+    assert "AWS-GR_S3_BUCKET_PUBLIC_READ_PROHIBITED" in controls_on(stack("lz-structure", EDITS), "OuCustomDataLab")
+
+
+def test_child_ous_inherit_instead_of_getting_their_own_guardrails():
+    template = stack("lz-structure", EDITS)
+    names = [body["Properties"]["Name"] for body in resources(template, "AWS::Organizations::Policy").values()]
+    assert (controls_on(template, "OuCustomPayments"), [name for name in names if "payments" in name]) == ([], [])
+
+
+def test_child_ou_is_created_under_its_environment():
+    assert properties(stack("lz-structure", EDITS), "OuCustomPayments")["ParentId"] == {"Ref": "OuProd"}
+
+
+def test_moved_account_lands_in_the_child_ou():
+    body = next(body for body in account_products(EDITS).values()
+                if provisioning(body)["AccountName"] == "acme-payments-prod")
+    assert provisioning(body)["ManagedOrganizationalUnit"] == {
+        "Fn::Sub": ["Payments (${OuId})", {"OuId": {"Fn::ImportValue": "acme-lz-OuCustomPaymentsId"}}]}
+
+
+def test_disabled_accounts_are_not_vended():
+    assert "acme-retail-prod" not in [provisioning(body)["AccountName"] for body in account_products(EDITS).values()]
+
+
+def test_edited_design_stays_within_the_scp_quota():
+    design = edited(EDITS)[0]
+    assert ScpQuotaRule().problems(GuardrailPlan.for_design(design, CATALOG)) == []

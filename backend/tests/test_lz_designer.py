@@ -104,3 +104,15 @@ def test_unknown_ou_name_raises():
     import pytest
     with pytest.raises(KeyError):
         design().ou_named("Nope")
+
+
+def test_questionnaire_accounts_are_fixed_and_workload_accounts_are_not():
+    fixed = {ou.name: [account.fixed for account in ou.accounts] for ou in design(infrastructure=["network", "cicd"]).walk()}
+    assert (fixed["Security"], fixed["Infrastructure"], fixed["Sandbox"], fixed["Automations"], fixed["PROD"]) == (
+        [True, True, True], [True], [True, True], [True], [False, False])
+
+
+def test_accounts_record_their_isolation_domain():
+    structure = design()
+    assert ([account.domain for account in structure.ou_named("PROD").accounts],
+            [account.domain for account in structure.ou_named("Security").accounts]) == (["prod", "prod"], [None] * 3)

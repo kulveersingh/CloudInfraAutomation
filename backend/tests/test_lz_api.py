@@ -1,4 +1,4 @@
-from tests.lz_factories import answers_dict
+from tests.lz_factories import account_op, add_account, add_ou, answers_dict
 
 ALEX = {"X-Actor": "alex", "X-Roles": "platform-admin"}
 RILEY = {"X-Actor": "riley", "X-Roles": "platform-admin"}
@@ -6,16 +6,30 @@ SAM = {"X-Actor": "sam", "X-Roles": "reviewer"}
 BASE = "/v1/admin/landing-zone"
 
 
-def propose(client, **overrides):
-    return client.post(f"{BASE}:propose", json=answers_dict(**overrides), headers=ALEX)
+def request(edits: list[dict] | None = None, **overrides) -> dict:
+    return {"answers": answers_dict(**overrides), "edits": edits or []}
 
 
-def create(client, headers=ALEX, **overrides):
-    return client.post(f"{BASE}/designs", json=answers_dict(**overrides), headers=headers)
+def propose(client, edits=None, **overrides):
+    return client.post(f"{BASE}:propose", json=request(edits, **overrides), headers=ALEX)
 
 
-def submitted(client) -> str:
-    design_id = create(client).json()["id"]
+def create(client, headers=ALEX, edits=None, **overrides):
+    return client.post(f"{BASE}/designs", json=request(edits, **overrides), headers=headers)
+
+
+def ou_named(ous: list[dict], name: str) -> dict:
+    for ou in ous:
+        if ou["name"] == name:
+            return ou
+        found = ou_named(ou["children"], name) if ou["children"] else None
+        if found:
+            return found
+    return {}
+
+
+def submitted(client, edits=None) -> str:
+    design_id = create(client, edits=edits).json()["id"]
     client.post(f"{BASE}/designs/{design_id}:submit", headers=ALEX)
     return design_id
 
@@ -45,7 +59,7 @@ def test_propose_includes_the_generated_files(client):
 
 def test_propose_names_accounts_after_registry_portfolios(client):
     prod = next(ou for ou in propose(client).json()["ous"] if ou["name"] == "PROD")
-    assert prod["accounts"] == ["acme-data-prod", "acme-payments-prod", "acme-retail-prod"]
+    assert [account["name"] for account in prod["accounts"]] == ["acme-data-prod", "acme-payments-prod", "acme-retail-prod"]
 
 
 def test_propose_rejects_invalid_answers(client):
@@ -53,7 +67,7 @@ def test_propose_rejects_invalid_answers(client):
 
 
 def test_propose_requires_a_platform_admin(client):
-    assert client.post(f"{BASE}:propose", json=answers_dict(), headers=SAM).status_code == 403
+    assert client.post(f"{BASE}:propose", json=request(), headers=SAM).status_code == 403
 
 
 # ---- designs and approval ----
@@ -191,3 +205,60 @@ def test_submit_refuses_a_design_with_problems(client, monkeypatch):
     design_id = create(client).json()["id"]
     response = client.post(f"{BASE}/designs/{design_id}:submit", headers=ALEX)
     assert (response.status_code, response.json()["detail"]) == (422, "Broken on purpose.")
+
+
+# ---- the OU tree editor ----
+
+PAYMENTS = add_ou("Payments")
+
+
+def test_propose_applies_the_edits(client):
+    assert [child["name"] for child in ou_named(propose(client, [PAYMENTS]).json()["ous"], "PROD")["children"]] == [
+        "Payments"]
+
+
+def test_propose_reports_edits_that_no_longer_fit(client):
+    assert propose(client, [add_ou("Acceptance", parent="uat")]).json()["problems"] == [
+        "Edit 1 (add OU 'Acceptance' under 'uat'): OU 'uat' does not exist."]
+
+
+def test_propose_rejects_unknown_edit_operations(client):
+    assert propose(client, [{"op": "explode"}]).status_code == 422
+
+
+def test_ous_describe_the_edits_they_allow(client):
+    prod = ou_named(propose(client).json()["ous"], "PROD")
+    assert (prod["custom"], prod["domain"], prod["allowed_edits"], prod["blocked_edits"]) == (
+        False, "prod", ["add_child", "add_account"], {})
+
+
+def test_non_empty_custom_ous_explain_why_they_cannot_be_removed(client):
+    payments = ou_named(propose(client, [PAYMENTS, add_account("cards-prod", "custom_payments")]).json()["ous"], "Payments")
+    assert (payments["custom"], payments["blocked_edits"]) == (
+        True, {"remove": "Move its accounts and child OUs to another OU first."})
+
+
+def test_accounts_describe_their_state_and_edits(client):
+    prod = ou_named(propose(client, [account_op("disable_account", "acme-retail-prod")]).json()["ous"], "PROD")
+    assert prod["accounts"][2] == {"name": "acme-retail-prod", "enabled": False, "added": False,
+                                   "allowed_edits": ["move", "enable"]}
+
+
+def test_create_stores_the_edits(client):
+    assert create(client, edits=[PAYMENTS]).json()["edits"] == [PAYMENTS]
+
+
+def test_get_design_applies_the_stored_edits(client):
+    design_id = create(client, edits=[PAYMENTS]).json()["id"]
+    detail = client.get(f"{BASE}/designs/{design_id}", headers=ALEX).json()
+    assert ou_named(detail["ous"], "Payments")["domain"] == "prod"
+
+
+def test_submit_refuses_edits_that_no_longer_fit(client):
+    design_id = create(client, edits=[add_ou("Acceptance", parent="uat")]).json()["id"]
+    assert client.post(f"{BASE}/designs/{design_id}:submit", headers=ALEX).status_code == 422
+
+
+def test_approval_does_not_create_disabled_accounts(client):
+    applied = approve(client, submitted(client, [account_op("disable_account", "acme-retail-prod")])).json()
+    assert ("acme-retail-prod" in applied["accounts"], "acme-payments-prod" in applied["accounts"]) == (False, True)

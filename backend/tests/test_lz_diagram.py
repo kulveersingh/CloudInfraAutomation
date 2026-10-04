@@ -2,7 +2,7 @@ from xml.etree import ElementTree
 
 from app.landing_zone.designer import LandingZoneDesigner
 from app.landing_zone.diagram import OuDiagramRenderer
-from tests.lz_factories import CATALOG, answers
+from tests.lz_factories import CATALOG, account_op, add_ou, answers, edited
 
 SVG = "{http://www.w3.org/2000/svg}"
 
@@ -44,3 +44,17 @@ def test_svg_has_foundation_and_environment_rows():
 def test_svg_shows_nested_compliance_ous():
     assert "PCI-PROD OU" in svg_texts(compliance=["PCI"])
 
+
+
+def test_disabled_accounts_are_marked_in_both_formats():
+    structure = edited([account_op("disable_account", "acme-retail-prod")])[0]
+    root = ElementTree.fromstring(OuDiagramRenderer().svg(structure))
+    texts = [element.text for element in root.iter(f"{SVG}text")]
+    assert ("acme-retail-prod (disabled)" in texts,
+            "acme-retail-prod (disabled)" in OuDiagramRenderer().mermaid(structure)) == (True, True)
+
+
+def test_root_level_custom_ous_are_drawn_with_the_isolated_environments():
+    structure = edited([add_ou("Data Lab", parent=None)])[0]
+    texts = [element.text for element in ElementTree.fromstring(OuDiagramRenderer().svg(structure)).iter(f"{SVG}text")]
+    assert texts.index("Data Lab OU") > texts.index("ENVIRONMENTS (ISOLATED)")
