@@ -17,6 +17,7 @@ class LambdaFunctionBlock(Block, RuntimePrincipal, InvocableFunction):
     category = "Compute"
     multi_region = "replicated"
     logical_id_suffix = "Function"
+    cloudformation_types = ("AWS::Lambda::Function",)
 
     def __init__(self, spec, request):
         super().__init__(spec, request)

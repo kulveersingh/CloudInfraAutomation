@@ -15,6 +15,7 @@ class Block(ABC):
     category: ClassVar[str]
     multi_region: ClassVar[str]
     logical_id_suffix: ClassVar[str] = ""
+    cloudformation_types: ClassVar[tuple[str, ...]] = ()
 
     def __init__(self, spec: ResourceSpec, request: ProjectRequest):
         self.spec = spec

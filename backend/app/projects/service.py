@@ -10,7 +10,7 @@ from app.provisioning.topology import TopologyFactory
 from app.registry.service import RegistryService
 from app.synth.binders.registry import BinderRegistry
 from app.synth.blocks.registry import BlockRegistry
-from app.synth.lint import TemplateLinter
+from app.synth.lint import LintError, TemplateLinter
 from app.synth.render import RepositoryBundle
 from app.synth.request import ProjectRequest
 from app.synth.synthesizer import TemplateSynthesizer
@@ -50,6 +50,7 @@ class ProjectService:
 
     def create(self, request: ProjectRequest, idempotency_key: str) -> models.Job:
         self._validate(request)
+        self._reject_lint_findings(self._synthesizer.synthesize(request))
         if self._queue.by_request_id(idempotency_key) is None:
             self._register(request)
         return self._queue.enqueue(request.project_name, idempotency_key, request.model_dump(mode="json"))
@@ -67,6 +68,12 @@ class ProjectService:
         self._registry.validate_ownership(request.ownership.portfolio_id, request.ownership.product_id)
         self._registry.validate_environments(request.environments)
         self._registry.validate_regions(request.resilience)
+
+    def _reject_lint_findings(self, template: dict) -> None:
+        try:
+            self._linter.assert_clean(template)
+        except LintError as error:
+            raise ValidationFailedError(str(error)) from error
 
     def _targets(self, request: ProjectRequest) -> dict:
         accounts = self._registry.target_accounts(request.ownership.portfolio_id, request.environments)

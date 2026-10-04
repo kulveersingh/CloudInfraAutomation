@@ -14,6 +14,7 @@ class S3BucketBlock(Block, AccessTarget, NotificationSource):
     category = "Storage"
     multi_region = "replicated"
     logical_id_suffix = "Bucket"
+    cloudformation_types = ("AWS::S3::Bucket",)
     notification_principal = "s3.amazonaws.com"
 
     OBJECT_ACTIONS = AccessActions(read=["s3:GetObject"], write=["s3:PutObject", "s3:AbortMultipartUpload"])

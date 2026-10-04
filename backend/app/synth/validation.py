@@ -29,13 +29,12 @@ class UniqueResourceIdsRule(RequestRule):
         return [f"Duplicate resource id '{resource_id}'." for resource_id, total in counts.items() if total > 1]
 
 
-class KnownResourceTypesRule(RequestRule):
+class ResourceTypeRule(RequestRule):
     def __init__(self, blocks: BlockRegistry):
         self._blocks = blocks
 
     def messages(self, request):
-        return [f"Unknown resource type '{resource.type}' for '{resource.id}'."
-                for resource in request.resources if not self._blocks.has_type(resource.type)]
+        return [message for resource in request.resources for message in self._blocks.problems_for(resource)]
 
 
 class ConnectionEndpointsRule(RequestRule):
@@ -110,7 +109,7 @@ class RequestValidator:
 
     @classmethod
     def default(cls, blocks: BlockRegistry, binders: BinderRegistry) -> "RequestValidator":
-        return cls([UniqueResourceIdsRule(), KnownResourceTypesRule(blocks), ConnectionEndpointsRule(),
+        return cls([UniqueResourceIdsRule(), ResourceTypeRule(blocks), ConnectionEndpointsRule(),
                     ConnectionCompatibilityRule(blocks, binders), ResilienceRegionsRule(), BlockNamingRule(blocks),
                     RecursiveInvocationRule()])
 

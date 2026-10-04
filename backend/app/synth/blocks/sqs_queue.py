@@ -10,6 +10,7 @@ class SqsQueueBlock(Block, AccessTarget):
     category = "Integration"
     multi_region = "regional"
     logical_id_suffix = "Queue"
+    cloudformation_types = ("AWS::SQS::Queue",)
 
     ACTIONS = AccessActions(
         read=["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:ChangeMessageVisibility", "sqs:GetQueueAttributes"],

@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from app.api.container import ServiceContainer
 from app.errors import BadRequestError, NotFoundError
 from app.registry.service import CostCenterChange
+from app.synth.blocks.cloudformation import SEARCH_LIMIT, CloudFormationSchemaCatalog
 from app.synth.catalog import ServiceCatalog
 from app.synth.request import ProjectRequest
 
@@ -28,13 +29,18 @@ class HealthRouter:
 
 
 class CatalogRouter:
-    def __init__(self, catalog: ServiceCatalog):
+    def __init__(self, catalog: ServiceCatalog, cloudformation: CloudFormationSchemaCatalog):
         self._catalog = catalog
+        self._cloudformation = cloudformation
         self.router = APIRouter(prefix="/v1", tags=["catalog"])
         self.router.add_api_route("/catalog", self.catalog, methods=["GET"])
+        self.router.add_api_route("/catalog/cloudformation", self.cloudformation_types, methods=["GET"])
 
     def catalog(self) -> list[dict]:
         return self._catalog.entries()
+
+    def cloudformation_types(self, search: str = "", limit: int = SEARCH_LIMIT) -> list[dict]:
+        return self._cloudformation.search(search, limit)
 
 
 class RegistryRouter:

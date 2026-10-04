@@ -7,6 +7,7 @@ from app.api.routers import CatalogRouter, HealthRouter, ProjectRouter, Registry
 from app.config import Settings
 from app.db.database import Database
 from app.errors import DomainError
+from app.synth.blocks.cloudformation import CloudFormationSchemaCatalog
 from app.synth.blocks.registry import BlockRegistry
 from app.synth.catalog import ServiceCatalog
 from app.synth.synthesizer import ENGINE_VERSION
@@ -37,5 +38,5 @@ class ApplicationFactory:
         return app
 
     def _routers(self) -> list:
-        return [HealthRouter(), CatalogRouter(ServiceCatalog(BlockRegistry.default())), RegistryRouter(),
-                ProjectRouter()]
+        catalog = CatalogRouter(ServiceCatalog(BlockRegistry.default()), CloudFormationSchemaCatalog.bundled())
+        return [HealthRouter(), catalog, RegistryRouter(), ProjectRouter()]

@@ -63,6 +63,7 @@ class DynamoDbTableBlock(Block, AccessTarget):
     category = "Databases"
     multi_region = "global"
     logical_id_suffix = "Table"
+    cloudformation_types = ("AWS::DynamoDB::Table", "AWS::DynamoDB::GlobalTable")
 
     ACTIONS = AccessActions(
         read=["dynamodb:GetItem", "dynamodb:Query", "dynamodb:BatchGetItem"],
