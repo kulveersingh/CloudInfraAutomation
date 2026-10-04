@@ -7,6 +7,7 @@ import { ProjectDraft } from "../../wizard/ProjectDraft";
 import { JobProgress } from "./JobProgress";
 import { ConnectionsStep } from "./steps/ConnectionsStep";
 import { EnvironmentsStep } from "./steps/EnvironmentsStep";
+import { NetworkStep } from "./steps/NetworkStep";
 import { OwnershipStep } from "./steps/OwnershipStep";
 import { PreviewStep } from "./steps/PreviewStep";
 import { ResilienceStep } from "./steps/ResilienceStep";
@@ -24,13 +25,14 @@ const STEPS: Array<{ label: string; render: (context: WizardContext) => ReactNod
   { label: "Services", render: (context) => <ServicesStep {...context} /> },
   { label: "Connections", render: (context) => <ConnectionsStep {...context} /> },
   { label: "Environments", render: (context) => <EnvironmentsStep {...context} /> },
+  { label: "Network", render: (context) => <NetworkStep {...context} /> },
   { label: "Preview", render: (context) => <PreviewStep {...context} /> },
 ];
 
 async function loadReferenceData(api: PlatformApiPort): Promise<ReferenceData> {
-  const [portfolios, environments, regions, catalog] = await Promise.all([
-    api.orgRegistry(), api.environments(), api.regions(), api.catalog()]);
-  return { portfolios, environments, regions, catalog };
+  const [portfolios, environments, regions, catalog, networkSettings] = await Promise.all([
+    api.orgRegistry(), api.environments(), api.regions(), api.catalog(), api.networkSettings()]);
+  return { portfolios, environments, regions, catalog, networkSettings };
 }
 
 interface NewProjectPageProps {
@@ -41,8 +43,6 @@ interface NewProjectPageProps {
 export function NewProjectPage({ newKey = () => crypto.randomUUID(), pollMs = 2000 }: NewProjectPageProps) {
   const api = useApi();
   const reference = useLoad(() => loadReferenceData(api));
-  const [draft, setDraft] = useState(ProjectDraft.initial());
-  const [step, setStep] = useState(0);
   const [jobId, setJobId] = useState<string>();
 
   return (
@@ -55,16 +55,22 @@ export function NewProjectPage({ newKey = () => crypto.randomUUID(), pollMs = 20
       </header>
       <ErrorAlert message={reference.error} />
       {jobId && <JobProgress jobId={jobId} pollMs={pollMs} />}
-      {!jobId && reference.data && (
-        <Wizard step={step} onStep={setStep} context={{
-          draft, onChange: setDraft, reference: reference.data, newKey, onCreated: setJobId,
-        }} />
-      )}
+      {!jobId && reference.data && <Wizard reference={reference.data} newKey={newKey} onCreated={setJobId} />}
     </section>
   );
 }
 
-function Wizard({ step, onStep, context }: { step: number; onStep: (step: number) => void; context: WizardContext }) {
+interface WizardProps {
+  reference: ReferenceData;
+  newKey: () => string;
+  onCreated: (jobId: string) => void;
+}
+
+function Wizard({ reference, newKey, onCreated }: WizardProps) {
+  const [draft, setDraft] = useState(
+    () => ProjectDraft.initial().withAttachCompute(reference.networkSettings.attach_compute_by_default));
+  const [step, onStep] = useState(0);
+  const context: WizardContext = { draft, onChange: setDraft, reference, newKey, onCreated };
   const last = STEPS.length - 1;
   return (
     <>

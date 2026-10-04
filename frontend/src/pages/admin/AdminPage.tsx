@@ -1,10 +1,12 @@
 import { useState, type ReactNode } from "react";
 import { CostCentersPanel } from "./CostCentersPanel";
+import { NetworksPanel } from "./NetworksPanel";
 import { RegionsPanel } from "./RegionsPanel";
 
 const TABS: Array<{ id: string; label: string; panel: () => ReactNode }> = [
   { id: "cost-centers", label: "Cost centers", panel: () => <CostCentersPanel /> },
   { id: "regions", label: "Regions", panel: () => <RegionsPanel /> },
+  { id: "networks", label: "Networks", panel: () => <NetworksPanel /> },
 ];
 
 export function AdminPage() {

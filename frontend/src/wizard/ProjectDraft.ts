@@ -3,6 +3,7 @@ import type { Classification, ConnectionRequest, ProjectRequest, ResilienceMode,
 const NAME_PATTERN = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
 const NAME_LENGTH = { min: 3, max: 30 };
 const ID_LENGTH = 10;
+const MULTI_REGION_ENVIRONMENTS = new Set(["stage", "prod"]);
 
 export interface DraftResource {
   id: string;
@@ -21,6 +22,8 @@ export interface DraftValues {
   environments: string[];
   resources: DraftResource[];
   connections: ConnectionRequest[];
+  attachCompute: boolean;
+  networkSelections: Record<string, string>;
 }
 
 /** Immutable model of the wizard: every change returns a new draft; toRequest() builds the API payload. */
@@ -31,6 +34,7 @@ export class ProjectDraft {
     return new ProjectDraft({
       name: "", portfolioId: "", productId: "", classification: "internal", mode: "single",
       primaryRegion: "us-east-1", secondaryRegion: "us-east-2", environments: [], resources: [], connections: [],
+      attachCompute: true, networkSelections: {},
     });
   }
 
@@ -79,6 +83,19 @@ export class ProjectDraft {
     return this.with({ connections: this.values.connections.filter((_, position) => position !== index) });
   }
 
+  withAttachCompute(attachCompute: boolean) { return this.with({ attachCompute }); }
+
+  withNetworkSelection(environmentId: string, region: string, networkId: string) {
+    return this.with({ networkSelections: { ...this.values.networkSelections, [`${environmentId}:${region}`]: networkId } });
+  }
+
+  /** Mirrors the platform topology: DR/HA puts QA/STAGE and PROD in both regions, everything else in the primary. */
+  regionsFor(environmentId: string): string[] {
+    const { mode, primaryRegion, secondaryRegion } = this.values;
+    return mode !== "single" && MULTI_REGION_ENVIRONMENTS.has(environmentId)
+      ? [primaryRegion, secondaryRegion] : [primaryRegion];
+  }
+
   problems(): string[] {
     const { productId, environments, resources, mode, primaryRegion, secondaryRegion } = this.values;
     const checks: Array<[boolean, string]> = [
@@ -105,6 +122,7 @@ export class ProjectDraft {
       environments: values.environments,
       resources: values.resources.map(toResourceRequest),
       connections: values.connections,
+      network: { attach_compute: values.attachCompute, selections: values.networkSelections },
     };
   }
 

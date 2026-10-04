@@ -1,4 +1,4 @@
-import type { CatalogEntry, EnvironmentInfo, Portfolio, RegionInfo } from "../../../api/types";
+import type { CatalogEntry, EnvironmentInfo, NetworkSettings, Portfolio, RegionInfo } from "../../../api/types";
 import type { ProjectDraft } from "../../../wizard/ProjectDraft";
 
 export interface ReferenceData {
@@ -6,6 +6,7 @@ export interface ReferenceData {
   environments: EnvironmentInfo[];
   regions: RegionInfo[];
   catalog: CatalogEntry[];
+  networkSettings: NetworkSettings;
 }
 
 export interface StepProps {

@@ -49,10 +49,12 @@ function PreviewDetails({ result }: { result: PreviewResult }) {
       <span className="label">Target accounts</span>
       <div className="tbl-wrap">
         <table>
-          <thead><tr><th>Environment</th><th>Account</th><th>Regions</th></tr></thead>
+          <thead><tr><th>Environment</th><th>Account</th><th>Regions</th><th>Network</th></tr></thead>
           <tbody>
             {Object.entries(result.targets).map(([environment, target]) => (
-              <tr key={environment}><td>{environment}</td><td className="num">{target.account_id}</td><td className="mono">{target.regions.join(" · ")}</td></tr>
+              <tr key={environment}><td>{environment}</td><td className="num">{target.account_id}</td><td className="mono">{target.regions.join(" · ")}</td>
+                <td className="mono">{Object.entries(target.networks).map(([region, network]) => (
+                  <div key={region}>{`${region}: ${network.vpc_id}`}</div>))}</td></tr>
             ))}
           </tbody>
         </table>

@@ -1,7 +1,7 @@
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { fakeApi } from "../../../test/fakes";
+import { fakeApi, network } from "../../../test/fakes";
 import { renderWithApi } from "../../../test/render";
 import { ProjectDraft } from "../../../wizard/ProjectDraft";
 import { NetworkStep } from "./NetworkStep";
@@ -32,6 +32,13 @@ describe("NetworkStep", () => {
   it("pre-selects the platform default network", async () => {
     renderStep();
     expect(await screen.findByLabelText("Network for prod in us-east-1")).toHaveValue("net-prod-use1");
+  });
+
+  it("falls back to the first network when the platform has no default", async () => {
+    const options = [{ environment: "prod", region: "us-east-1", account_id: "555555555555", default_network_id: null,
+      networks: [network({ id: "net-a", is_default: false }), network({ id: "net-b", is_default: false })] }];
+    renderStep(draftFor("prod"), fakeApi({ networkOptions: vi.fn().mockResolvedValue(options) }));
+    expect(await screen.findByLabelText("Network for prod in us-east-1")).toHaveValue("net-a");
   });
 
   it("shows the explicit choice from the draft", async () => {
