@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { App } from "./App";
@@ -12,7 +12,7 @@ describe("App", () => {
 
   it("navigates to the wizard", async () => {
     renderWithApi(<App />);
-    await userEvent.click(screen.getByRole("button", { name: "New project" }));
+    await userEvent.click(within(screen.getByLabelText("Main navigation")).getByRole("button", { name: "New project" }));
     expect(await screen.findByRole("heading", { name: "New project" })).toBeInTheDocument();
   });
 

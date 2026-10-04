@@ -39,6 +39,19 @@ describe("ProjectDraft", () => {
     expect([draft.values.resources.length, draft.values.connections.length]).toEqual([1, 0]);
   });
 
+  it("removing a connection target removes the connection but keeps unrelated ones", () => {
+    const draft = ready().withResource("lambda.function").withResource("sqs.queue")
+      .withConnection({ kind: "iam.access", source: "function", target: "bucket", access: "read" })
+      .withConnection({ kind: "iam.access", source: "function", target: "queue", access: "write" })
+      .withoutResource("bucket");
+    expect(draft.values.connections.map((connection) => connection.target)).toEqual(["queue"]);
+  });
+
+  it("setting properties leaves other resources unchanged", () => {
+    const draft = ready().withResource("AWS::SNS::Topic").withResourceProperties("topic", { DisplayName: "A" });
+    expect(draft.values.resources[0].properties).toEqual({});
+  });
+
   it("stores properties for a resource", () => {
     const draft = ready().withResourceProperties("bucket", { Foo: 1 });
     expect(draft.values.resources[0].properties).toEqual({ Foo: 1 });

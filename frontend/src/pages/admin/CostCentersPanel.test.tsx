@@ -2,7 +2,7 @@ import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../api/PlatformApi";
-import { fakeApi } from "../../test/fakes";
+import { COST_CENTERS, fakeApi } from "../../test/fakes";
 import { renderWithApi } from "../../test/render";
 import { CostCentersPanel } from "./CostCentersPanel";
 
@@ -52,6 +52,13 @@ describe("CostCentersPanel", () => {
     renderWithApi(<CostCentersPanel />, api);
     await userEvent.click(await screen.findByRole("button", { name: "Save cost centers" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Invalid cost center");
+  });
+
+  it("shows an empty field for a portfolio that inherits the organization default", async () => {
+    const inheriting = { ...COST_CENTERS, portfolios: [{ ...COST_CENTERS.portfolios[0], cost_center: null,
+      effective: { value: "CC-1000", source: "organization" } }] };
+    renderWithApi(<CostCentersPanel />, fakeApi({ costCenters: vi.fn().mockResolvedValue(inheriting) }));
+    expect(await screen.findByLabelText("Cost center for Payments")).toHaveValue("");
   });
 
   it("shows loading errors", async () => {

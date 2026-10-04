@@ -35,6 +35,16 @@ describe("JobProgress", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("needs attention");
   });
 
+  it("stops polling after the page is left", async () => {
+    let finish: (value: ReturnType<typeof job>) => void = () => {};
+    const poll = vi.fn().mockImplementation(() => new Promise((done) => { finish = done; }));
+    const { unmount } = renderWithApi(<JobProgress jobId="job-1" pollMs={1} />, fakeApi({ job: poll }));
+    unmount();
+    finish(job("running"));
+    await new Promise((done) => setTimeout(done, 20));
+    expect(poll).toHaveBeenCalledTimes(1);
+  });
+
   it("shows polling errors", async () => {
     renderWithApi(<JobProgress jobId="job-1" pollMs={1} />, fakeApi({ job: vi.fn().mockRejectedValue(new Error("lost")) }));
     expect(await screen.findByRole("alert")).toHaveTextContent("lost");
