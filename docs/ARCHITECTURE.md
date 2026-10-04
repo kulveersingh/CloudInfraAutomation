@@ -1,10 +1,11 @@
 # CloudInfraAutomation — Architecture
 
-**Status:** Draft v2.16 for review. No code is written until this design is approved.
+**Status:** v2.17, approved; implementation in progress. No code is written until this design is approved.
 **Date:** 2026-10-03
 **Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9). Every solution is **DR-capable**: it can run in one region, as DR (primary active, secondary standby) or as an HA pair (both active), with **any region pair chosen in the UI** (default us-east-1 / us-east-2) (§10).
 
 **Changes in v2:** added the org registry and tagging strategy (§4); permissions based on tags (§4.5–4.8); multi-account, five-environment model (§5); promotion pipeline (§8). Payload, provisioning, security and scaling sections are updated to match.
+**Changes in v2.17:** implementation started. The control plane runs on ECS Fargate with Aurora PostgreSQL (§2.2a), and the same containers run locally on Docker Desktop.
 **Changes in v2.16:** cost centers are admin-configurable for the whole organization (§4.2.1): an org default, then per portfolio, per product and optional project overrides, with inheritance, validation, audit and automatic re-tagging.
 **Changes in v2.15:** Appendix A (§19): a complete set of approval and workflow diagrams (landscape, release in default mode, release decision flow, override, sharing routing, access request, infrastructure change request, configuration change, DR failover, recertification, application release) plus an approval summary table.
 **Changes in v2.14:** all sharing is granted through a sharing approval workflow (§4.11.6). Covers share offers, access requests, agreements, renewal and revocation, with risk-based routing, optional auto-approval within an approved tag offer, recertification and audit.
@@ -226,6 +227,15 @@ sequenceDiagram
   SF-->>UI: repo URL, run URL, status for each environment
 ```
 
+### 2.2a Implementation decision: control plane on ECS + Aurora PostgreSQL
+
+**Decided at implementation start:** the platform's own control plane runs on **ECS Fargate** (api, worker and ui services) with **Aurora PostgreSQL Serverless v2** as its database, deployed by `infra/platform/platform.yaml`. This replaces DynamoDB and Step Functions for the control plane:
+- the job queue and saga state live in PostgreSQL (`FOR UPDATE SKIP LOCKED`);
+- the worker service runs provisioning steps with undo-on-failure;
+- registry, cost centers, jobs and audit are relational tables, migrated with Alembic.
+
+The same containers run locally with Docker Desktop (PostgreSQL 16) for development and testing. Generated customer infrastructure is unaffected: it still uses any AWS service via CloudFormation.
+
 ### 2.3 Component responsibilities
 
 | Component | Responsibility | Scaling |
@@ -236,7 +246,7 @@ sequenceDiagram
 | **Environment config** | Admin-managed list of environments (name, order, tier, protection and guardrail profiles) and **account bindings** (environment + portfolio/product + region → AWS account ID). Validates and onboards accounts before they can be used (§5.5). | DynamoDB, versioned, audited |
 | **Synthesis engine** | Payload → template, starter code, workflow, per-environment parameter files. Pure function with no I/O. | Runs in-process |
 | **Validation gate** | Schema, connection rules, cfn-lint, cfn-guard (rules differ per environment), IAM least-privilege + tag linter. | Runs in-process |
-| **Orchestrator** | Provisioning steps across GitHub and up to five accounts, with retries and undo steps. | Step Functions Standard |
+| **Orchestrator** | Provisioning steps across GitHub and up to five accounts, with retries and undo steps. | Worker ECS service + PostgreSQL job queue (§2.2a) |
 | **Org guardrails** | SCPs and Tag Policies attached to OUs, enforcing the tag rules no matter which tool makes the call. | AWS Organizations |
 | **StackSets** | Deploy the *account bootstrap* (OIDC provider, shared tag-based policies, provisioner role) to every workload account automatically, including new ones. | Service-managed StackSets |
 | **Artifact bucket** | One per region in Shared Services. Workload accounts can read only their project's prefix. | S3 |
