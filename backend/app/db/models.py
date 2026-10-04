@@ -1,0 +1,128 @@
+import uuid
+from datetime import UTC, datetime
+
+from sqlalchemy import JSON, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+JsonDocument = JSON().with_variant(JSONB(), "postgresql")
+
+
+def utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class OrganizationSettings(Base):
+    __tablename__ = "organization_settings"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    default_cost_center: Mapped[str] = mapped_column(String(32))
+    cost_center_pattern: Mapped[str] = mapped_column(String(128))
+
+
+class Portfolio(Base):
+    __tablename__ = "portfolios"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str] = mapped_column(String(128))
+    cost_center: Mapped[str | None] = mapped_column(String(32))
+    products: Mapped[list["Product"]] = relationship(order_by="Product.id", lazy="selectin")
+
+
+class Product(Base):
+    __tablename__ = "products"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    portfolio_id: Mapped[str] = mapped_column(ForeignKey("portfolios.id"))
+    name: Mapped[str] = mapped_column(String(128))
+    kind: Mapped[str] = mapped_column(String(16))
+    cost_center: Mapped[str | None] = mapped_column(String(32))
+    classification_ceiling: Mapped[str] = mapped_column(String(16))
+
+
+class CostCenterOverride(Base):
+    __tablename__ = "cost_center_overrides"
+
+    project_name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    cost_center: Mapped[str] = mapped_column(String(32))
+    reason: Mapped[str] = mapped_column(Text)
+    approved_by: Mapped[str] = mapped_column(String(128))
+
+
+class Environment(Base):
+    __tablename__ = "environments"
+
+    id: Mapped[str] = mapped_column(String(16), primary_key=True)
+    name: Mapped[str] = mapped_column(String(64))
+    tier: Mapped[str] = mapped_column(String(16))
+    position: Mapped[int]
+    requires_approval: Mapped[bool]
+
+
+class Region(Base):
+    __tablename__ = "regions"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    name: Mapped[str] = mapped_column(String(128))
+    enabled: Mapped[bool]
+
+
+class AccountBinding(Base):
+    __tablename__ = "account_bindings"
+    __table_args__ = (UniqueConstraint("environment_id", "portfolio_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    environment_id: Mapped[str] = mapped_column(ForeignKey("environments.id"))
+    portfolio_id: Mapped[str] = mapped_column(ForeignKey("portfolios.id"))
+    account_id: Mapped[str] = mapped_column(String(12), unique=True)
+
+
+class Project(Base):
+    __tablename__ = "projects"
+
+    name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    portfolio_id: Mapped[str] = mapped_column(String(64))
+    product_id: Mapped[str] = mapped_column(String(64))
+    resilience_mode: Mapped[str] = mapped_column(String(16))
+    status: Mapped[str] = mapped_column(String(32))
+    request: Mapped[dict] = mapped_column(JsonDocument)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now)
+
+
+class Job(Base):
+    __tablename__ = "jobs"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    project_name: Mapped[str] = mapped_column(String(64))
+    request_id: Mapped[str] = mapped_column(String(128), unique=True)
+    payload: Mapped[dict] = mapped_column(JsonDocument)
+    state: Mapped[str] = mapped_column(String(32))
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now)
+
+
+class JobStep(Base):
+    __tablename__ = "job_steps"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("jobs.id"))
+    sequence: Mapped[int]
+    name: Mapped[str] = mapped_column(String(128))
+    state: Mapped[str] = mapped_column(String(32))
+    detail: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(default=utc_now)
+
+
+class AuditEntry(Base):
+    __tablename__ = "audit_entries"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    actor: Mapped[str] = mapped_column(String(128))
+    action: Mapped[str] = mapped_column(String(128))
+    details: Mapped[dict] = mapped_column(JsonDocument)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now)
