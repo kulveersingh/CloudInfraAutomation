@@ -2,6 +2,7 @@ from sqlalchemy.orm import Session
 
 from app.db import models
 from app.errors import ConflictError, ValidationFailedError
+from app.networks.service import NetworkService
 from app.projects.repository import ProjectRepository
 from app.projects.tags import TagSet
 from app.provisioning.queue import JobQueue
@@ -22,7 +23,7 @@ class ProjectService:
 
     def __init__(self, registry: RegistryService, synthesizer: TemplateSynthesizer, validator: RequestValidator,
                  linter: TemplateLinter, bundle: RepositoryBundle, topologies: TopologyFactory, queue: JobQueue,
-                 projects: ProjectRepository):
+                 projects: ProjectRepository, networks: NetworkService):
         self._registry = registry
         self._synthesizer = synthesizer
         self._validator = validator
@@ -31,13 +32,15 @@ class ProjectService:
         self._topologies = topologies
         self._queue = queue
         self._projects = projects
+        self._networks = networks
 
     @classmethod
     def for_session(cls, session: Session) -> "ProjectService":
         blocks, binders = BlockRegistry.default(), BinderRegistry.default()
         return cls(RegistryService.for_session(session), TemplateSynthesizer(blocks, binders),
                    RequestValidator.default(blocks, binders), TemplateLinter.default(), RepositoryBundle.default(),
-                   TopologyFactory.default(), JobQueue(session), ProjectRepository(session))
+                   TopologyFactory.default(), JobQueue(session), ProjectRepository(session),
+                   NetworkService.for_session(session))
 
     def preview(self, request: ProjectRequest) -> dict:
         self._validate(request)
@@ -50,6 +53,7 @@ class ProjectService:
 
     def create(self, request: ProjectRequest, idempotency_key: str) -> models.Job:
         self._validate(request)
+        self._targets(request)
         self._reject_lint_findings(self._synthesizer.synthesize(request))
         if self._queue.by_request_id(idempotency_key) is None:
             self._register(request)
@@ -78,8 +82,15 @@ class ProjectService:
     def _targets(self, request: ProjectRequest) -> dict:
         accounts = self._registry.target_accounts(request.ownership.portfolio_id, request.environments)
         topology = self._topologies.for_resilience(request.resilience)
-        return {environment: {"account_id": account, "regions": topology.regions_for(environment)}
+        networks = self._networks.resolve(request, topology, accounts)
+        return {environment: {"account_id": account, "regions": topology.regions_for(environment),
+                              "networks": self._networks_for(environment, networks)}
                 for environment, account in accounts.items()}
+
+    def _networks_for(self, environment: str, networks: dict[tuple[str, str], dict]) -> dict:
+        return {region: {"network_id": network["id"], "vpc_id": network["vpc_id"],
+                         "subnet_ids": network["private_subnet_ids"]}
+                for (network_environment, region), network in networks.items() if network_environment == environment}
 
     def _register(self, request: ProjectRequest) -> None:
         if self._projects.get(request.project_name) is not None:

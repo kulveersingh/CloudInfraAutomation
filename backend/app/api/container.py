@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.adapters.factory import AdapterFactory
 from app.config import Settings
+from app.networks.service import NetworkService
 from app.projects.service import ProjectService
 from app.provisioning.queue import JobQueue
 from app.registry.service import RegistryService
@@ -18,6 +19,7 @@ class ServiceContainer:
         self.registry = RegistryService.for_session(session)
         self.projects = ProjectService.for_session(session)
         self.jobs = JobQueue(session)
+        self.networks = NetworkService.for_session(session)
         self.releases = ReleaseService.for_session(session, AdapterFactory().release_executor(settings))
 
     @classmethod

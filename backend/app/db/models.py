@@ -1,7 +1,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import JSON, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import JSON, ForeignKey, String, Text, UniqueConstraint, true
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -22,6 +22,7 @@ class OrganizationSettings(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     default_cost_center: Mapped[str] = mapped_column(String(32))
     cost_center_pattern: Mapped[str] = mapped_column(String(128))
+    attach_compute_to_vpc: Mapped[bool] = mapped_column(default=True, server_default=true())
 
 
 class Portfolio(Base):
@@ -156,3 +157,19 @@ class ReleaseDecision(Base):
     kind: Mapped[str] = mapped_column(String(32))
     comment: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(default=utc_now)
+
+
+class Network(Base):
+    """An organization network a platform engineer registered for one account and region."""
+
+    __tablename__ = "networks"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str] = mapped_column(String(128))
+    account_id: Mapped[str] = mapped_column(String(12), index=True)
+    region: Mapped[str] = mapped_column(String(32))
+    vpc_id: Mapped[str] = mapped_column(String(32))
+    cidr: Mapped[str] = mapped_column(String(43))
+    private_subnet_ids: Mapped[list] = mapped_column(JsonDocument)
+    security_group_ids: Mapped[list] = mapped_column(JsonDocument)
+    is_default: Mapped[bool] = mapped_column(default=False)

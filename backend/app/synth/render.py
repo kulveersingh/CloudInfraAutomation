@@ -76,15 +76,22 @@ jobs:
           --role-arn "${{{{ vars.CFN_EXEC_ROLE_ARN }}}}" --capabilities CAPABILITY_IAM --no-fail-on-empty-changeset
           --parameter-overrides ProjectName="${{{{ vars.PROJECT_NAME }}}}"
           EnvironmentName="${{{{ vars.ENVIRONMENT_NAME }}}}" ResilienceMode="${{{{ vars.RESILIENCE_MODE }}}}"
-          RegionRole={role} ActivationState={activation}{code}
+          RegionRole={role} ActivationState={activation}{overrides}
 """
+    NETWORK_OVERRIDES = (' VpcId="${{{{ vars.VPC_ID{suffix} }}}}" PrivateSubnetIds="${{{{ vars.PRIVATE_SUBNET_IDS{suffix} }}}}"'
+                         ' OrgSecurityGroupIds="${{{{ vars.ORG_SECURITY_GROUP_IDS{suffix} }}}}"'
+                         ' OrgPrivateCidr="${{{{ vars.ORG_PRIVATE_CIDR{suffix} }}}}"')
     CODE_OVERRIDES = (' CodeS3Bucket="${{ vars.ARTIFACT_BUCKET }}"'
                       ' CodeS3Key="bootstrap/${{ vars.PROJECT_NAME }}.zip"')
 
     def render(self, request, template):
-        code = self.CODE_OVERRIDES if "CodeS3Bucket" in template.get("Parameters", {}) else ""
-        steps = [self._step("primary", "${{ vars.AWS_PRIMARY_REGION }}", "primary", "active", code)]
-        steps += [self._step("secondary", "${{ vars.AWS_SECONDARY_REGION }}", "secondary", activation, code)
+        parameters = template.get("Parameters", {})
+        code = self.CODE_OVERRIDES if "CodeS3Bucket" in parameters else ""
+        networked = "VpcId" in parameters
+        steps = [self._step("primary", "${{ vars.AWS_PRIMARY_REGION }}", "primary", "active",
+                            code + self._network(networked, ""))]
+        steps += [self._step("secondary", "${{ vars.AWS_SECONDARY_REGION }}", "secondary", activation,
+                             code + self._network(networked, "_SECONDARY"))
                   for activation in self._secondary_activations(request)]
         return {".github/workflows/deploy.yml": self.HEADER + "".join(steps)}
 
@@ -92,8 +99,12 @@ jobs:
         activation = SECONDARY_ACTIVATION.get(request.resilience.mode)
         return [activation] if activation else []
 
-    def _step(self, label: str, region: str, role: str, activation: str, code: str) -> str:
-        return self.DEPLOY_STEP.format(label=label, region=region, role=role, activation=activation, code=code)
+    def _network(self, networked: bool, suffix: str) -> str:
+        return self.NETWORK_OVERRIDES.format(suffix=suffix) if networked else ""
+
+    def _step(self, label: str, region: str, role: str, activation: str, overrides: str) -> str:
+        return self.DEPLOY_STEP.format(label=label, region=region, role=role, activation=activation,
+                                       overrides=overrides)
 
 
 class ReadmeRenderer(FileRenderer):

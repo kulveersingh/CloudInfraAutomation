@@ -33,6 +33,24 @@ class StackFoundation:
             template.add_condition(name, body)
 
 
+class NetworkParameters:
+    """Typed parameters (shown as dropdowns in the CloudFormation console) for the organization network."""
+
+    PARAMETERS: ClassVar[dict[str, dict]] = {
+        "VpcId": {"Type": "AWS::EC2::VPC::Id", "Description": "Organization VPC for this account and region"},
+        "PrivateSubnetIds": {"Type": "List<AWS::EC2::Subnet::Id>", "Description": "Private subnets (two or more AZs)"},
+        "OrgSecurityGroupIds": {"Type": "List<AWS::EC2::SecurityGroup::Id>",
+                                "Description": "Organization security groups attached to all compute"},
+        "OrgPrivateCidr": {"Type": "String", "Default": "10.0.0.0/8",
+                           "AllowedPattern": r"^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$",
+                           "Description": "Private range reachable from compute"},
+    }
+
+    def apply(self, template: Template) -> None:
+        for name, body in self.PARAMETERS.items():
+            template.add_parameter(name, body)
+
+
 class ContractParameter:
     """Publishes the infrastructure contract to SSM so application repos can discover resources."""
 
@@ -70,6 +88,8 @@ class TemplateSynthesizer:
         self._bind_connections(request, blocks, template)
         for block in blocks.values():
             self._emit(block, template)
+        if any(block.uses_network for block in blocks.values()):
+            NetworkParameters().apply(template)
         ContractParameter(blocks).apply(template)
         return template.to_dict()
 

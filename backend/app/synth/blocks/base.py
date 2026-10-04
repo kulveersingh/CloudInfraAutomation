@@ -30,6 +30,10 @@ class Block(ABC):
     def naming_problems(cls, project_name: str, resource_id: str) -> list[str]:
         return []
 
+    @property
+    def uses_network(self) -> bool:
+        return False
+
     def required_parameters(self) -> dict:
         return {}
 

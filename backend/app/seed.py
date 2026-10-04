@@ -1,3 +1,4 @@
+import hashlib
 from typing import ClassVar
 
 from sqlalchemy import select
@@ -47,6 +48,21 @@ class ReferenceData:
         return [self._organization(), *self._portfolios(), *self._products(), *self._environments(),
                 *self._regions()]
 
+    NETWORK_REGIONS = ("us-east-1", "us-east-2")
+
+    def networks(self) -> list[models.Network]:
+        accounts = [binding.account_id for binding in self.account_bindings()]
+        pairs = [(account, region) for account in accounts for region in self.NETWORK_REGIONS]
+        return [self._network(account, region, index) for index, (account, region) in enumerate(pairs, start=1)]
+
+    def _network(self, account_id: str, region: str, index: int) -> models.Network:
+        digest = hashlib.sha1(f"{account_id}{region}".encode()).hexdigest()
+        return models.Network(
+            id=f"net-{account_id}-{region}", name="Org shared VPC", account_id=account_id, region=region,
+            vpc_id=f"vpc-{digest[:17]}", cidr=f"10.{index}.0.0/16",
+            private_subnet_ids=[f"subnet-{digest[offset:offset + 17]}" for offset in (1, 2, 3)],
+            security_group_ids=[f"sg-{digest[4:21]}"], is_default=True)
+
     def account_bindings(self) -> list[models.AccountBinding]:
         environment_ids = [environment[0] for environment in self.ENVIRONMENTS]
         return [models.AccountBinding(environment_id=environment_id, portfolio_id=portfolio_id,
@@ -87,6 +103,8 @@ class ReferenceDataSeeder:
         self._session.flush()
         for binding in self._data.account_bindings():
             self._add_binding_if_missing(binding)
+        for network in self._data.networks():
+            self._add_if_missing(network)
         self._session.commit()
 
     def _add_if_missing(self, item) -> None:

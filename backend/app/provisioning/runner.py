@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.adapters.ports import AwsPort, GitHubPort
 from app.db import models
+from app.networks.service import NetworkService
 from app.projects.repository import ProjectRepository
 from app.projects.tags import TagSet
 from app.provisioning.queue import JobQueue
@@ -24,7 +25,8 @@ class JobRunner:
 
     def __init__(self, queue: JobQueue, projects: ProjectRepository, registry: RegistryService,
                  synthesizer: TemplateSynthesizer, bundle: RepositoryBundle, topologies: TopologyFactory,
-                 planner: ProvisioningPlanner, github: GitHubPort, aws: AwsPort, owner: str):
+                 planner: ProvisioningPlanner, networks: NetworkService, github: GitHubPort, aws: AwsPort,
+                 owner: str):
         self._queue = queue
         self._projects = projects
         self._registry = registry
@@ -32,6 +34,7 @@ class JobRunner:
         self._bundle = bundle
         self._topologies = topologies
         self._planner = planner
+        self._networks = networks
         self._github = github
         self._aws = aws
         self._owner = owner
@@ -40,7 +43,8 @@ class JobRunner:
     def for_session(cls, session: Session, github: GitHubPort, aws: AwsPort, owner: str) -> "JobRunner":
         return cls(JobQueue(session), ProjectRepository(session), RegistryService.for_session(session),
                    TemplateSynthesizer(BlockRegistry.default(), BinderRegistry.default()), RepositoryBundle.default(),
-                   TopologyFactory.default(), ProvisioningPlanner(), github, aws, owner)
+                   TopologyFactory.default(), ProvisioningPlanner(), NetworkService.for_session(session), github, aws,
+                   owner)
 
     def run(self, job: models.Job) -> None:
         request = ProjectRequest.model_validate(job.payload)
@@ -53,9 +57,10 @@ class JobRunner:
         ownership = request.ownership
         cost_center = self._registry.resolve_cost_center(ownership.portfolio_id, ownership.product_id,
                                                          request.project_name)
+        accounts = self._registry.target_accounts(ownership.portfolio_id, request.environments)
+        topology = self._topologies.for_resilience(request.resilience)
         return ProvisioningContext(
             request_id=job.request_id, request=request, owner=self._owner,
-            files=self._bundle.render(request, self._synthesizer.synthesize(request)),
-            accounts=self._registry.target_accounts(ownership.portfolio_id, request.environments),
-            topology=self._topologies.for_resilience(request.resilience),
-            tags=TagSet(request, cost_center).as_dict(), github=self._github, aws=self._aws)
+            files=self._bundle.render(request, self._synthesizer.synthesize(request)), accounts=accounts,
+            topology=topology, tags=TagSet(request, cost_center).as_dict(), github=self._github, aws=self._aws,
+            networks=self._networks.resolve(request, topology, accounts))

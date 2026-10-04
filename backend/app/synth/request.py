@@ -1,6 +1,6 @@
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 PROJECT_NAME_PATTERN = r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
 RESOURCE_ID_PATTERN = r"^[a-z][a-z0-9-]{0,19}$"
@@ -12,6 +12,7 @@ DEFAULT_EVENTS = ("s3:ObjectCreated:*",)
 Classification = Literal["public", "internal", "confidential", "restricted"]
 AccessLevel = Literal["read", "write", "readwrite"]
 ResilienceMode = Literal["single", "dr", "ha"]
+SelectionKey = Annotated[str, StringConstraints(pattern=r"^[a-z0-9]+:[a-z0-9-]+$")]
 
 
 class ResourceSpec(BaseModel):
@@ -49,6 +50,13 @@ class Resilience(BaseModel):
         return [self.primary_region, self.secondary_region] if self.is_multi_region else [self.primary_region]
 
 
+class NetworkChoice(BaseModel):
+    """Whether compute joins the organization VPC, and which network per "environment:region" (default otherwise)."""
+
+    attach_compute: bool = True
+    selections: dict[SelectionKey, str] = Field(default_factory=dict)
+
+
 class ProjectRequest(BaseModel):
     project_name: str = Field(min_length=MIN_PROJECT_NAME_LENGTH, max_length=MAX_PROJECT_NAME_LENGTH,
                               pattern=PROJECT_NAME_PATTERN)
@@ -57,6 +65,7 @@ class ProjectRequest(BaseModel):
     environments: list[str] = Field(min_length=1)
     resources: list[ResourceSpec] = Field(min_length=1, max_length=MAX_RESOURCES)
     connections: list[ConnectionSpec] = Field(default_factory=list)
+    network: NetworkChoice = Field(default_factory=NetworkChoice)
 
     def resource(self, resource_id: str) -> ResourceSpec | None:
         return next((resource for resource in self.resources if resource.id == resource_id), None)

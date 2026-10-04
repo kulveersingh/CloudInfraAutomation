@@ -75,8 +75,8 @@ def test_preview_resolves_tags(client):
 
 
 def test_preview_resolves_target_accounts(client):
-    assert preview(client, request_dict()).json()["targets"]["prod"] == {
-        "account_id": "555555555555", "regions": ["us-east-1"]}
+    target = preview(client, request_dict()).json()["targets"]["prod"]
+    assert (target["account_id"], target["regions"]) == ("555555555555", ["us-east-1"])
 
 
 def test_preview_dr_targets_both_regions(client):

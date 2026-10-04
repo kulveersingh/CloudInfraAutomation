@@ -8,6 +8,9 @@ DEFAULT_MEMORY_MB = 256
 DEFAULT_TIMEOUT_SEC = 30
 LOG_RETENTION_DAYS = 30
 ARCHITECTURE = "arm64"
+VPC_ACCESS_POLICY = {"Fn::Sub": "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"}
+ANYWHERE = "0.0.0.0/0"
+HTTPS_PORT = 443
 PERMISSIONS_BOUNDARY = {"Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/cloudinfra-app-boundary"}
 
 
@@ -32,6 +35,14 @@ class LambdaFunctionBlock(Block, RuntimePrincipal, InvocableFunction):
     def log_group_id(self) -> str:
         return self.naming.logical_id("LogGroup")
 
+    @property
+    def security_group_id(self) -> str:
+        return self.naming.logical_id("SecurityGroup")
+
+    @property
+    def uses_network(self) -> bool:
+        return self.request.network.attach_compute
+
     def grant(self, statement: dict) -> None:
         if statement not in self._statements:
             self._statements.append(statement)
@@ -51,6 +62,8 @@ class LambdaFunctionBlock(Block, RuntimePrincipal, InvocableFunction):
 
     def emit(self, template: Template) -> None:
         template.add_resource(self.log_group_id, self._log_group())
+        if self.uses_network:
+            template.add_resource(self.security_group_id, self._security_group())
         template.add_resource(self.role_id, self._role())
         template.add_resource(self.logical_id, self._function())
         template.add_output(f"{self.logical_id}Arn", {"Value": self.arn()})
@@ -68,12 +81,30 @@ class LambdaFunctionBlock(Block, RuntimePrincipal, InvocableFunction):
                 "Resource": {"Fn::GetAtt": [self.log_group_id, "Arn"]}}
         trust = {"Version": POLICY_VERSION, "Statement": [{
             "Effect": "Allow", "Principal": {"Service": "lambda.amazonaws.com"}, "Action": "sts:AssumeRole"}]}
-        return {"Type": "AWS::IAM::Role", "Properties": {
+        properties = {
             "AssumeRolePolicyDocument": trust,
             "Path": {"Fn::Sub": "/app/${ProjectName}/"},
             "PermissionsBoundary": PERMISSIONS_BOUNDARY,
             "Policies": [{"PolicyName": "least-privilege",
-                          "PolicyDocument": {"Version": POLICY_VERSION, "Statement": [logs, *self._statements]}}]}}
+                          "PolicyDocument": {"Version": POLICY_VERSION, "Statement": [logs, *self._statements]}}]}
+        properties.update({"ManagedPolicyArns": [VPC_ACCESS_POLICY]} if self.uses_network else {})
+        return {"Type": "AWS::IAM::Role", "Properties": properties}
+
+    def _security_group(self) -> dict:
+        return {"Type": "AWS::EC2::SecurityGroup", "Properties": {
+            "GroupDescription": {"Fn::Sub": f"{self.naming.physical_name()} function"},
+            "VpcId": {"Ref": "VpcId"},
+            "SecurityGroupEgress": [
+                {"IpProtocol": "-1", "CidrIp": {"Ref": "OrgPrivateCidr"},
+                 "Description": "Organization private network"},
+                {"IpProtocol": "tcp", "FromPort": HTTPS_PORT, "ToPort": HTTPS_PORT, "CidrIp": ANYWHERE,
+                 "Description": "HTTPS to AWS service endpoints"}]}}
+
+    def _vpc_config(self) -> dict:
+        own_and_org_groups = {"Fn::Join": [",", [{"Ref": self.security_group_id},
+                                                 {"Fn::Join": [",", {"Ref": "OrgSecurityGroupIds"}]}]]}
+        return {"VpcConfig": {"SubnetIds": {"Ref": "PrivateSubnetIds"},
+                              "SecurityGroupIds": {"Fn::Split": [",", own_and_org_groups]}}}
 
     def _function(self) -> dict:
         properties = {
@@ -89,4 +120,5 @@ class LambdaFunctionBlock(Block, RuntimePrincipal, InvocableFunction):
             "ReservedConcurrentExecutions": {"Fn::If": ["IsActive", {"Ref": "AWS::NoValue"}, 0]},
         }
         properties.update({"Environment": {"Variables": dict(self._environment)}} if self._environment else {})
+        properties.update(self._vpc_config() if self.uses_network else {})
         return {"Type": "AWS::Lambda::Function", "Properties": properties}
