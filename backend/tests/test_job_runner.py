@@ -66,6 +66,24 @@ def test_dr_secondary_variables(seeded, queue, local_github, local_aws):
     assert (variables["AWS_SECONDARY_REGION"], variables["ACTIVATION_STATE_SECONDARY"]) == ("us-east-2", "standby")
 
 
+def test_environment_variables_carry_the_network(seeded, queue, local_github, local_aws):
+    run(seeded, queue, local_github, local_aws, request_dict())
+    variables = local_github.environment(OWNER, "invoice-ingest-infra", "prod")
+    assert (variables["VPC_ID"].startswith("vpc-"), len(variables["PRIVATE_SUBNET_IDS"].split(",")),
+            variables["ORG_PRIVATE_CIDR"].startswith("10.")) == (True, 3, True)
+
+
+def test_dr_secondary_region_carries_its_own_network(seeded, queue, local_github, local_aws):
+    run(seeded, queue, local_github, local_aws, dr_request_dict())
+    variables = local_github.environment(OWNER, "invoice-ingest-infra", "prod")
+    assert variables["VPC_ID_SECONDARY"] != variables["VPC_ID"]
+
+
+def test_detached_project_has_no_network_variables(seeded, queue, local_github, local_aws):
+    run(seeded, queue, local_github, local_aws, request_dict(network={"attach_compute": False}))
+    assert "VPC_ID" not in local_github.environment(OWNER, "invoice-ingest-infra", "prod")
+
+
 def test_repository_variables_carry_tags(seeded, queue, local_github, local_aws):
     run(seeded, queue, local_github, local_aws, request_dict())
     variables = local_github.repository_variables(OWNER, "invoice-ingest-infra")

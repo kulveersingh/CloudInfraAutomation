@@ -61,3 +61,12 @@ def test_at_most_twenty_resources():
 def test_unknown_resilience_mode_is_rejected():
     with pytest.raises(ValidationError):
         parse(request_dict(resilience={"mode": "multi", "primary_region": "us-east-1"}))
+
+
+def test_network_defaults_to_attaching_compute():
+    assert parse(request_dict()).network.attach_compute is True
+
+
+def test_network_selection_keys_must_be_environment_and_region():
+    with pytest.raises(ValidationError):
+        parse(request_dict(network={"attach_compute": True, "selections": {"prod": "net-1"}}))
