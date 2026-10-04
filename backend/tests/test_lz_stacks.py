@@ -211,14 +211,14 @@ def test_each_environment_ou_gets_its_own_isolation_scp():
 
 def test_isolation_scp_denies_role_assumption_outside_the_environment_path():
     statement = policy_named(stack("lz-structure"), "acme-isolation-prod")["Content"]["Statement"][0]
-    assert statement["Condition"]["StringNotLike"]["aws:ResourceOrgPaths"] == {
+    assert statement["Condition"]["ForAllValues:StringNotLike"]["aws:ResourceOrgPaths"] == {
         "Fn::Sub": ["${OrgId}/${RootId}/${OuProd}/*", {"OrgId": {"Fn::ImportValue": "acme-lz-OrganizationId"},
                                                         "RootId": {"Fn::ImportValue": "acme-lz-RootId"}}]}
 
 
 def test_isolation_path_includes_parent_ous():
     statement = policy_named(stack("lz-structure", grouping="prod_nonprod"), "acme-isolation-prod")["Content"]["Statement"][0]
-    assert statement["Condition"]["StringNotLike"]["aws:ResourceOrgPaths"]["Fn::Sub"][0] == (
+    assert statement["Condition"]["ForAllValues:StringNotLike"]["aws:ResourceOrgPaths"]["Fn::Sub"][0] == (
         "${OrgId}/${RootId}/${OuParentProd}/${OuProd}/*")
 
 
@@ -292,7 +292,7 @@ def test_scp_quota_rule_reports_overloaded_ous():
     design = LandingZoneDesigner.default().design(answers(), CATALOG)
     plan = GuardrailPlan.for_design(design)
     prod = design.ou_named("PROD")
-    for index in range(3):
+    for index in range(2):
         plan.attach_scp(f"extra-{index}", prod)
     assert ScpQuotaRule().problems(plan) == [
         "OU 'PROD' would have 6 SCPs; AWS Organizations allows 5 including FullAWSAccess."]
@@ -391,7 +391,8 @@ def test_firewall_drops_internal_traffic_by_default():
 def test_declared_flows_become_single_port_firewall_rules():
     rules = properties(stack("lz-network", network={"flows": [FLOW]}), "FirewallRules")["RuleGroup"]["RulesSource"][
         "RulesString"]
-    assert 'pass tcp 10.16.0.0/16 any -> 10.32.0.0/16 5432 (msg:"dev to test: Data refresh"; sid:1000001; rev:1;)' in rules
+    assert ('pass tcp [10.16.0.0/16,10.144.0.0/16] any -> [10.32.0.0/16,10.160.0.0/16] 5432 '
+            '(msg:"dev to test: Data refresh"; sid:1000001; rev:1;)') in rules
 
 
 def test_no_inspection_means_no_firewall():
