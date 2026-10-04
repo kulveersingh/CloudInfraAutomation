@@ -130,8 +130,8 @@ def test_remove_a_root_level_custom_ou():
 def test_remove_refused_until_accounts_are_moved_out():
     problems = edited([PAYMENTS, account_op("move_account", "acme-retail-prod", ou="custom_payments"),
                        {"op": "remove_ou", "ou": "custom_payments"}])[1]
-    assert problems == ["Edit 3 (remove 'custom_payments'): OU 'Payments' isn't empty. "
-                        "Move its accounts and child OUs to another OU first."]
+    assert problems == [("Edit 3 (remove 'custom_payments'): OU 'Payments' isn't empty. "
+                         "Move its accounts and child OUs to another OU first.")]
 
 
 def test_remove_refused_until_child_ous_are_moved_out():

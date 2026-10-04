@@ -8,11 +8,13 @@ from app.errors import ConflictError, ForbiddenError, NotFoundError, ValidationF
 from app.landing_zone.answers import LandingZoneAnswers
 from app.landing_zone.cloudformation.bundle import LandingZoneBundle
 from app.landing_zone.cloudformation.guardrails import GuardrailPlan, ScpQuotaRule
-from app.landing_zone.design import LandingZoneDesign, OrgCatalog, OuNode
+from app.landing_zone.design import AccountPlan, LandingZoneDesign, OrgCatalog, OuNode
 from app.landing_zone.designer import LandingZoneDesigner
 from app.landing_zone.diagram import OuDiagramRenderer
+from app.landing_zone.edits import EditPermissions, TreeEdit, TreeEditor
 from app.landing_zone.executor import LandingZoneExecutor, LandingZoneOutputs
 from app.landing_zone.repository import LandingZoneRepository
+from app.landing_zone.request import LandingZoneRequest
 from app.landing_zone.states import DesignStatus
 from app.landing_zone.validation import DesignValidator
 from app.networks.models import NetworkInput
@@ -57,15 +59,16 @@ class LandingZoneService:
         return cls(LandingZoneRepository(session), RegistryService.for_session(session),
                    NetworkService.for_session(session), github, executor, owner)
 
-    def propose(self, answers: LandingZoneAnswers, actor: Actor) -> dict:
+    def propose(self, request: LandingZoneRequest, actor: Actor) -> dict:
         self._policy.require_admin(actor)
-        design = self._design(answers)
+        design = self._design(request.answers, request.edits)
         return {**self._explain(design), "files": LandingZoneBundle.default().render(design, self._catalog())}
 
-    def create(self, answers: LandingZoneAnswers, actor: Actor) -> dict:
+    def create(self, request: LandingZoneRequest, actor: Actor) -> dict:
         self._policy.require_admin(actor)
         record = models.LandingZoneDesignRecord(version=self._repository.next_version(),
-                                                answers=answers.model_dump(mode="json"),
+                                                answers=request.answers.model_dump(mode="json"),
+                                                edits=TreeEditor.dump(request.edits),
                                                 status=DesignStatus.DRAFT, created_by=actor.name)
         self._repository.add(record)
         self._repository.commit()
@@ -120,14 +123,17 @@ class LandingZoneService:
         return OrgCatalog(portfolios=[portfolio["id"] for portfolio in portfolios],
                           products=[product["id"] for portfolio in portfolios for product in portfolio["products"]])
 
-    def _design(self, answers: LandingZoneAnswers) -> LandingZoneDesign:
-        return self._designer.design(answers, self._catalog())
+    def _design(self, answers: LandingZoneAnswers, edits: list[TreeEdit]) -> LandingZoneDesign:
+        design = self._designer.design(answers, self._catalog())
+        design.edit_problems = TreeEditor().apply(design, edits)
+        return design
 
     def _design_of(self, record: models.LandingZoneDesignRecord) -> LandingZoneDesign:
-        return self._design(LandingZoneAnswers.model_validate(record.answers))
+        return self._design(LandingZoneAnswers.model_validate(record.answers), TreeEditor.parse(record.edits))
 
     def _problems(self, design: LandingZoneDesign) -> list[str]:
-        return [*DesignValidator.default().problems(design), *ScpQuotaRule().problems(GuardrailPlan.for_design(design))]
+        return [*design.edit_problems, *DesignValidator.default().problems(design),
+                *ScpQuotaRule().problems(GuardrailPlan.for_design(design))]
 
     def _explain(self, design: LandingZoneDesign) -> dict:
         renderer = OuDiagramRenderer()
@@ -162,6 +168,7 @@ class LandingZoneService:
     def _describe(self, record: models.LandingZoneDesignRecord) -> dict:
         return {"id": str(record.id), "version": record.version, "status": record.status,
                 "organization_name": record.answers["organization_name"], "answers": record.answers,
+                "edits": record.edits,
                 "created_by": record.created_by, "submitted_by": record.submitted_by,
                 "decided_by": record.decided_by, "decision_comment": record.decision_comment,
                 "repository": record.repository, "commit_sha": record.commit_sha, "accounts": record.accounts or {},
@@ -169,6 +176,14 @@ class LandingZoneService:
 
 
 def _ou_json(ou: OuNode) -> dict:
+    permissions = EditPermissions()
     return {"key": ou.key, "name": ou.name, "kind": ou.kind, "environment": ou.environment, "tier": ou.tier,
-            "created_by_control_tower": ou.created_by_control_tower,
-            "accounts": [account.name for account in ou.accounts], "children": [_ou_json(child) for child in ou.children]}
+            "created_by_control_tower": ou.created_by_control_tower, "custom": ou.custom,
+            "domain": ou.isolation_domain, "allowed_edits": permissions.for_ou(ou),
+            "blocked_edits": permissions.blocked_for_ou(ou), "accounts": [_account_json(account) for account in ou.accounts],
+            "children": [_ou_json(child) for child in ou.children]}
+
+
+def _account_json(account: AccountPlan) -> dict:
+    return {"name": account.name, "enabled": account.enabled, "added": account.added,
+            "allowed_edits": EditPermissions().for_account(account)}

@@ -48,13 +48,29 @@ class MaximumDepth(DesignRule):
                 for ou, depth in _depths(design.root_ous, 1) if depth > MAX_OU_DEPTH]
 
 
+class UniqueAccountNames(DesignRule):
+    def problems(self, design):
+        counts = Counter(account.name for account in design.walk_accounts())
+        return [f"Account name '{name}' is used more than once." for name, count in counts.items() if count > 1]
+
+
+class AccountsStayInTheirDomain(DesignRule):
+    """R1: an environment OU (and the OUs below it) holds only that environment's accounts."""
+
+    def problems(self, design):
+        return [f"Account '{account.name}' belongs to isolation domain '{account.domain}' but is in OU '{ou.name}'."
+                for ou in design.walk() for account in ou.accounts
+                if account.domain and account.domain != ou.isolation_domain]
+
+
 class DesignValidator:
     def __init__(self, rules: list[DesignRule]):
         self._rules = rules
 
     @classmethod
     def default(cls) -> "DesignValidator":
-        return cls([EnvironmentOusAreSeparate(), SingleSecurityOu(), UniqueOuNames(), MaximumDepth()])
+        return cls([EnvironmentOusAreSeparate(), SingleSecurityOu(), UniqueOuNames(), MaximumDepth(), UniqueAccountNames(),
+                    AccountsStayInTheirDomain()])
 
     def problems(self, design: LandingZoneDesign) -> list[str]:
         return [problem for rule in self._rules for problem in rule.problems(design)]

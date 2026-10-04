@@ -4,7 +4,7 @@ from fastapi import APIRouter, Response
 
 from app.api.release_router import CurrentActor, Decision
 from app.api.routers import Services
-from app.landing_zone.answers import LandingZoneAnswers
+from app.landing_zone.request import LandingZoneRequest
 
 BASE = "/admin/landing-zone"
 
@@ -21,11 +21,11 @@ class LandingZoneRouter:
         self.router.add_api_route(f"{BASE}/designs/{{design_id}}:approve", self.approve, methods=["POST"])
         self.router.add_api_route(f"{BASE}/designs/{{design_id}}:reject", self.reject, methods=["POST"])
 
-    def propose(self, answers: LandingZoneAnswers, services: Services, actor: CurrentActor) -> dict:
-        return services.landing_zone.propose(answers, actor)
+    def propose(self, request: LandingZoneRequest, services: Services, actor: CurrentActor) -> dict:
+        return services.landing_zone.propose(request, actor)
 
-    def create(self, answers: LandingZoneAnswers, services: Services, actor: CurrentActor) -> dict:
-        return services.landing_zone.create(answers, actor)
+    def create(self, request: LandingZoneRequest, services: Services, actor: CurrentActor) -> dict:
+        return services.landing_zone.create(request, actor)
 
     def designs(self, services: Services, actor: CurrentActor) -> list[dict]:
         return services.landing_zone.designs(actor)

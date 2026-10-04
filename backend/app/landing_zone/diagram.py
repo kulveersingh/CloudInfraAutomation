@@ -3,7 +3,7 @@ from html import escape
 
 from app.landing_zone.design import LandingZoneDesign, OuNode
 
-ENVIRONMENT_KINDS = frozenset({"environment", "parent", "compliance"})
+ENVIRONMENT_KINDS = frozenset({"environment", "parent", "compliance", "custom_domain"})
 MAX_ACCOUNTS_SHOWN = 3
 COLORS = {"root": "#16222B", "security": "#B3261E", "infrastructure": "#2C5AA0", "automations": "#2C5AA0",
           "parent": "#53636E", "compliance": "#B26A00", "suspended": "#7C8B95"}
@@ -25,7 +25,7 @@ class OuDiagramRenderer:
         return "\n".join(lines) + "\n"
 
     def _mermaid_node(self, ou: OuNode, parent: str) -> list[str]:
-        label = "<br/>".join([ou.label, *(account.name for account in ou.accounts[:MAX_ACCOUNTS_SHOWN])])
+        label = "<br/>".join([ou.label, *(account.label for account in ou.accounts[:MAX_ACCOUNTS_SHOWN])])
         lines = [f'  {ou.key}["{label}"]', f"  {parent} --> {ou.key}"]
         for child in ou.children:
             lines += self._mermaid_node(child, ou.key)
@@ -80,7 +80,7 @@ class SvgLayout:
 
     def _box(self, ou: OuNode) -> _Box:
         color = TIER_COLORS.get(ou.tier, DEFAULT_COLOR) if ou.kind == "environment" else COLORS.get(ou.kind, DEFAULT_COLOR)
-        items = [account.name for account in ou.accounts[:MAX_ACCOUNTS_SHOWN]]
+        items = [account.label for account in ou.accounts[:MAX_ACCOUNTS_SHOWN]]
         return _Box(ou, ou.label, items, color, [self._box(child) for child in ou.children])
 
     def _layout(self, boxes: list[_Box]) -> tuple[list[_Box], float, list[int]]:

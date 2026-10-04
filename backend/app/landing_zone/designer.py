@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from dataclasses import replace
 
 from app.landing_zone.answers import EnvironmentAnswer, LandingZoneAnswers
 from app.landing_zone.design import AccountPlan, LandingZoneDesign, OrgCatalog, OuNode
@@ -19,6 +20,14 @@ class AccountNamer:
     def account(self, suffix: str) -> AccountPlan:
         return AccountPlan(name=f"{self._organization}-{suffix}", email=f"{self._local}+{suffix}@{self._domain}")
 
+    def fixed(self, suffix: str) -> AccountPlan:
+        """An account that one questionnaire answer decides; the tree editor leaves it alone."""
+        return replace(self.account(suffix), fixed=True)
+
+    def added(self, suffix: str) -> AccountPlan:
+        """An account the tree editor added; it can be removed again."""
+        return replace(self.account(suffix), added=True)
+
 
 class AnswerHandler(ABC):
     """Turns part of the questionnaire into OUs and accounts. New questions add a handler."""
@@ -33,13 +42,13 @@ class SecurityHandler(AnswerHandler):
         namer = AccountNamer(answers)
         suffixes = ["log-archive", "audit", *(["security-tooling"] if answers.security_tooling else [])]
         design.root_ous.append(OuNode(key="security", name="Security", kind="security", created_by_control_tower=True,
-                                      accounts=[namer.account(suffix) for suffix in suffixes]))
+                                      accounts=[namer.fixed(suffix) for suffix in suffixes]))
 
 
 class InfrastructureHandler(AnswerHandler):
     def contribute(self, answers, catalog, design):
         namer = AccountNamer(answers)
-        accounts = [namer.account(suffix) for key, suffix in INFRASTRUCTURE_ACCOUNTS.items()
+        accounts = [namer.fixed(suffix) for key, suffix in INFRASTRUCTURE_ACCOUNTS.items()
                     if key in answers.infrastructure]
         design.root_ous.append(OuNode(key="infrastructure", name="Infrastructure", kind="infrastructure",
                                       accounts=accounts))
@@ -73,8 +82,8 @@ class EnvironmentHandler(AnswerHandler):
 
     def _sandbox_accounts(self, answers, catalog, namer) -> list[AccountPlan]:
         if answers.sandbox.model == "developer":
-            return [namer.account("developer-sandbox-01")]
-        return [namer.account(f"{_short(portfolio)}-sandbox") for portfolio in catalog.portfolios]
+            return [namer.fixed("developer-sandbox-01")]
+        return [namer.fixed(f"{_short(portfolio)}-sandbox") for portfolio in catalog.portfolios]
 
     def _parents(self, workloads: list[OuNode]) -> list[OuNode]:
         return [OuNode(key=f"parent_{tier}", name=name, kind="parent", tier=tier,
@@ -100,7 +109,7 @@ class AutomationsHandler(AnswerHandler):
     def contribute(self, answers, catalog, design):
         if "cicd" in answers.infrastructure:
             design.root_ous.append(OuNode(key="automations", name="Automations", kind="automations",
-                                          accounts=[AccountNamer(answers).account("cicd")]))
+                                          accounts=[AccountNamer(answers).fixed("cicd")]))
 
 
 class PolicyStagingHandler(AnswerHandler):
@@ -127,7 +136,13 @@ class LandingZoneDesigner:
         design = LandingZoneDesign(answers=answers)
         for handler in self._handlers:
             handler.contribute(answers, catalog, design)
+        self._record_domains(design)
         return design
+
+    def _record_domains(self, design: LandingZoneDesign) -> None:
+        """Each account remembers its isolation domain, so a later move out of it is caught."""
+        for ou in design.walk():
+            ou.accounts = [replace(account, domain=ou.isolation_domain) for account in ou.accounts]
 
 
 def network_host_suffix(answers: LandingZoneAnswers) -> str | None:

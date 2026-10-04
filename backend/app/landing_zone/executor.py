@@ -72,7 +72,8 @@ class LocalLandingZoneExecutor(LandingZoneExecutor):
                              cidr=layout.vpc_cidr(region, ou.key),
                              subnet_ids=[resource_id("subnet", "a"), resource_id("subnet", "b")],
                              security_group_id=resource_id("sg", "org"),
-                             account_names=[account.name for account in ou.accounts], label=ou.name)
+                             account_names=[account.name for account in ou.subtree_accounts() if account.enabled],
+                             label=ou.name)
 
     def _record(self, entry: dict) -> None:
         self._history_file.parent.mkdir(parents=True, exist_ok=True)

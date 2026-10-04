@@ -183,6 +183,7 @@ class LandingZoneDesignRecord(Base):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     version: Mapped[int] = mapped_column(unique=True)
     answers: Mapped[dict] = mapped_column(JsonDocument)
+    edits: Mapped[list] = mapped_column(JsonDocument, default=list)
     status: Mapped[str] = mapped_column(String(32))
     created_by: Mapped[str] = mapped_column(String(128))
     submitted_by: Mapped[str | None] = mapped_column(String(128))

@@ -18,7 +18,7 @@ class AccountsStack(StackRenderer):
         host = network_host_suffix(context.design.answers)
         resources, outputs, previous = {}, {}, None
         for ou in context.design.walk():
-            for account in ou.accounts:
+            for account in ou.enabled_accounts():
                 suffix = account.name.removeprefix(f"{organization}-")
                 if suffix in FOUNDATION_ACCOUNTS:
                     continue

@@ -12,7 +12,7 @@ BREAK_GLASS = "arn:aws:iam::*:role/BreakGlass"
 RELEASE_EXECUTOR = "arn:aws:iam::*:role/PlatformReleaseExecutor"
 NETWORK_ADMIN = "arn:aws:iam::*:role/NetworkAdmin"
 BASELINE_KINDS = frozenset({"environment", "parent", "compliance", "policy_staging", "exceptions", "business_users",
-                            "automations"})
+                            "automations", "custom_domain"})
 GLOBAL_SERVICES = ["iam:*", "organizations:*", "sts:*", "support:*", "cloudfront:*", "route53:*", "route53domains:*",
                    "waf:*", "budgets:*", "ce:*", "cur:*", "health:*", "trustedadvisor:*", "account:*",
                    "controltower:*", "sso:*", "globalaccelerator:*", "shield:*", "pricing:*", "s3:ListAllMyBuckets",
@@ -52,7 +52,7 @@ class ControlCatalog:
     """Control Tower controls per OU for the chosen profile. Identifiers are checked against ListControls at plan time."""
 
     def controls_for(self, ou: OuNode, profile: str) -> list[str]:
-        if ou.kind in {"security", "suspended", "parent", "compliance"}:
+        if ou.kind in {"security", "suspended", "parent", "compliance", "custom"}:
             return []
         if profile == "baseline":
             return list(BASELINE_CONTROLS)
@@ -100,8 +100,8 @@ class PolicyBuilder:
         self._prefix = design.answers.organization_name
 
     def policies(self) -> list[PolicySpec]:
-        environment_ous = self._design.environment_ous()
-        policies = [self._baseline(), *map(self._isolation, environment_ous), *map(self._perimeter, environment_ous),
+        isolated = self._design.isolated_ous()
+        policies = [self._baseline(), *map(self._isolation, isolated), *map(self._perimeter, isolated),
                     self._production_protection(), self._sandbox_limits(), self._infrastructure(), self._security(),
                     *self._compliance(), *self._suspended(), self._tag_policy(), self._backup(), self._ai_opt_out()]
         return [policy for policy in policies if policy.targets]

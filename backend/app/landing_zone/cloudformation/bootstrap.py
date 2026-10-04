@@ -36,14 +36,14 @@ def account_bootstrap_template() -> dict:
 
 
 class BootstrapStack(StackRenderer):
-    """Service-managed StackSet that installs the account bootstrap in every environment account, including new ones."""
+    """Service-managed StackSet that installs the account bootstrap in every isolated OU's accounts, including new ones."""
 
     name = "lz-bootstrap"
-    description = "Landing zone account bootstrap, auto-deployed to every account in the environment OUs."
+    description = "Landing zone account bootstrap, auto-deployed to every account in the isolated OUs."
 
     def sections(self, context: StackContext) -> dict:
         answers = context.design.answers
-        targets = [context.references.imported_id(ou) for ou in context.design.environment_ous()]
+        targets = [context.references.imported_id(ou) for ou in context.design.isolated_ous()]
         return {
             "Parameters": {"PlatformAccountId": {"Type": "String", "AllowedPattern": r"^\d{12}$"},
                            "SandboxOuId": {"Type": "String", "AllowedPattern": r"^ou-[0-9a-z]{4,32}-[a-z0-9]{8,32}$"}},
