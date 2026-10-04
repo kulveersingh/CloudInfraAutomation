@@ -1,15 +1,25 @@
 import { useState } from "react";
-import type { LandingZoneExplanation, OuInfo } from "../../api/types";
+import type { AccountInfo, LandingZoneExplanation, OuInfo } from "../../api/types";
+import { AccountActions } from "./tree/AccountActions";
+import { OuActions, RootActions } from "./tree/OuActions";
+import type { TreeEditor } from "./tree/TreeEditor";
 
-/** The OU tree and diagram the platform derived from the answers, labelled "Proposed" or "Approved". */
-export function StructureView({ explanation, stage }: { explanation: LandingZoneExplanation; stage: "Proposed" | "Approved" }) {
+interface StructureViewProps {
+  explanation: LandingZoneExplanation;
+  stage: "Proposed" | "Approved";
+  editor?: TreeEditor;
+}
+
+/** The OU tree and diagram the platform derived from the answers and edits; editable when given an editor. */
+export function StructureView({ explanation, stage, editor }: StructureViewProps) {
   return (
     <div className="split">
       <div className="panel">
         <div className="panel-h"><h3>OU structure</h3><span className="hint">Environment OUs are fixed and isolated</span></div>
         <div className="panel-b">
+          {editor && <RootActions editor={editor} />}
           <ul className="tree" role="tree" aria-label={`${stage} OU structure`}>
-            {explanation.ous.map((ou) => <OuNode key={ou.key} ou={ou} />)}
+            {explanation.ous.map((ou) => <OuNode key={ou.key} ou={ou} editor={editor} />)}
           </ul>
         </div>
       </div>
@@ -23,15 +33,30 @@ export function StructureView({ explanation, stage }: { explanation: LandingZone
   );
 }
 
-function OuNode({ ou }: { ou: OuInfo }) {
+function OuNode({ ou, editor }: { ou: OuInfo; editor?: TreeEditor }) {
   return (
     <li role="treeitem" aria-selected={false}>
       <span className="ou">
         <b>{ou.name} OU</b>
         {ou.created_by_control_tower && <span className="chip">Control Tower</span>}
-        {ou.accounts.map((account) => <span key={account} className="tag">{account}</span>)}
+        {editor && <OuActions ou={ou} editor={editor} />}
       </span>
-      {ou.children.length > 0 && <ul role="group">{ou.children.map((child) => <OuNode key={child.key} ou={child} />)}</ul>}
+      {ou.accounts.length > 0 && (
+        <ul className="accounts">
+          {ou.accounts.map((account) => <AccountItem key={account.name} account={account} ou={ou} editor={editor} />)}
+        </ul>
+      )}
+      {ou.children.length > 0 && <ul role="group">{ou.children.map((child) => <OuNode key={child.key} ou={child} editor={editor} />)}</ul>}
+    </li>
+  );
+}
+
+function AccountItem({ account, ou, editor }: { account: AccountInfo; ou: OuInfo; editor?: TreeEditor }) {
+  return (
+    <li className={account.enabled ? "account" : "account off"}>
+      <span className="tag">{account.name}</span>
+      {!account.enabled && <span className="chip">Disabled</span>}
+      {editor && <AccountActions account={account} ou={ou} editor={editor} />}
     </li>
   );
 }

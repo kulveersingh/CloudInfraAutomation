@@ -3,7 +3,10 @@ import { useApi } from "../../api/ApiContext";
 import type { LandingZoneDesign, LandingZoneStatus } from "../../api/types";
 import { ErrorAlert, StatusMessage, type SaveStatus } from "../../components/Notices";
 import { useLoad } from "../../hooks/useLoad";
+import { EditDescriber } from "../../landingZone/EditDescriber";
+import { OuTreeIndex } from "../../landingZone/OuTreeIndex";
 import { StructureView } from "./StructureView";
+import { ManualChanges } from "./tree/ManualChanges";
 
 const STATUS_LABELS: Record<LandingZoneStatus, string> = {
   draft: "Draft", pending_approval: "Awaiting second admin", applied: "Applied", rejected: "Rejected",
@@ -94,7 +97,12 @@ function DesignDetail({ design }: { design: LandingZoneDesign }) {
       </div>
       <div className="panel-b">
         <ErrorAlert message={detail.error} />
-        {detail.data && <StructureView explanation={detail.data} stage={applied ? "Approved" : "Proposed"} />}
+        {detail.data && (
+          <>
+            <StructureView explanation={detail.data} stage={applied ? "Approved" : "Proposed"} />
+            <ManualChanges edits={detail.data.edits} describer={new EditDescriber(new OuTreeIndex(detail.data.ous))} />
+          </>
+        )}
       </div>
     </div>
   );

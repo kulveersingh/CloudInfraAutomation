@@ -1,6 +1,6 @@
 import type {
   CatalogEntry, CloudFormationType, CostCenterChange, CostCenterSettings, EnvironmentInfo, Identity, JobStatus,
-  LandingZoneAnswers, LandingZoneDesign, LandingZoneDesignDetail, LandingZoneProposal, NetworkInfo, NetworkInput,
+  LandingZoneDesign, LandingZoneDesignDetail, LandingZoneProposal, LandingZoneRequest, NetworkInfo, NetworkInput,
   NetworkOption, NetworkSettings, PipelineStage, PlatformApiPort, Portfolio, PreviewResult, ProjectRequest, ProjectSummary,
   RegionInfo, Release,
 } from "./types";
@@ -29,12 +29,12 @@ export class PlatformApi implements PlatformApiPort {
     this.actorHeaders = { "X-Actor": identity.name, "X-Roles": identity.roles.join(",") };
   }
 
-  proposeLandingZone(answers: LandingZoneAnswers) {
-    return this.send<LandingZoneProposal>("POST", "/v1/admin/landing-zone:propose", answers);
+  proposeLandingZone(request: LandingZoneRequest) {
+    return this.send<LandingZoneProposal>("POST", "/v1/admin/landing-zone:propose", request);
   }
 
-  createLandingZoneDesign(answers: LandingZoneAnswers) {
-    return this.send<LandingZoneDesign>("POST", LANDING_ZONE_DESIGNS, answers);
+  createLandingZoneDesign(request: LandingZoneRequest) {
+    return this.send<LandingZoneDesign>("POST", LANDING_ZONE_DESIGNS, request);
   }
 
   landingZoneDesigns() { return this.send<LandingZoneDesign[]>("GET", LANDING_ZONE_DESIGNS); }

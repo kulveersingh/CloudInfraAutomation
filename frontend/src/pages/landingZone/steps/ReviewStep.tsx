@@ -2,10 +2,14 @@ import { useState } from "react";
 import { useApi } from "../../../api/ApiContext";
 import type { LandingZoneProposal } from "../../../api/types";
 import { ErrorAlert } from "../../../components/Notices";
+import { EditDescriber } from "../../../landingZone/EditDescriber";
+import type { LandingZoneDraft } from "../../../landingZone/LandingZoneDraft";
+import { OuTreeIndex } from "../../../landingZone/OuTreeIndex";
 import { GeneratedFiles, StructureView } from "../StructureView";
+import { ManualChanges } from "../tree/ManualChanges";
 import type { StepProps } from "./StepProps";
 
-export function ReviewStep({ draft, onSubmitted }: StepProps) {
+export function ReviewStep({ draft, onChange, onSubmitted }: StepProps) {
   const api = useApi();
   const [proposal, setProposal] = useState<LandingZoneProposal>();
   const [error, setError] = useState<string>();
@@ -19,9 +23,14 @@ export function ReviewStep({ draft, onSubmitted }: StepProps) {
       setError((failure as Error).message);
     }
   };
-  const propose = () => attempt(async () => setProposal(await api.proposeLandingZone(draft.toAnswers())));
+  const propose = (next: LandingZoneDraft) => attempt(async () => setProposal(await api.proposeLandingZone(next.toRequest())));
+  /** Every tree edit is proposed again at once, so the platform stays the one source of the tree and its problems. */
+  const change = (next: LandingZoneDraft) => {
+    onChange(next);
+    return propose(next);
+  };
   const requestApproval = () => attempt(async () => {
-    const design = await api.createLandingZoneDesign(draft.toAnswers());
+    const design = await api.createLandingZoneDesign(draft.toRequest());
     onSubmitted(await api.submitLandingZoneDesign(design.id));
   });
 
@@ -31,19 +40,32 @@ export function ReviewStep({ draft, onSubmitted }: StepProps) {
         is created until a second platform admin approves.</p>
       <ProblemList problems={problems} />
       <div className="row">
-        <button className="btn" disabled={problems.length > 0} onClick={propose}>Propose structure</button>
+        <button className="btn" disabled={problems.length > 0} onClick={() => propose(draft)}>Propose structure</button>
         {proposal && (
           <button className="btn pri" disabled={proposal.problems.length > 0} onClick={requestApproval}>Request approval</button>
         )}
       </div>
       <ErrorAlert message={error} />
-      {proposal && (
-        <>
-          <ProblemList problems={proposal.problems} />
-          <StructureView explanation={proposal} stage="Proposed" />
-          <GeneratedFiles files={proposal.files} />
-        </>
-      )}
+      {proposal && <ProposalEditor proposal={proposal} draft={draft} onChange={change} />}
+    </>
+  );
+}
+
+interface ProposalEditorProps {
+  proposal: LandingZoneProposal;
+  draft: LandingZoneDraft;
+  onChange: (draft: LandingZoneDraft) => void;
+}
+
+function ProposalEditor({ proposal, draft, onChange }: ProposalEditorProps) {
+  const index = new OuTreeIndex(proposal.ous);
+  return (
+    <>
+      <ProblemList problems={proposal.problems} />
+      <StructureView explanation={proposal} stage="Proposed" editor={{ index, onEdit: (edit) => onChange(draft.withEdit(edit)) }} />
+      <ManualChanges edits={draft.edits()} describer={new EditDescriber(index)}
+                     onUndo={(position) => onChange(draft.withoutEdit(position))} />
+      <GeneratedFiles files={proposal.files} />
     </>
   );
 }

@@ -1,4 +1,4 @@
-import type { EnvironmentCount, FlowException, LandingZoneAnswers } from "../api/types";
+import type { EnvironmentCount, FlowException, LandingZoneAnswers, LandingZoneRequest, TreeEdit } from "../api/types";
 
 const ORGANIZATION_NAME_PATTERN = /^[a-z][a-z0-9-]{1,30}$/;
 const EMAIL_PATTERN = /^[^@\s+]+@[^@\s]+\.[^@\s]+$/;
@@ -27,9 +27,12 @@ export const ENVIRONMENT_PRESETS: Record<EnvironmentCount, LandingZoneEnvironmen
   6: [SANDBOX, DEV, TEST, UAT, STAGE, PROD],
 };
 
-/** Immutable model of the landing zone questionnaire; defaults are the platform's recommendations. */
+/**
+ * Immutable model of the landing zone questionnaire plus the OU tree editor's changes, in order.
+ * Defaults are the platform's recommendations; the edits survive answer changes and are replayed by the platform.
+ */
 export class LandingZoneDraft {
-  private constructor(private readonly answers: LandingZoneAnswers) {}
+  private constructor(private readonly answers: LandingZoneAnswers, private readonly treeEdits: TreeEdit[]) {}
 
   static initial(): LandingZoneDraft {
     return new LandingZoneDraft({
@@ -40,11 +43,23 @@ export class LandingZoneDraft {
       network: { hub: true, egress: "central", inspection: true, on_premises: "none", cidr: "10.0.0.0/8", flows: [] },
       sandbox: { model: "team", monthly_budget_usd: 500, expiry_days: 30 },
       optional_ous: ["exceptions", "suspended"], controls_profile: "recommended",
-    });
+    }, []);
   }
 
   with(change: Partial<LandingZoneAnswers>): LandingZoneDraft {
-    return new LandingZoneDraft({ ...this.answers, ...change });
+    return new LandingZoneDraft({ ...this.answers, ...change }, this.treeEdits);
+  }
+
+  withEdit(edit: TreeEdit): LandingZoneDraft {
+    return new LandingZoneDraft(this.answers, [...this.treeEdits, edit]);
+  }
+
+  withoutEdit(index: number): LandingZoneDraft {
+    return new LandingZoneDraft(this.answers, this.treeEdits.filter((_, position) => position !== index));
+  }
+
+  edits(): TreeEdit[] {
+    return this.treeEdits;
   }
 
   withOrganization(organizationName: string, managementEmail: string) {
@@ -109,6 +124,10 @@ export class LandingZoneDraft {
 
   toAnswers(): LandingZoneAnswers {
     return this.answers;
+  }
+
+  toRequest(): LandingZoneRequest {
+    return { answers: this.answers, edits: this.treeEdits };
   }
 }
 
