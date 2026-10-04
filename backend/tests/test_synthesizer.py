@@ -416,3 +416,8 @@ def test_contract_parameter_name():
 def test_contract_lists_resources():
     contract = json.loads(properties(synthesize(request_dict()), "ContractParameter")["Value"]["Fn::Sub"])
     assert set(contract["resources"]) == {"uploads", "processor"}
+
+
+def test_contract_publishes_resilience_mode():
+    contract = json.loads(properties(synthesize(request_dict()), "ContractParameter")["Value"]["Fn::Sub"])
+    assert contract["resilienceMode"] == "${ResilienceMode}"

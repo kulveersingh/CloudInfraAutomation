@@ -28,7 +28,7 @@ services:
       AWS_MODE: local
       LOCAL_STATE_DIR: /var/cloudinfra
     volumes:
-      - localstate:/var/cloudinfra
+      - ${CLOUDINFRA_STATE_DIR:-./var/state}:/var/cloudinfra
     ports:
       - "8010:8000"
     depends_on:
@@ -45,7 +45,7 @@ services:
       AWS_MODE: local
       LOCAL_STATE_DIR: /var/cloudinfra
     volumes:
-      - localstate:/var/cloudinfra
+      - ${CLOUDINFRA_STATE_DIR:-./var/state}:/var/cloudinfra
     depends_on:
       db:
         condition: service_healthy
@@ -60,4 +60,3 @@ services:
 
 volumes:
   pgdata:
-  localstate:

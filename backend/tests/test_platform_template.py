@@ -33,6 +33,12 @@ def test_template_passes_cfn_lint(template_text):
     assert CfnLintRunner().errors(template_text) == []
 
 
+def test_template_has_no_cfn_lint_warnings(template_text):
+    from cfnlint.api import ManualArgs, lint
+
+    assert [str(match) for match in lint(template_text, config=ManualArgs(regions=["us-east-1"]))] == []
+
+
 def test_database_is_aurora_postgresql(template):
     assert single(template, "AWS::RDS::DBCluster")["Properties"]["Engine"] == "aurora-postgresql"
 

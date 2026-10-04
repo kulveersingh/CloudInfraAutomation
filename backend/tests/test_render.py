@@ -4,7 +4,7 @@ import re
 import yaml
 
 from app.synth.lint import CfnLintRunner
-from app.synth.render import FileRenderer, RepositoryBundle
+from app.synth.render import FileRenderer, RepositoryBundle, TemplateYamlRenderer
 from app.synth.request import ProjectRequest
 from tests.factories import dr_request_dict, request_dict, with_resources
 from tests.synth_helpers import synthesize
@@ -91,3 +91,10 @@ def test_generated_dr_template_with_all_services_passes_cfn_lint():
                                  {"kind": "iam.access", "source": "processor", "target": "jobs", "access": "write"}])
     payload["resilience"] = {"mode": "dr", "primary_region": "us-east-1", "secondary_region": "us-east-2"}
     assert CfnLintRunner().errors(render(payload)["template.yaml"]) == []
+
+
+def test_template_yaml_never_uses_aliases():
+    shared = {"Key": "org:project", "Value": "invoice-ingest"}
+    template = {"Resources": {"A": {"Tags": [shared]}, "B": {"Tags": [shared]}}}
+    text = TemplateYamlRenderer().render(ProjectRequest.model_validate(request_dict()), template)["template.yaml"]
+    assert not re.search(r"[&*]id\d+", text)

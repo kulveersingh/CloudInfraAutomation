@@ -31,6 +31,7 @@ def test_parameters_conditions_outputs_are_kept():
     template = Template()
     template.add_parameter("ProjectName", {"Type": "String"})
     template.add_condition("IsActive", {"Fn::Equals": ["a", "a"]})
+    template.add_resource("Queue", {"Type": "AWS::SQS::Queue", "Condition": "IsActive"})
     template.add_output("Name", {"Value": "x"})
     sections = template.to_dict()
     assert (sections["Parameters"], sections["Conditions"], sections["Outputs"]) == (
@@ -51,3 +52,25 @@ def test_metadata_is_included_when_set():
     template = Template()
     template.set_metadata({"Generator": {"name": "x"}})
     assert template.to_dict()["Metadata"] == {"Generator": {"name": "x"}}
+
+
+def test_unreferenced_conditions_are_omitted():
+    template = Template()
+    template.add_condition("IsActive", {"Fn::Equals": ["a", "a"]})
+    assert "Conditions" not in template.to_dict()
+
+
+def test_conditions_used_by_fn_if_are_kept():
+    template = Template()
+    template.add_condition("IsPrimary", {"Fn::Equals": ["a", "a"]})
+    template.add_resource("Queue", {"Type": "AWS::SQS::Queue",
+                                    "Properties": {"DelaySeconds": {"Fn::If": ["IsPrimary", 0, 5]}}})
+    assert set(template.to_dict()["Conditions"]) == {"IsPrimary"}
+
+
+def test_conditions_used_by_other_conditions_are_kept():
+    template = Template()
+    template.add_condition("IsActive", {"Fn::Equals": ["a", "a"]})
+    template.add_condition("IsActivePrimary", {"Fn::And": [{"Condition": "IsActive"}, {"Fn::Equals": ["b", "b"]}]})
+    template.add_output("Name", {"Value": "x", "Condition": "IsActivePrimary"})
+    assert set(template.to_dict()["Conditions"]) == {"IsActive", "IsActivePrimary"}
