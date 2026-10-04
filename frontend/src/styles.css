@@ -119,3 +119,8 @@ tr.indented td:first-child { padding-left: 28px; }
 tr.risk-high td:first-child { box-shadow: inset 3px 0 0 var(--crit); }
 tr.risk-medium td:first-child { box-shadow: inset 3px 0 0 var(--warn); }
 .inbox, .decisions { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.split > * { min-width: 0; }
+.panel-h { align-items: flex-start; }
+.panel-h .chip { align-self: flex-start; white-space: nowrap; }
+table[aria-label="Change set"] td.mono { overflow-wrap: anywhere; }
+table[aria-label="Change set"] td:first-child, .chip { white-space: nowrap; }

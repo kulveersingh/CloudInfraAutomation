@@ -4,6 +4,8 @@ import type { Identity, Release } from "../../api/types";
 import { ErrorAlert } from "../../components/Notices";
 import { DECISIONS, decisionProblem, describeEvidence, STATE_LABELS, type DecisionRequirement } from "./decisions";
 
+const SHORT_ID_LENGTH = 8;
+
 interface ReleaseDetailProps {
   release: Release;
   identity: Identity;
@@ -17,7 +19,7 @@ export function ReleaseDetail({ release, identity, onDecided, onClose }: Release
     <div className="panel">
       <div className="panel-h">
         <div>
-          <h2>Release {release.id}</h2>
+          <h2>Release {release.id.slice(0, SHORT_ID_LENGTH)}</h2>
           <span className="hint">{release.project_name} → {release.environment} · requested by {release.requested_by} ·
             commit <span className="mono">{release.commit_sha}</span></span>
         </div>
