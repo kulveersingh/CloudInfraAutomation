@@ -30,6 +30,9 @@ class ExampleProvider(CloudProvider):
     def resources(self):
         return AwsProvider().resources()
 
+    def landing_zone(self):
+        return AwsProvider().landing_zone()
+
 
 # ---- registry ----
 
