@@ -1,10 +1,11 @@
 # CloudInfraAutomation — Architecture
 
-**Status:** v2.20, approved; implementation in progress. No code is written until this design is approved.
+**Status:** v2.21, approved; implementation in progress. No code is written until this design is approved.
 **Date:** 2026-10-04
 **Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9). Every solution is **DR-capable**: it can run in one region, as DR (primary active, secondary standby) or as an HA pair (both active), with **any region pair chosen in the UI** (default us-east-1 / us-east-2) (§10).
 
 **Changes in v2:** added the org registry and tagging strategy (§4); permissions based on tags (§4.5–4.8); multi-account, five-environment model (§5); promotion pipeline (§8). Payload, provisioning, security and scaling sections are updated to match.
+**Changes in v2.21:** teardown (§21.9): remove an environment or decommission a project, backup-first into a vault locked for 60 days (deleted only manually by super users), with a teardown record and restore.
 **Changes in v2.20:** Change infrastructure for projects (§21.8): edit a read-back project in the wizard; the platform opens a pull request with the regenerated, signed files and records the new revision when it is merged.
 **Changes in v2.19:** service settings (§6.4.1): each curated block declares its settings, which are validated, used as defaults and shown as fields in the Services step.
 **Changes in v2.18:** read-back (§21): generated repositories carry a signed manifest, so the platform can verify a repo is its own, detect hand edits and load the design back into the UI for editing.
@@ -3327,7 +3328,7 @@ A developer changes a provisioned project in the UI. The platform reads the proj
 |---|---|---|
 | Services, their settings, connections | **Editable** | The core of §9.8: add a table, grant access, raise memory |
 | Network attach and VPC choice per environment/region | **Editable** | GitHub environment variables are reconfigured by the change job |
-| Environments | **Add only** | New environments are bootstrapped by the change job. Removing one needs a teardown flow (stack deletion, data retention) |
+| Environments | **Add only** | New environments are bootstrapped by the change job. Removing one is a teardown (§21.9) |
 | Project name, portfolio, product | **Locked** | They are the repository, the tags and every IAM boundary (§4) |
 | Data classification | **Locked** | Changes encryption and tag conditions; needs its own reviewed flow |
 | Resilience mode and regions | **Locked** | Needs a data-replication and failover plan (§10) |
@@ -3385,5 +3386,137 @@ Removing a service deletes its CloudFormation resources on the next deploy unles
 | C3 | Removing services | **Allowed** with the retained/deleted list and explicit confirmation when anything is deleted |
 | C4 | Concurrent changes | **One open change per project**; close it to start another |
 | C5 | RB6 optimistic lock | **Included here**: base commit must match main HEAD |
+
+### 21.9 Teardown: removing an environment or decommissioning a project, with locked backups and restore
+
+Two teardown flows: **remove an environment** from a project, and **decommission** a whole project. Both are **backup-first**:
+1. Nothing is deleted until every data store has a completed backup copied into a **locked vault in the central Backup account**.
+2. Those backups cannot be deleted by anyone for **60 days**. After that, only **super users**, manually in the AWS console, can delete them; the platform never deletes a backup.
+3. Every teardown leaves a **teardown record**, so the environment or project can be **restored** from its last revision and its backups.
+
+#### 21.9.1 Backups
+
+| Topic | Design |
+|---|---|
+| What is backed up | Every data store in the environment's stacks, found from the deployed stack's resources (`ListStackResources`) by type: S3 buckets, DynamoDB tables and global tables (backed up in the primary region), RDS/Aurora clusters and instances, EFS file systems. A `BackupTarget` class per resource type maps it to its AWS Backup resource ARN (Open/Closed; new database blocks add one). S3 needs versioning, which every generated bucket already has (§6.4). |
+| Not backed up | CloudWatch Logs (AWS Backup does not support them), Lambda code (it is rebuilt from the application repository), IAM roles and other stateless resources (rebuilt from the template). The preview says so. |
+| How | AWS Backup on-demand backup job into the workload account's `cloudinfra-teardown` vault, then a **copy job** to the central vault `cloudinfra-teardown-{region}` in the **Backup account** (same region; the landing zone's backup policy already copies production data to the DR region, §20.6). The platform waits until every copy is `COMPLETED`. |
+| Locked vault | The central vault has **AWS Backup Vault Lock in compliance mode**: `MinRetentionDays: 60`, no `MaxRetentionDays`, `ChangeableForDays: 3` (after 3 days the lock can no longer be changed or removed, even by the root user). Recovery points are copied **without a lifecycle**, so they are never deleted automatically. |
+| Who can delete | The vault access policy denies `backup:DeleteRecoveryPoint`, `backup:DeleteBackupVault`, `backup:PutBackupVaultAccessPolicy` and `backup:DeleteBackupVaultLockConfiguration` to every principal except the **`CloudInfraBackupSuperUser`** role, which needs MFA and is assumable only by a named super-user group. An SCP on all OUs repeats the denial. The production-protection SCP (§20.6) stops exempting the release executor for `backup:DeleteRecoveryPoint`. Vault Lock still blocks even super users for the first 60 days. |
+| Checks before deleting | The vault is locked (`DescribeBackupVault`: `Locked = true`, `MinRetentionDays >= 60`); every expected data store has exactly one completed recovery point in it. Any failure stops the teardown **before anything is deleted**. |
+| Where the vault comes from | A new landing zone stack, **`lz-backup`**, deploys the locked vault, its KMS key (key policy allows copies from the organization) and the super-user role into the Backup account in every governed region. The bootstrap StackSet adds the `cloudinfra-teardown` vault to every workload account. Cross-account backup is turned on in the management account (`UpdateGlobalSettings`). A landing zone without a Backup account cannot run teardowns; the UI says why. |
+
+#### 21.9.2 Remove an environment
+
+1. **Request:** Projects page, then **Tear down environment** on a project with more than one environment.
+   - The preview lists, per region: the stacks to delete, each data store and its backup, and what is not backed up.
+   - The requester types the project name to confirm.
+2. **Blockers** (one `TeardownBlocker` class each):
+   - an open change (§21.8 C4);
+   - a release in progress in that environment;
+   - the project's last environment (use decommission instead);
+   - later, active sharing agreements (§4.11).
+3. **Approval (decision TD1):** a reviewer approves non-production environments. STAGE and PROD need a platform admin. Nobody approves their own request.
+4. **Teardown job.** It runs **forward-only with checkpoints**: deletions cannot be undone, so a failed step stops the job as `failed_needs_attention`. **Retry** resumes from the failed step, and every step is idempotent. The steps:
+   1. Back up every data store, copy to the locked vault, verify (§21.9.1).
+   2. Lift the production stack policy for this deletion only (recorded).
+   3. Delete the application stack in each region, secondary region first.
+   4. Empty and delete data stores that retain policies kept, now that they are backed up (decision TD2).
+   5. Delete the bootstrap stack (deploy and execution roles).
+   6. Delete the GitHub environment and update `ENVIRONMENT_ORDER`.
+   7. **Commit revision *n+1* to main** (decision TD4):
+      - `infra.json` without the environment;
+      - `config/{env}.json` removed;
+      - `teardowns/{id}.json` (the record, below);
+      - a new signed manifest.
+
+      The project's request, revision and commit are updated, so read-back stays verified.
+
+   The job runs with the release executor's role, which is the only role the production SCP lets delete stacks and data stores.
+
+#### 21.9.3 Decommission a project
+
+The same job runs for **every** environment (production last), then:
+- Commit the final revision with the teardown record and a README notice.
+- **Archive** the repository (read-only) and set its custom property `cloudinfra-state=decommissioned`.
+- Mark the project `decommissioned`.
+
+The platform never deletes the repository: it is the design record a restore starts from. Approval is always by a platform admin, with typed confirmation.
+
+#### 21.9.4 Teardown record
+
+Stored in the database (`teardowns`) **and** committed to the repository as `teardowns/{id}.json`, so a restore does not depend on the platform's database alone. It holds:
+- id, project, scope (`environment` or `project`), environments;
+- the revision and request **before** the teardown, and its commit;
+- per environment and region: account and stack names;
+- per data store: service id, CloudFormation type, physical name, source ARN, **central recovery point ARN**, vault, completion time and `locked_until` (completion + 60 days);
+- requested and approved by, state, timestamps.
+
+#### 21.9.5 Restore
+
+**Restore** on a teardown record (approval as in TD1) rebuilds what was torn down:
+1. For a decommissioned project: unarchive the repository and set the project back to `active`.
+2. Bootstrap the environment again (the account must still be bound to the portfolio).
+3. Run AWS Backup **restore jobs** from the central recovery points into the original physical names. DynamoDB and RDS restore into new resources; S3 restores into a bucket created for it.
+4. Create the application stack with a CloudFormation **IMPORT change set** that adopts the restored data stores. All three types support resource import, and the generated templates already give them retain policies.
+5. A normal deploy of the environment adds the stateless resources.
+6. Commit revision *n+1* with the environment back in `infra.json`. The record is marked `restored`.
+
+Restore needs only the record and the recovery points, which stay for 60 days at least, and until a super user deletes them.
+
+#### 21.9.6 Platform changes
+
+| Area | Change |
+|---|---|
+| `AwsPort` | `stack_resources`, `start_backup`, `start_copy`, `backup_status`, `vault_lock`, `set_stack_policy`, `delete_stack`, `empty_and_delete` (per data store type), `start_restore`, `import_stack`. `LocalAws` keeps stacks, vaults and recovery points in its JSON state, and **enforces the lock**: deleting a recovery point fails before 60 days, and always fails for any role except the super-user role (to test the policy). |
+| `GitHubPort` | `delete_environment`, `archive_repository`, `unarchive_repository`; `commit_files` can delete paths. |
+| Database | `teardowns` (the record above) and `teardown_recovery_points`; `projects.status` gains `decommissioned`; `jobs.kind` gains `teardown` and `restore`. |
+| Services | `TeardownService` (preview, request, approve/reject, retry, restore), `TeardownBlocker`s, `BackupTarget`s, the teardown and restore planners on the existing worker. |
+| Landing zone | `lz-backup` stack; super-user role; SCP and vault policy as in §21.9.1; the bootstrap StackSet's local vault. |
+| API | `POST /v1/projects/{name}/teardowns:preview`, `POST …/teardowns`, `GET …/teardowns`, `GET …/teardowns/{id}`, `POST …/teardowns/{id}:approve`, `:reject`, `:retry`, `:restore`. |
+| UI | **Tear down environment** and **Decommission** on the Projects page, with the preview and typed confirmation; an approvals list; a teardown detail page with job steps, backups and their `locked_until` dates, and **Restore**. |
+
+#### 21.9.7 Testing (TDD, 100% coverage)
+
+- **BackupTarget per type:** source ARN; unsupported types listed as "not backed up".
+- **Blockers:**
+  - an open change;
+  - a release in progress;
+  - the last environment.
+- **Approvals:**
+  - reviewer for non-prod, platform admin for STAGE/PROD and decommission;
+  - no self-approval;
+  - typed confirmation.
+- **Job:**
+  - backups and copies complete before any delete;
+  - an unlocked vault, or a failed backup or copy, stops with nothing deleted;
+  - stacks deleted secondary-first;
+  - retained data stores emptied and deleted;
+  - bootstrap and GitHub environment removed;
+  - revision *n+1* committed and read-back verified;
+  - retry resumes after a failed delete.
+- **Lock (local stand-in):**
+  - deleting a recovery point before 60 days fails for everyone;
+  - after 60 days it fails for the platform and succeeds only for the super-user role;
+  - the platform has no code path that deletes one.
+- **Decommission:** every environment torn down, production last; repository archived and marked; project `decommissioned`.
+- **Restore:**
+  - restore jobs to the original names;
+  - IMPORT then deploy;
+  - revision committed;
+  - the project and repository reactivated after a decommission.
+- **UI:** previews, confirmation, approval, job progress, backups with lock dates, restore.
+
+#### 21.9.8 Decisions
+
+| # | Decision | Recommendation |
+|---|---|---|
+| TD1 | Approvals | Reviewer for non-prod environments; platform admin for STAGE/PROD and decommission; never self-approval; typed project name |
+| TD2 | Data stores kept by retain policies | **Delete them after their backups are verified in the locked vault** (otherwise teardown leaves billed, unmanaged buckets and tables) |
+| TD3 | Backup retention | **Decided: 60 days minimum for every environment**; Vault Lock compliance mode; no automatic deletion; manual deletion by super users only |
+| TD4 | How the repository is updated | **Platform commits revision *n+1* directly to main** after approval (like the landing zone, §20.7), because the infrastructure is already gone; no pull request |
+| TD5 | The repository on decommission | **Archived, never deleted by the platform** |
+| TD6 | Logs | Not backed up in v1 (AWS Backup does not support CloudWatch Logs); exporting logs to S3 is a later option |
+| TD7 | Restore in v1 | **Included:** restore an environment or a whole project from its teardown record |
 
 **Found while researching (separate fixes):** curated blocks silently ignored unknown `config` keys, and the UI had no fields for their settings; both are fixed by §6.4.1. (The UI sends `config.properties` only for schema-driven resources, which read it, so no settings were being dropped.) §6.1 says "sorted keys" but templates keep insertion order; only `infra.json` is sorted.
