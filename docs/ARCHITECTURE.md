@@ -1,10 +1,11 @@
 # CloudInfraAutomation — Architecture
 
-**Status:** v2.27, approved; implementation in progress. No code is written until this design is approved.
+**Status:** v2.28, §22.10 (MC-3) for review; implementation in progress. No code is written until this design is approved.
 **Date:** 2026-10-05
 **Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9). Every solution is **DR-capable**: it can run in one region, as DR (primary active, secondary standby) or as an HA pair (both active), with **any region pair chosen in the UI** (default us-east-1 / us-east-2) (§10).
 
 **Changes in v2:** added the org registry and tagging strategy (§4); permissions based on tags (§4.5–4.8); multi-account, five-environment model (§5); promotion pipeline (§8). Payload, provisioning, security and scaling sections are updated to match.
+**Changes in v2.28:** MC-3 design (§22.10): the Google Cloud landing zone (folders, project factory, Org Policy/IAM deny/SCC pack mappings, Shared VPC with an NCC star topology, VPC Service Controls per environment, vault project), and the neutral split of landing-zone answers and control packs.
 **Changes in v2.27:** MC-2e: the UI picks the cloud (wizard, Admin regions and networks), follows the chosen cloud's regions, catalog, type search, networks, words and main file, and shows preview notes; MC-2 is complete (§22.9.7 notes).
 **Changes in v2.26:** MC-2d: Google Cloud release risk from Terraform plans; teardown inventory from the configuration; Bucket-Locked and Backup and DR vault backups in the vault project; restore with import (§22.9.7 notes).
 **Changes in v2.25:** MC-2c: Google Cloud provisioning, read-back and Change infrastructure end to end; ownership labels through a per-provider tag policy; deployments named `cloudinfra-{project}-{region}`; removal wording in change previews (§22.9.7 notes).
@@ -3923,3 +3924,187 @@ Delete steps: delete the Infrastructure Manager deployment (secondary region fir
 | MC2-8 | Network attachment | **Direct VPC egress** with the registered subnet and network tags |
 | MC2-9 | Contract | **Secret Manager** secret with the same JSON |
 | MC2-10 | Cloud picker | **Shown in the project wizard and networks screen now**; the landing zone stays AWS-only until MC-3 |
+
+### 22.10 MC-3 in detail: the Google Cloud landing zone
+
+**Status: design for review.**
+
+**Goal.** An admin designs a Google Cloud landing zone with the same questionnaire, tree editor, industry templates and control packs as on AWS (§20). The platform then generates Terraform for Infrastructure Manager, gets it approved by a second admin, applies it, and fills the registries:
+- environment projects become account bindings;
+- Shared VPC subnets become networks;
+- the vault project replaces the `gcp_backup_project` setting.
+
+Everything runs locally against stand-ins, like AWS today.
+
+This phase also finishes the split that MC-1 deferred (MC1-4): landing-zone answers and control packs become neutral definitions with one mapping per cloud.
+
+#### 22.10.1 Research findings
+
+| # | Finding | Consequence |
+|---|---|---|
+| G1 | Google Cloud has **no managed landing-zone service** like Control Tower. Google's references are the Enterprise Foundations Blueprint and Cloud Foundation Fabric (FAST): Terraform that an organization admin runs in stages from a **seed project**. | The platform generates its own Terraform JSON, applied by Infrastructure Manager from a seed project (MC3-1, MC3-2). FAST is the reference for structure and roles, not a dependency. |
+| G2 | Hierarchy: organization → **folders** (nested up to 10 levels, at most 300 folders per parent) → **projects**. Project ids are 6–30 characters and **globally unique**. | Folders take the place of OUs and projects take the place of accounts. The limits become Google Cloud checks, and project ids get an organization hash (MC3-7). |
+| G3 | **Organization Policy** constraints (managed constraints such as `iam.disableServiceAccountKeyCreation`, `storage.publicAccessPrevention`, `gcp.resourceLocations`, plus custom CEL constraints) attach to the organization, folders or projects. They are **inherited by every descendant**. There is **one policy per constraint per resource**; list constraints merge with the parent's policy unless the policy resets inheritance. Dry-run is available. | Preventive controls go on the top-most targeted folder, as on AWS. Two packs that set the same constraint on one folder are merged into one policy, and the platform warns when they conflict. |
+| G4 | **IAM deny policies** attach to the organization, folders or projects. They deny permissions to principals, with exception principals and tag conditions. | Used for the vault (only super users may delete after the lock) and to stop identities moving between environments (MC3-4). |
+| G5 | **VPC Service Controls** perimeters stop data leaving a set of projects through Google APIs. A project can be in at most one regular perimeter. This is Google Cloud's equivalent of the AWS RCP data perimeter (§22.2). | **One perimeter per environment** holds that environment's projects: R2 on Google Cloud. It is applied in dry-run first (MC3-4). |
+| G6 | **Security Command Center.** Security Health Analytics detectors find misconfigurations (open firewall, public bucket, no MFA, keys not rotated). **Security Posture** deploys detectors and organization-policy constraints together, to the organization, a folder or a project. Postures need SCC **Premium or Enterprise**. | Detective pack controls map to posture detectors and are **deployed only with Premium/Enterprise**. On Standard, the design shows them as not deployed (MC3-5). Detectors deployed on a folder apply to everything below it, so detective controls are inherited too, unlike AWS (F11). |
+| G7 | Google Cloud has **no proactive controls** (the CloudFormation-hooks equivalent). Custom Org Policy constraints check resources when they are created or updated, so they are preventive. | Proactive controls in a pack have no Google Cloud mapping. The packs view says so (MC5 "show, don't hide"). |
+| G8 | Networking: a **Shared VPC host project** owns the VPC, and service projects use its subnets. **Network Connectivity Center** joins VPCs as spokes. Its **star topology** lets edge spokes reach the center only, never each other. **Cloud NAT** is regional per VPC. **Private Service Connect** publishes one service from one VPC into another, on one port. Hierarchical **firewall policies** attach to folders. | Each environment gets its own Shared VPC host. The hub (center) is shared services and on-premises connectivity, and the environments are edges, so no route exists between environments. Declared cross-environment flows are Private Service Connect services (MC3-3). |
+| G9 | **Bucket Lock** (an irreversible retention policy) and **Backup and DR vaults** (enforced minimum retention) hold teardown backups (§22.9.5). | The landing zone creates the vault project, its locked buckets per region, a Backup and DR vault per region, and the IAM deny policy (MC3-6). |
+| G10 | **Tags** (Resource Manager tag keys and values) are inherited down folders and projects, and IAM and Org Policy conditions can test them. Labels cannot. | An `environment` tag key with one value per environment, bound to each environment folder, lets policies tell environments apart. |
+| G11 | Infrastructure Manager runs Terraform ≤ 1.5.7 and needs a service account with the roles the configuration uses. Here those are organization-level: folder admin, Org Policy admin, project creator, billing user, Shared VPC admin, security admin, Access Context Manager admin. | The one-time **seed bootstrap** grants them (MC3-2). The platform never holds a person's organization-admin rights. |
+
+#### 22.10.2 How each concept maps
+
+| Concept (§20) | AWS | Google Cloud |
+|---|---|---|
+| Root | Management account, Organizations, Control Tower | Organization node, plus a seed project `{org}-lz-seed` with the Infrastructure Manager service account |
+| Hierarchy node | OU | Folder |
+| Isolation unit | Account (Account Factory) | Project, with billing account, enabled APIs, environment tag binding and labels |
+| Security (R3) | Security OU: Log Archive, Audit, Security Tooling | Security folder: `{org}-logging` (organization log sink into a log bucket with locked retention), `{org}-security` (SCC, plus Security Tooling if chosen) |
+| Infrastructure | Network, Shared Services, Identity, Backup, Monitoring, CI/CD accounts | Infrastructure folder: `{org}-net-hub` (NCC hub, shared services VPC, hybrid connectivity), `{org}-shared-services`, `{org}-vault` (MC3-6), `{org}-monitoring`, `{org}-cicd`. Identity is Cloud Identity, so there is no Identity project. |
+| Environment OU (R1) | OU per environment | Folder per environment, with an `environment` tag binding, a Shared VPC host project `{org}-net-{env}`, and workload projects as service projects |
+| No access between environments (R2) | RCP + SCP + transit-gateway route tables | **VPC Service Controls perimeter per environment** + **IAM deny on each environment folder** (no impersonating service accounts from other environments) + **no route** (separate VPCs, NCC star topology) |
+| Policies on nodes only (R4) | SCPs on OUs | Org policies, IAM deny and firewall policies on folders and the organization, never on projects (the validator enforces it) |
+| Policy Staging (R5) | Policy Staging OU | Policy Staging folder. Org policies are applied there in dry-run, then promoted. |
+| Preventive control | SCP / RCP / declarative policy | Org Policy constraint (managed or custom CEL), IAM deny |
+| Detective control | Config rule / Security Hub control | SCC posture detector (Premium/Enterprise) |
+| Proactive control | CloudFormation hook | None (G7) |
+| Hub and spoke | Transit Gateway with route table per environment | NCC star topology: hub = center, environments = edges |
+| Egress | Central egress VPC + Network Firewall | Cloud NAT in each environment's host VPC, plus egress rules in the environment folder's firewall policy. Central egress is not offered (advice). |
+| Inspection | AWS Network Firewall | Cloud NGFW Enterprise firewall endpoints (optional, paid), on the hub and on each flow's consumer side |
+| Cross-environment flow | Route through inspection + stateful rule | Private Service Connect: the producer environment publishes the service on one port, and the consumer environment gets an endpoint and a firewall rule, with an owner and expiry |
+| Addressing | VPC IPAM pools | No managed IPAM. The platform's `IpamPlanner` (already neutral) splits the top-level CIDR into one range per environment per region, and each host VPC's subnet takes its range. |
+| On-premises | VPN / Direct Connect | HA VPN / Cloud Interconnect on the hub, as an NCC hybrid spoke |
+| Sandbox | Sandbox OU, budget, expiry | Sandbox folder: projects with a `google_billing_budget`, an `expires_on` label, and no Shared VPC (Cloud NAT egress only) |
+| Locked backup vault | Backup account vault, Vault Lock | Vault project: locked buckets + Backup and DR vaults + IAM deny (MC3-6) |
+| Deploy units | Stacks `lz-foundation` … `lz-bootstrap` | Infrastructure Manager deployments in the seed project, in order (§22.10.5) |
+| Repository | `landing-zone-infra` | `landing-zone-gcp-infra` |
+
+#### 22.10.3 Neutral answers and provider answers (MC1-4)
+
+`LandingZoneAnswers` keeps every neutral question:
+- organization name, home and governed regions, template, environments, grouping;
+- unit model (one project per portfolio, product or environment), compliance scopes, security tooling, log retention;
+- shared units, network intent, sandbox, optional nodes, controls profile, packs and their parameters.
+
+The cloud-specific answers move into `provider_answers`, validated by the provider's own model:
+
+| Provider | Provider answers | Notes |
+|---|---|---|
+| AWS | `management_email` | Account emails use plus addressing on it, as today |
+| Google Cloud | `organization_id` (digits), `billing_account` (`XXXXXX-XXXXXX-XXXXXX`), `domain` (for `iam.allowedPolicyMemberDomains`), `groups`: organization admins, network admins, security admins, billing admins, backup super users. Each group defaults to `gcp-<role>@<domain>`. `scc_tier`: `standard` / **`premium`** / `enterprise`. | The platform does not create Cloud Identity groups: they must exist (MC3-8) |
+
+**Compatibility:**
+- Stored AWS designs keep `management_email` at the top level. A before-validator moves it into `provider_answers`, so old designs and `design.json` still load and read back verified.
+- Network intent stays neutral: `on_premises` becomes `none` / `vpn` / `dedicated`, with `direct_connect` accepted as an alias of `dedicated`.
+- `egress: central` is an AWS-only choice. On Google Cloud it is accepted and advised against: "Google Cloud uses Cloud NAT in each environment's VPC".
+
+**Naming.** The designer's account naming becomes a per-provider **`UnitNamer`**.
+- **AWS:** `{org}-{suffix}` plus the email.
+- **Google Cloud:** `{org}-{suffix}-{h4}`, where `h4` is 4 hex characters of a hash of `organization_id`, because project ids are global. The 30-character limit is a check.
+
+`AccountPlan.email` becomes optional (AWS only), and `OuNode.created_by_control_tower` becomes `created_by_service` (the provider's landing-zone service; on Google Cloud nothing is pre-created).
+
+#### 22.10.4 Control packs: one definition, one mapping per cloud
+
+A pack file keeps the neutral part: id, version, name, description, selectors, `optional`, `order`. The controls move into **mapping files** under `catalog/mappings/<provider>/<pack>.yaml`. Each mapping lists that cloud's control ids and maps the pack's parameters (for example, `AllowedRegions` → `gcp.resourceLocations` values `in:<region>-locations`).
+
+- **AWS:** the mapping holds today's Control Tower global ids, so AWS designs resolve exactly as before (the regression tests stay).
+- **Google Cloud:** a **`GcpControlSnapshot`** (`catalog/gcp_controls.yaml`) lists each control's id, name, behavior, implementation (`ORG_POLICY`, `CUSTOM_CONSTRAINT`, `IAM_DENY` or `SCC_DETECTOR`) and frameworks (SCC compliance mappings: CIS Google Cloud Foundations, PCI DSS, NIST 800-53, ISO 27001). A refresh script (read-only, needs credentials) confirms the detector names and frameworks. Until it runs, the frameworks show as "intended alignment (unverified)", as with T2.
+
+Google Cloud mapping (v1), pack by pack:
+
+| Pack | Preventive (Org Policy / IAM deny) | Detective (SCC detectors) |
+|---|---|---|
+| `foundation` | `iam.disableServiceAccountKeyCreation`, `iam.disableServiceAccountKeyUpload`, `iam.allowedPolicyMemberDomains` (the domain), `iam.automaticIamGrantsForDefaultServiceAccounts`, `storage.publicAccessPrevention`, `compute.skipDefaultNetworkCreation`, `compute.vmExternalIpAccess` (deny all) | `MFA_NOT_ENFORCED`, `PUBLIC_BUCKET_ACL`, `OPEN_SSH_PORT`, `OPEN_RDP_PORT`, `ADMIN_SERVICE_ACCOUNT`, `USER_MANAGED_SERVICE_ACCOUNT_KEY` |
+| `data-protection` | `storage.uniformBucketLevelAccess`, `sql.restrictPublicIp`, `sql.restrictAuthorizedNetworks`, custom constraint `custom.cloudinfraSqlRequireSsl` | `PUBLIC_SQL_INSTANCE`, `SQL_NO_ROOT_PASSWORD`, `BUCKET_POLICY_ONLY_DISABLED` |
+| `network-hardening` | `compute.requireOsLogin`, `compute.disableSerialPortAccess`, `compute.requireShieldedVm`, `compute.restrictVpcPeering`, `compute.restrictSharedVpcHostProjects` (the environment's host only) | `OPEN_FIREWALL`, `FLOW_LOGS_DISABLED`, `DEFAULT_NETWORK`, `LEGACY_NETWORK` |
+| `logging-integrity` | IAM deny: no `logging.sinks.delete` or `logging.buckets.delete` outside the security admins group | `AUDIT_LOGGING_DISABLED`, `BUCKET_LOGGING_DISABLED`, `LOG_NOT_EXPORTED` |
+| `key-management` | `gcp.restrictNonCmekServices` (storage, Cloud SQL, BigQuery), `gcp.restrictCmekCryptoKeyProjects` (the environment's key project) | `KMS_KEY_NOT_ROTATED`, `KMS_PUBLIC_KEY` |
+| `production-resilience` | IAM deny on production-tier folders: no `resourcemanager.projects.delete` and no deleting data stores outside the release executor's service account | `SQL_BACKUP_DISABLED`, `OBJECT_VERSIONING_DISABLED` |
+| `data-residency` | `gcp.resourceLocations` from `AllowedRegions` | — |
+| `strict-residency` | `gcp.resourceLocations` without multi-regions; custom constraint denying dual-region buckets | — (and the advice "breaks DR/HA dual-region storage", as T6) |
+| `pci-cde` | All of the above on the PCI folders, plus `compute.restrictLoadBalancerCreationForTypes` (internal only) | The PCI DSS posture's detectors |
+
+Proactive controls in a pack have no Google Cloud mapping and show as "no equivalent on Google Cloud".
+
+**Resolver.** `PackResolver` takes the provider's **`InheritanceRule`**:
+- AWS: preventive controls are inherited, detective and proactive ones are not (F11).
+- Google Cloud: all are inherited (G3, G6), so every control goes on the top-most targeted folder.
+
+The Google Cloud bundle merges two packs' policies for the same constraint on one folder, and the `DesignAdvisor` warns when the merged values conflict. For example, two `gcp.resourceLocations` lists are intersected, and an empty intersection is a problem.
+
+#### 22.10.5 Repository and deployments
+
+`landing-zone-gcp-infra` holds `design.json`, the diagrams, `docs/controls.md`, `scripts/bootstrap-seed.sh`, a workflow, and one directory per Infrastructure Manager deployment (`main.tf.json` + `variables.tf.json`, Terraform JSON as in MC-2, google provider ≥ 7.21). The deployments are applied in order from the seed project:
+
+| Order | Deployment | Main resources |
+|---|---|---|
+| 0 | *Seed bootstrap (one-time, by an organization admin running `scripts/bootstrap-seed.sh`)* | Seed project, Infrastructure Manager service account and its organization roles, Workload Identity Federation for the repository (MC3-2) |
+| 1 | `lz-foundation` | Tag key `environment` and its values; organization-level org policies (domain restriction, no default networks); custom constraints; organization log sink into `{org}-logging`; Essential Contacts |
+| 2 | `lz-structure` | Folders (nested), tag bindings, folder org policies (merged per constraint), IAM deny policies, hierarchical firewall policies |
+| 3 | `lz-projects` | Project factory: `google_project` (billing, folder, labels, `auto_create_network = false`), `google_project_service`, tag bindings, sandbox budgets |
+| 4 | `lz-network` | Hub VPC and NCC hub (star topology); one Shared VPC host project per environment (VPC, subnets per region from the IPAM plan, Cloud NAT, private Google access, DNS); NCC VPC spokes (environments as edges, hub as center); service-project attachments; Private Service Connect flows; optional NGFW endpoints; HA VPN / Interconnect hybrid spoke |
+| 5 | `lz-security` | Access Context Manager policy; one VPC Service Controls perimeter per environment, dry-run then enforced (MC3-4); SCC posture per targeted folder (Premium/Enterprise only) |
+| 6 | `lz-vault` | `{org}-vault` project: per region, a Bucket-Locked bucket `cloudinfra-teardown-{region}-{vault project}` (60-day locked retention, uniform access, public access prevention) and a Backup and DR vault (60-day enforced minimum retention); IAM deny on the project (no deletes except the backup super-user group) |
+
+**Workflow.** The workflow signs in through the seed's Workload Identity Federation and runs `gcloud infra-manager previews create` for every deployment. After approval it applies them in order. The approval workflow (§20.7) is unchanged.
+
+**Read-back.** It uses the signed manifest, as for the AWS landing zone (§21).
+
+**Checks.** Lint uses the bundled provider-schema rule (MC-2b) and the MC-2b lint rules (no primitive roles, no public members, public access prevention). The real `terraform validate` runs in the repository's workflow.
+
+#### 22.10.6 Checks, advice and outputs
+
+| Kind | Google Cloud |
+|---|---|
+| Checks (block submit) | Folder depth ≤ 10; ≤ 300 folders per parent; project ids 6–30 characters and unique; policies only on folders and the organization (R4); one regular VPC Service Controls perimeter per project; merged list constraints not empty; existing R1–R3 rules (neutral) |
+| Advice (shown, never blocking) | Detective controls not deployed on SCC Standard; proactive controls with no equivalent; `egress: central` not used; strict residency vs DR/HA dual-region storage; project-creation quota (an organization starts with a small quota of projects; request more before applying large designs) |
+| Executor outputs | Project ids per environment and portfolio/product → **account bindings** (`provider = gcp`); each environment host's subnetwork per region → **networks** (`network_ref` self-link, `subnet_refs`, `firewall_refs` = network tags); the vault project → the **teardown vault** for Google Cloud |
+
+The backup-account resolver for Google Cloud reads the applied landing zone's vault project. `gcp_backup_project` remains an explicit override, as `backup_account_id` is on AWS.
+
+#### 22.10.7 Platform changes
+
+| Area | Change |
+|---|---|
+| Answers | Neutral `LandingZoneAnswers` + `provider_answers` (§22.10.3), with the AWS migration validator. `on_premises: dedicated`. |
+| Designer | `UnitNamer` and the security/infrastructure handlers' unit lists come from the provider (`LandingZoneProvider.units()`). `created_by_service`. |
+| Catalog | Neutral pack files; `catalog/mappings/aws/*.yaml` (today's ids) and `catalog/mappings/gcp/*.yaml`; `GcpControlSnapshot` and its refresh script; `InheritanceRule` per provider. Templates keep neutral answers and gain `regions: {aws: […], gcp: […]}` for the templates that fix regions (public sector: us-east1/us-west1; EU sovereignty: europe-west3/europe-west1). |
+| Provider | `GcpProvider.landing_zone()`: repository `landing-zone-gcp-infra`, `GcpLandingZoneBundle` (the deployments above), checks, advice, inheritance rule, unit namer. |
+| Workflow | One landing zone per provider (MC4): `latest_applied(provider)`, versions per provider, `provider` on every landing-zone endpoint (default `aws`). Executors are per provider (`AdapterFactory.landing_zone_executors(settings)`), with `LocalGcpLandingZone` returning project ids, networks and the vault project. |
+| API | `GET …/templates?provider=`, `GET …/control-packs?provider=` (controls per cloud, with "no equivalent" and "needs SCC Premium" marked), and `provider` on propose, create and read-back. |
+| UI | The Start step gets the cloud picker. Question steps show provider answers (AWS: management email; Google Cloud: organization id, billing account, domain, groups, SCC tier) and read their words from the vocabulary. The Controls step shows each cloud's controls and their gaps. Review and diagram say "folder" and "project". |
+
+#### 22.10.8 Delivery (TDD, 100% coverage)
+
+| Step | Scope | Exit |
+|---|---|---|
+| **MC-3a Neutral split** | Answers and provider answers (AWS migration), pack mappings with the AWS ids moved, `InheritanceRule`, `UnitNamer`, landing zones per provider in the workflow and API | Every AWS landing-zone test passes unchanged apart from renamed fields; stored designs read back verified |
+| **MC-3b Google Cloud design** | Provider answers, namer, `GcpControlSnapshot` and mappings for every pack, checks and advice | Every industry template proposes on Google Cloud with no problems |
+| **MC-3c Google Cloud bundle** | The seven deployments, `design.json`, diagrams, `controls.md`, seed script, workflow; lint with the provider schema | Every template's deployments pass the lint and schema rules; golden tests per deployment |
+| **MC-3d Apply and registries** | `LocalGcpLandingZone` executor; account bindings, networks and the vault project filled; teardown vault resolved from the landing zone | Approve → applied → a Google Cloud project provisions into the vended projects and tears down into the landing zone's vault, locally |
+| **MC-3e UI** | Cloud picker on the landing-zone page, provider questions, per-cloud controls and templates, folder/project wording | 100% frontend coverage |
+
+#### 22.10.9 Decisions and open questions
+
+| # | Decision | Recommendation |
+|---|---|---|
+| MC3-1 | Landing-zone IaC | **Generated Terraform JSON on Infrastructure Manager**, like MC-2. FAST and the Foundations Blueprint are the reference for structure and roles, but are not vendored: their modules need newer Terraform than 1.5.7 in places, and generated JSON stays deterministic and readable back. |
+| MC3-2 | Bootstrap | **A one-time seed bootstrap run by an organization admin** (`scripts/bootstrap-seed.sh`: seed project, Infrastructure Manager service account and its organization roles, Workload Identity Federation for the repository), like the AWS management account. After it, every change goes through the platform. |
+| MC3-3 | Networking | **One Shared VPC host per environment; NCC star topology** with the hub as center and environments as edges, so no route exists between environments. **Cross-environment flows as Private Service Connect services** on one port, with owner and expiry. NGFW Enterprise inspection is optional. |
+| MC3-4 | Environment isolation (R2) | **A VPC Service Controls perimeter per environment** (dry-run on first apply, enforced after the dry-run shows no violations), **IAM deny on environment folders** against impersonation from other environments, and separate VPCs |
+| MC3-5 | Detective controls | **SCC posture detectors, only with Premium or Enterprise**. On Standard, packs show them as not deployed, and the design advises it. |
+| MC3-6 | Vault | **`{org}-vault` project in the Infrastructure folder**, with Bucket-Locked buckets and Backup and DR vaults per governed region, and an IAM deny that only the backup super-user group escapes (after the lock). It replaces `gcp_backup_project`, which stays as an override. |
+| MC3-7 | Project ids | **`{org}-{suffix}-{h4}`** (hash of the organization id), checked against 6–30 characters |
+| MC3-8 | Groups | **The admin names existing Cloud Identity groups**; the platform checks their format and never creates groups (that needs Workspace or Cloud Identity admin rights) |
+| MC3-9 | Packs | **Neutral pack files plus mapping files per provider**; AWS behavior unchanged |
+| MC3-10 | Repository | **`landing-zone-gcp-infra`**; AWS keeps `landing-zone-infra` |
+
+| # | Open question | Plan |
+|---|---|---|
+| Q1 | The exact IAM deny principal set for "principals outside this environment" (G4) | Verify on a real organization during MC-3c. Until then, deny for `principalSet://goog/public:all`, with the environment's deploy and workload service accounts and the admin groups as exceptions. |
+| Q2 | Whether a folder can hold more than one posture deployment | Generate **one combined posture per targeted folder**, which works either way |
+| Q3 | SCC tier and Security Posture availability in the customer's organization | Asked in the provider answers (`scc_tier`); refresh script confirms detector names |
+| Q4 | NCC star topology for VPC spokes in all chosen regions | Check in the refresh script; fall back to separate VPC peerings to the hub (no transitive routing) if unavailable |
