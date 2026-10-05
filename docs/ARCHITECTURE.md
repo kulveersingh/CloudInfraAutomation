@@ -1,10 +1,11 @@
 # CloudInfraAutomation — Architecture
 
-**Status:** v2.18, approved; implementation in progress. No code is written until this design is approved.
+**Status:** v2.19, approved; implementation in progress. No code is written until this design is approved.
 **Date:** 2026-10-04
 **Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9). Every solution is **DR-capable**: it can run in one region, as DR (primary active, secondary standby) or as an HA pair (both active), with **any region pair chosen in the UI** (default us-east-1 / us-east-2) (§10).
 
 **Changes in v2:** added the org registry and tagging strategy (§4); permissions based on tags (§4.5–4.8); multi-account, five-environment model (§5); promotion pipeline (§8). Payload, provisioning, security and scaling sections are updated to match.
+**Changes in v2.19:** service settings (§6.4.1): each curated block declares its settings, which are validated, used as defaults and shown as fields in the Services step.
 **Changes in v2.18:** read-back (§21): generated repositories carry a signed manifest, so the platform can verify a repo is its own, detect hand edits and load the design back into the UI for editing.
 **Changes in v2.17:** implementation started. The control plane runs on ECS Fargate with Aurora PostgreSQL (§2.2a), and the same containers run locally on Docker Desktop.
 **Changes in v2.16:** cost centers are admin-configurable for the whole organization (§4.2.1): an org default, then per portfolio, per product and optional project overrides, with inheritance, validation, audit and automatic re-tagging.
@@ -1098,6 +1099,26 @@ flowchart LR
   - Code: in the recommended split model (§9) the function is created with a platform bootstrap package and the **application repo** deploys the real code. In single-repo starter mode only, code comes from the regional artifact bucket at `{project}/{tree-hash}/{id}.zip`.
   - DLQ / on-failure destination recommended for S3 triggers.
 - **DynamoDB:** on-demand billing, point-in-time recovery, encryption, deletion protection in stage/prod.
+
+#### 6.4.1 Service settings (declared by each block, validated, shown in the UI)
+
+Each curated block declares the `config` keys it accepts as **setting** objects (one class per kind: choice, integer, text; Open/Closed). The declaration drives three things, so they cannot drift apart:
+
+1. **Validation.** `BlockRegistry.problems_for` rejects unknown keys and invalid values with a 422 that names the allowed keys (for example, *"lambda.function 'processor' does not accept 'memory'; allowed: runtime, handler, memory_mb, timeout_sec"*). Before this, unknown keys were silently ignored and the block used its defaults.
+2. **Defaults.** Blocks read values through `Block.setting(name)`, which falls back to the declared default.
+3. **UI.** `GET /v1/catalog` returns each service's `settings` (`kind`, `name`, `label`, `default`, plus `choices`, `minimum`/`maximum`/`unit` or `optional`). The Services step renders one field per setting for every curated resource. Only values the user changes are sent, so `infra.json` keeps "default" distinct from "chosen".
+
+| Service | Setting | Kind | Default | Allowed |
+|---|---|---|---|---|
+| Lambda | `runtime` | choice | `python3.13` | `python3.13`, `python3.12`, `nodejs22.x`, `nodejs20.x`, `java21`, `provided.al2023` (Go, Rust and other compiled languages) |
+| Lambda | `handler` | text | `lambda_function.lambda_handler` | 1–128 characters of `A-Za-z0-9_.:/$-` |
+| Lambda | `memory_mb` | integer | 256 | 128–10240 MB |
+| Lambda | `timeout_sec` | integer | 30 | 1–900 seconds |
+| DynamoDB | `partition_key` | text | `pk` | 1–255 characters of `A-Za-z0-9_.-` |
+| DynamoDB | `sort_key` | text, optional | none | 1–255 characters of `A-Za-z0-9_.-` |
+| S3, SQS | none | | | Any `config` key is rejected |
+
+Schema-driven (Tier 2) resources accept only `config.properties`, which must be a JSON object.
 
 ### 6.5 Template parameters
 
@@ -3295,4 +3316,4 @@ A `RepositoryReader` runs an ordered chain of checks (one class each, Open/Close
 | RB6 | Later: optimistic lock (a design records the commit it was read from; approve fails if HEAD moved) | Phase 2 |
 | RB7 | Repositories generated before the manifest existed | Rejected by read-back; approving any new landing zone design stamps the repo. |
 
-**Found while researching (separate fixes):** the UI sends resource settings as `config.properties`, but the curated S3, Lambda, DynamoDB and SQS blocks read only top-level `config` keys, so those properties appear to be dropped. §6.1 says "sorted keys" but templates keep insertion order; only `infra.json` is sorted.
+**Found while researching (separate fixes):** curated blocks silently ignored unknown `config` keys, and the UI had no fields for their settings; both are fixed by §6.4.1. (The UI sends `config.properties` only for schema-driven resources, which read it, so no settings were being dropped.) §6.1 says "sorted keys" but templates keep insertion order; only `infra.json` is sorted.
