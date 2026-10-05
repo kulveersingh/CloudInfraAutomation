@@ -1,9 +1,11 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from datetime import datetime
 
 from app.config import Settings
 
 DEFAULT_BRANCH = "main"
+BOOTSTRAP_STACK = "cloudinfra-bootstrap-{project}"
 
 
 class RepositoryConflictError(Exception):
@@ -12,6 +14,10 @@ class RepositoryConflictError(Exception):
 
 class MergeConflictError(Exception):
     """The pull request cannot be merged or closed in its current state."""
+
+
+class RepositoryArchivedError(Exception):
+    """The repository is archived (read-only)."""
 
 
 @dataclass(frozen=True)
@@ -30,7 +36,7 @@ class BootstrapRequest:
 
     @property
     def stack_name(self) -> str:
-        return f"cloudinfra-bootstrap-{self.project}"
+        return BOOTSTRAP_STACK.format(project=self.project)
 
     @property
     def trust_subject(self) -> str:
@@ -81,8 +87,8 @@ class GitHubPort(ABC):
 
     @abstractmethod
     def commit_files(self, owner: str, name: str, files: dict[str, str], message: str,
-                     branch: str = DEFAULT_BRANCH) -> str:
-        """One commit on the branch; a new branch starts from the default branch."""
+                     branch: str = DEFAULT_BRANCH, deleted: tuple[str, ...] | list[str] = ()) -> str:
+        """One commit on the branch (a new branch starts from the default branch), also removing `deleted` paths."""
 
     @abstractmethod
     def read_files(self, owner: str, name: str, branch: str = DEFAULT_BRANCH) -> RepositorySnapshot:
@@ -90,6 +96,22 @@ class GitHubPort(ABC):
 
     @abstractmethod
     def delete_branch(self, owner: str, name: str, branch: str) -> None:
+        ...
+
+    @abstractmethod
+    def repository_variables(self, owner: str, name: str) -> dict[str, str]:
+        ...
+
+    @abstractmethod
+    def delete_environment(self, owner: str, name: str, environment: str) -> None:
+        ...
+
+    @abstractmethod
+    def archive_repository(self, owner: str, name: str) -> None:
+        ...
+
+    @abstractmethod
+    def unarchive_repository(self, owner: str, name: str) -> None:
         ...
 
     @abstractmethod
@@ -127,4 +149,71 @@ class AwsPort(ABC):
 
     @abstractmethod
     def delete_bootstrap_stack(self, request: BootstrapRequest) -> None:
+        ...
+
+    @abstractmethod
+    def allow_stack_deletion(self, account_id: str, region: str, stack_name: str) -> None:
+        """Lifts the production stack policy for one deletion (§21.9.2)."""
+
+    @abstractmethod
+    def delete_stack(self, account_id: str, region: str, stack_name: str) -> None:
+        ...
+
+    @abstractmethod
+    def delete_data_store(self, account_id: str, region: str, resource_type: str, physical_name: str) -> None:
+        """Empties and deletes a data store a retain policy kept, once it is backed up."""
+
+    @abstractmethod
+    def import_stack(self, account_id: str, region: str, stack_name: str, logical_ids: list[str]) -> None:
+        """Creates the stack with an IMPORT change set that adopts restored data stores (§21.9.5)."""
+
+    @abstractmethod
+    def backup(self, backup_account_id: str) -> "BackupPort":
+        """AWS Backup, with the central vaults of the given Backup account."""
+
+
+@dataclass(frozen=True)
+class BackupSource:
+    account_id: str
+    region: str
+    resource_type: str
+    source_arn: str
+
+
+@dataclass(frozen=True)
+class RecoveryPoint:
+    arn: str
+    vault: str
+    account_id: str
+    region: str
+    source_arn: str
+    resource_type: str
+    completed_at: datetime
+    locked_until: datetime
+
+
+@dataclass(frozen=True)
+class VaultLock:
+    locked: bool
+    min_retention_days: int
+
+
+class BackupPort(ABC):
+    """AWS Backup for teardowns, from `AwsPort.backup`: back up into the locked central vault, check the lock,
+    restore. It has no way to delete a recovery point: only super users do that, manually, after the lock (§21.9.1)."""
+
+    @abstractmethod
+    def back_up(self, source: BackupSource) -> RecoveryPoint:
+        """Backs up the resource and copies it to the central vault; returns once the copy completed."""
+
+    @abstractmethod
+    def vault_lock(self, region: str) -> VaultLock:
+        ...
+
+    @abstractmethod
+    def recovery_point(self, arn: str) -> RecoveryPoint | None:
+        ...
+
+    @abstractmethod
+    def restore(self, recovery_point_arn: str, account_id: str, region: str, physical_name: str) -> None:
         ...

@@ -3528,6 +3528,23 @@ Restore needs only the record and the recovery points, which stay for 60 days at
   - the project and repository reactivated after a decommission.
 - **UI:** previews, confirmation, approval, job progress, backups with lock dates, restore.
 
+#### 21.9.7a Implementation notes
+
+- **Finding data stores.** They come from the template the environment's current request generates (the main resource of each service, its name property resolved with the project, account and region), not from `ListStackResources`. A real AWS adapter can cross-check the deployed stack. A data store whose physical name is not in the template (an RDS cluster without an identifier, any EFS file system) **blocks** the teardown rather than being skipped.
+- **Environment states:**
+  - `pending_approval`;
+  - `approved` (waiting for its turn);
+  - `queued`;
+  - `running` (backups and deletions show as job steps);
+  - `completed`;
+  - `rejected` or `cancelled`;
+  - `failed_needs_attention`.
+- **The Backup account** is resolved when the teardown is requested (configured `backup_account_id`, else the applied landing zone's `<org>-backup` account) and **stored on the teardown**, so a restore uses the same vaults. AWS Backup is reached through `AwsPort.backup(account)`.
+- **Restore** is requested with `POST …/teardowns/{id}:restore` and decided with `:approve-restore` or `:reject-restore`, by someone other than the requester; a platform admin is needed when STAGE or PROD come back. Restore is refused while a backup is missing, or when an environment was added back to the project in the meantime.
+- **SCPs.** The recovery-point protection is a statement in the existing baseline and infrastructure SCPs, so no OU gains an SCP (quota of 10, §20.12.6).
+- **Workload vaults.** Each workload account gets its local `cloudinfra-teardown` vault from a second service-managed StackSet in every governed region.
+- **Changes during a teardown.** A teardown or restore in progress blocks new changes (§21.8) on the project.
+
 #### 21.9.8 Decisions
 
 | # | Decision | Recommendation |

@@ -4,6 +4,7 @@ from app.db import models
 from app.errors import ConflictError, NotFoundError, ValidationFailedError
 from app.networks.service import NetworkService
 from app.projects.change_repository import ProjectChangeRepository
+from app.projects.files import ProjectFiles
 from app.projects.readback import ProjectSubject
 from app.projects.repository import ProjectRepository
 from app.projects.tags import TagSet
@@ -25,7 +26,8 @@ class ProjectService:
 
     def __init__(self, registry: RegistryService, synthesizer: TemplateSynthesizer, validator: RequestValidator,
                  linter: TemplateLinter, bundle: RepositoryBundle, topologies: TopologyFactory, queue: JobQueue,
-                 projects: ProjectRepository, networks: NetworkService, changes: ProjectChangeRepository):
+                 projects: ProjectRepository, networks: NetworkService, changes: ProjectChangeRepository,
+                 files: ProjectFiles):
         self._registry = registry
         self._synthesizer = synthesizer
         self._validator = validator
@@ -36,6 +38,7 @@ class ProjectService:
         self._projects = projects
         self._networks = networks
         self._changes = changes
+        self._files = files
 
     @classmethod
     def for_session(cls, session: Session) -> "ProjectService":
@@ -43,7 +46,8 @@ class ProjectService:
         return cls(RegistryService.for_session(session), TemplateSynthesizer(blocks, binders),
                    RequestValidator.default(blocks, binders), TemplateLinter.default(), RepositoryBundle.default(),
                    TopologyFactory.default(), JobQueue(session), ProjectRepository(session),
-                   NetworkService.for_session(session), ProjectChangeRepository(session))
+                   NetworkService.for_session(session), ProjectChangeRepository(session),
+                   ProjectFiles.for_session(session))
 
     def preview(self, request: ProjectRequest) -> dict:
         self._validate(request)
@@ -69,6 +73,7 @@ class ProjectService:
     def projects(self) -> list[dict]:
         return [{"name": project.name, "portfolio_id": project.portfolio_id, "product_id": project.product_id,
                  "resilience_mode": project.resilience_mode, "status": project.status, "revision": project.revision,
+                 "environments": project.request["environments"],
                  "open_change": self._open_change(project.name)}
                 for project in self._projects.all()]
 
@@ -85,7 +90,7 @@ class ProjectService:
         return ProjectSubject(project, self.render)
 
     def render(self, request: ProjectRequest) -> dict[str, str]:
-        return self._bundle.render(request, self._synthesizer.synthesize(request))
+        return self._files.render(request)
 
     def _validate(self, request: ProjectRequest) -> None:
         try:

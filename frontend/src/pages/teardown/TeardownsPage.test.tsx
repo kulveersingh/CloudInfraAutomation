@@ -80,6 +80,12 @@ describe("TeardownsPage", () => {
       screen.getByRole("region", { name: "invoice-ingest · decommission" })]).toHaveLength(2);
   });
 
+  it("says when a restore is running", async () => {
+    renderTeardowns([{ ...COMPLETED, restore: { state: "running", requested_by: "jordan", decided_by: "sam", job_id: "job-9" } }]);
+    expect([await screen.findByText("The restore is running."), screen.queryByRole("button", { name: /restore of/ })]).toEqual(
+      [expect.anything(), null]);
+  });
+
   it("offers a new restore after one was rejected", async () => {
     renderTeardowns([{ ...COMPLETED, restore: { state: "rejected", requested_by: "jordan", decided_by: "sam", job_id: null } }]);
     expect(await screen.findByRole("button", { name: "Request restore of invoice-ingest" })).toBeInTheDocument();

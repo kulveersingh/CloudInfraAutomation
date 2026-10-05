@@ -17,6 +17,8 @@ from app.readback.manifest import MANIFEST_PATH
 from app.registry.service import require
 from app.synth.blocks.registry import BlockRegistry
 from app.synth.request import ProjectRequest
+from app.teardown.blockers import active_teardown_message
+from app.teardown.repository import TeardownRepository
 
 CHANGE_JOB = "change"
 
@@ -33,7 +35,8 @@ class ProjectChangeService:
     """Change infrastructure (§21.8): preview, open as a change job that raises a pull request, merge or close."""
 
     def __init__(self, projects: ProjectRepository, changes: ProjectChangeRepository, service: ProjectService,
-                 queue: JobQueue, github: GitHubPort, owner: str, blocks: BlockRegistry, rules: ChangeRules):
+                 queue: JobQueue, github: GitHubPort, owner: str, blocks: BlockRegistry, rules: ChangeRules,
+                 teardowns: TeardownRepository):
         self._projects = projects
         self._changes = changes
         self._service = service
@@ -42,11 +45,13 @@ class ProjectChangeService:
         self._owner = owner
         self._blocks = blocks
         self._rules = rules
+        self._teardowns = teardowns
 
     @classmethod
     def for_session(cls, session: Session, github: GitHubPort, owner: str) -> "ProjectChangeService":
         return cls(ProjectRepository(session), ProjectChangeRepository(session), ProjectService.for_session(session),
-                   JobQueue(session), github, owner, BlockRegistry.default(), ChangeRules.default())
+                   JobQueue(session), github, owner, BlockRegistry.default(), ChangeRules.default(),
+                   TeardownRepository(session))
 
     def preview(self, project_name: str, change: ChangeRequest) -> dict:
         project = self._changeable(project_name, change.request)
@@ -117,6 +122,8 @@ class ProjectChangeService:
         return project
 
     def _require_no_active_change(self, project: models.Project) -> None:
+        if self._teardowns.active(project.name) is not None:
+            raise ConflictError(active_teardown_message(project.name))
         active = self._changes.active(project.name)
         if active is not None:
             raise ConflictError(f"Change revision {active.revision} is still open: merge or close it first.")

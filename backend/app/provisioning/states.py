@@ -17,6 +17,7 @@ class ProjectStatus:
     PROVISIONING = "provisioning"
     ACTIVE = "active"
     FAILED = "failed"
+    DECOMMISSIONED = "decommissioned"
 
     @classmethod
     def for_job_state(cls, job_state: str) -> str:

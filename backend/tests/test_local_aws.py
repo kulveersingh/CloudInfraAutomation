@@ -56,8 +56,10 @@ def test_stack_operations_are_recorded(local_aws):
 
 def test_operations_name_their_target(local_aws):
     local_aws.delete_data_store("222222222222", "us-east-1", "AWS::DynamoDB::Table", "demo--orders")
-    assert local_aws.operations() == [{"operation": "delete_data_store", "account": "222222222222",
-                                       "region": "us-east-1", "target": "AWS::DynamoDB::Table demo--orders"}]
+    [operation] = local_aws.operations()
+    assert {key: value for key, value in operation.items() if key != "at"} == {
+        "operation": "delete_data_store", "account": "222222222222", "region": "us-east-1",
+        "target": "AWS::DynamoDB::Table demo--orders"}
 
 
 def test_no_operations_yet(local_aws):

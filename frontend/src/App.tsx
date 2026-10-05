@@ -1,14 +1,16 @@
 import { useState, type ReactNode } from "react";
 import { useApi } from "./api/ApiContext";
-import type { Identity } from "./api/types";
+import type { Identity, TeardownScope } from "./api/types";
 import { AdminPage } from "./pages/admin/AdminPage";
 import { LandingZonePage } from "./pages/landingZone/LandingZonePage";
 import { ProjectsPage } from "./pages/ProjectsPage";
 import { ReleaseConsolePage } from "./pages/releases/ReleaseConsolePage";
+import { TeardownRequestPage } from "./pages/teardown/TeardownRequestPage";
+import { TeardownsPage } from "./pages/teardown/TeardownsPage";
 import { ChangeProjectPage } from "./pages/wizard/ChangeProjectPage";
 import { NewProjectPage } from "./pages/wizard/NewProjectPage";
 
-type Page = "projects" | "new" | "change" | "releases" | "admin" | "landing-zone";
+type Page = "projects" | "new" | "change" | "teardown" | "teardowns" | "releases" | "admin" | "landing-zone";
 
 /** Local identities until SSO is connected; the API receives them as X-Actor / X-Roles. */
 export const IDENTITIES: Identity[] = [
@@ -23,14 +25,18 @@ const NAVIGATION: Array<{ page: Page; label: string }> = [
   { page: "projects", label: "Projects" },
   { page: "new", label: "New project" },
   { page: "releases", label: "Release console" },
+  { page: "teardowns", label: "Teardowns" },
   { page: "admin", label: "Admin" },
   { page: "landing-zone", label: "Landing zone" },
 ];
 
-type Go = (page: Page, project?: string) => void;
+type Go = (page: Page, project?: string, scope?: TeardownScope) => void;
 
-const PAGES: Record<Page, (go: Go, identity: Identity, project: string) => ReactNode> = {
-  projects: (go) => <ProjectsPage onNewProject={() => go("new")} onChangeProject={(name) => go("change", name)} />,
+const PAGES: Record<Page, (go: Go, identity: Identity, project: string, scope: TeardownScope) => ReactNode> = {
+  projects: (go) => <ProjectsPage onNewProject={() => go("new")} onChangeProject={(name) => go("change", name)}
+                                  onTeardown={(name, scope) => go("teardown", name, scope)} />,
+  teardown: (_, __, project, scope) => <TeardownRequestPage key={`${project}-${scope}`} projectName={project} scope={scope} />,
+  teardowns: () => <TeardownsPage />,
   new: () => <NewProjectPage />,
   change: (_, __, project) => <ChangeProjectPage key={project} projectName={project} />,
   releases: (_, identity) => <ReleaseConsolePage key={identity.name} identity={identity} />,
@@ -42,8 +48,10 @@ export function App() {
   const api = useApi();
   const [page, setPage] = useState<Page>("projects");
   const [project, setProject] = useState("");
-  const go: Go = (next, name = "") => {
+  const [scope, setScope] = useState<TeardownScope>("environment");
+  const go: Go = (next, name = "", teardownScope = "environment") => {
     setProject(name);
+    setScope(teardownScope);
     setPage(next);
   };
   const [identity, setIdentity] = useState(() => {
@@ -75,7 +83,7 @@ export function App() {
           </select>
         </div>
       </aside>
-      <main className="content">{PAGES[page](go, identity, project)}</main>
+      <main className="content">{PAGES[page](go, identity, project, scope)}</main>
     </div>
   );
 }

@@ -6,6 +6,17 @@ from app.synth.render import NoAliasDumper
 GITHUB_OIDC_URL = "https://token.actions.githubusercontent.com"
 
 
+def teardown_vault_template() -> dict:
+    """The local vault teardown backups are taken into before they are copied to the locked central vault."""
+    return {
+        "AWSTemplateFormatVersion": FORMAT_VERSION,
+        "Description": "CloudInfra teardown vault: on-demand backups before their copy to the central Backup account.",
+        "Resources": {"TeardownVault": {"Type": "AWS::Backup::BackupVault", "DeletionPolicy": "Retain",
+                                        "UpdateReplacePolicy": "Retain",
+                                        "Properties": {"BackupVaultName": "cloudinfra-teardown"}}},
+    }
+
+
 def account_bootstrap_template() -> dict:
     """What every workload account needs before the platform can bootstrap projects in it."""
     return {
@@ -57,5 +68,14 @@ class BootstrapStack(StackRenderer):
                 "Parameters": [{"ParameterKey": "PlatformAccountId", "ParameterValue": {"Ref": "PlatformAccountId"}}],
                 "StackInstancesGroup": [{"DeploymentTargets": {"OrganizationalUnitIds": targets},
                                          "Regions": [answers.home_region]}],
-                "TemplateBody": yaml.dump(account_bootstrap_template(), Dumper=NoAliasDumper, sort_keys=False)}}},
+                "TemplateBody": yaml.dump(account_bootstrap_template(), Dumper=NoAliasDumper, sort_keys=False)}},
+                "TeardownVaults": {"Type": "AWS::CloudFormation::StackSet", "Properties": {
+                    "StackSetName": f"{answers.organization_name}-teardown-vaults",
+                    "PermissionModel": "SERVICE_MANAGED",
+                    "AutoDeployment": {"Enabled": True, "RetainStacksOnAccountRemoval": False},
+                    "ManagedExecution": {"Active": True},
+                    "OperationPreferences": {"FailureTolerancePercentage": 10, "MaxConcurrentPercentage": 25},
+                    "StackInstancesGroup": [{"DeploymentTargets": {"OrganizationalUnitIds": targets},
+                                             "Regions": list(answers.governed_regions)}],
+                    "TemplateBody": yaml.dump(teardown_vault_template(), Dumper=NoAliasDumper, sort_keys=False)}}},
         }

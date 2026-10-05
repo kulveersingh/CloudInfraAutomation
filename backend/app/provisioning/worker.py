@@ -12,8 +12,10 @@ from app.provisioning.change_runner import ChangeJobRunner
 from app.provisioning.queue import JobQueue
 from app.provisioning.runner import JobRunner
 from app.readback.manifest import ManifestSigner
+from app.teardown.jobs import RestoreJobRunner, TeardownJobRunner
 
-RUNNERS = {"provision": JobRunner, "change": ChangeJobRunner}
+RUNNERS = {"provision": JobRunner, "change": ChangeJobRunner, "teardown": TeardownJobRunner,
+           "restore": RestoreJobRunner}
 
 
 class Worker:

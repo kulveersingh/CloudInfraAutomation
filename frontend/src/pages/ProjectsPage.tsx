@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useApi } from "../api/ApiContext";
-import type { OpenChange, ProjectSummary, ResilienceMode } from "../api/types";
+import type { OpenChange, ProjectSummary, ResilienceMode, TeardownScope } from "../api/types";
 import { ErrorAlert } from "../components/Notices";
 import { useLoad } from "../hooks/useLoad";
 
@@ -13,9 +13,10 @@ export const MODE_LABELS: Record<ResilienceMode, string> = {
 interface ProjectsPageProps {
   onNewProject: () => void;
   onChangeProject: (projectName: string) => void;
+  onTeardown: (projectName: string, scope: TeardownScope) => void;
 }
 
-export function ProjectsPage({ onNewProject, onChangeProject }: ProjectsPageProps) {
+export function ProjectsPage({ onNewProject, onChangeProject, onTeardown }: ProjectsPageProps) {
   const api = useApi();
   const projects = useLoad(() => api.projects());
   const [error, setError] = useState<string>();
@@ -39,7 +40,8 @@ export function ProjectsPage({ onNewProject, onChangeProject }: ProjectsPageProp
         <button className="btn pri" onClick={onNewProject}>New project</button>
       </header>
       <ErrorAlert message={projects.error ?? error} />
-      {projects.data && <ProjectTable projects={projects.data} onChangeProject={onChangeProject} onDecide={decide} />}
+      {projects.data && <ProjectTable projects={projects.data} onChangeProject={onChangeProject} onTeardown={onTeardown}
+                                      onDecide={decide} />}
     </section>
   );
 }
@@ -47,10 +49,11 @@ export function ProjectsPage({ onNewProject, onChangeProject }: ProjectsPageProp
 interface ProjectTableProps {
   projects: ProjectSummary[];
   onChangeProject: (projectName: string) => void;
+  onTeardown: (projectName: string, scope: TeardownScope) => void;
   onDecide: (decision: "mergeChange" | "closeChange", project: string, change: OpenChange) => void;
 }
 
-function ProjectTable({ projects, onChangeProject, onDecide }: ProjectTableProps) {
+function ProjectTable({ projects, onChangeProject, onTeardown, onDecide }: ProjectTableProps) {
   if (projects.length === 0) {
     return <p className="empty">No projects yet. Create one with New project.</p>;
   }
@@ -71,8 +74,14 @@ function ProjectTable({ projects, onChangeProject, onDecide }: ProjectTableProps
                 {project.open_change
                   ? <OpenChangeCell project={project.name} change={project.open_change} onDecide={onDecide} />
                   : project.status === "active" && (
-                    <button className="btn ghost" aria-label={`Change infrastructure for ${project.name}`}
-                            onClick={() => onChangeProject(project.name)}>Change infrastructure</button>
+                    <div className="row">
+                      <button className="btn ghost" aria-label={`Change infrastructure for ${project.name}`}
+                              onClick={() => onChangeProject(project.name)}>Change infrastructure</button>
+                      <button className="btn ghost" aria-label={`Tear down an environment of ${project.name}`}
+                              onClick={() => onTeardown(project.name, "environment")}>Tear down environment</button>
+                      <button className="btn ghost" aria-label={`Decommission ${project.name}`}
+                              onClick={() => onTeardown(project.name, "project")}>Decommission</button>
+                    </div>
                   )}
               </td>
             </tr>

@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.adapters.ports import AwsPort, GitHubPort
 from app.db import models
 from app.networks.service import NetworkService
+from app.projects.files import ProjectFiles
 from app.projects.readback import GENERATOR, INPUT_FILE, KIND, REVISION
 from app.projects.repository import ProjectRepository
 from app.projects.tags import TagSet
@@ -15,25 +16,20 @@ from app.provisioning.steps import ProvisioningContext, ProvisioningPlanner
 from app.provisioning.topology import TopologyFactory
 from app.readback.manifest import ManifestSealer, ManifestSigner
 from app.registry.service import RegistryService
-from app.synth.binders.registry import BinderRegistry
-from app.synth.blocks.registry import BlockRegistry
-from app.synth.render import RepositoryBundle
 from app.synth.request import ProjectRequest
-from app.synth.synthesizer import TemplateSynthesizer
 
 
 class JobRunner:
     """Runs one provisioning job: build the files, plan the steps, run them as a saga, record the result."""
 
     def __init__(self, queue: JobQueue, projects: ProjectRepository, registry: RegistryService,
-                 synthesizer: TemplateSynthesizer, bundle: RepositoryBundle, topologies: TopologyFactory,
+                 files: ProjectFiles, topologies: TopologyFactory,
                  planner: ProvisioningPlanner, networks: NetworkService, github: GitHubPort, aws: AwsPort,
                  owner: str, sealer: ManifestSealer):
         self._queue = queue
         self._projects = projects
         self._registry = registry
-        self._synthesizer = synthesizer
-        self._bundle = bundle
+        self._project_files = files
         self._topologies = topologies
         self._planner = planner
         self._networks = networks
@@ -46,7 +42,7 @@ class JobRunner:
     def for_session(cls, session: Session, github: GitHubPort, aws: AwsPort, owner: str,
                     signer: ManifestSigner) -> "JobRunner":
         return cls(JobQueue(session), ProjectRepository(session), RegistryService.for_session(session),
-                   TemplateSynthesizer(BlockRegistry.default(), BinderRegistry.default()), RepositoryBundle.default(),
+                   ProjectFiles.for_session(session),
                    TopologyFactory.default(), ProvisioningPlanner(), NetworkService.for_session(session), github, aws,
                    owner, ManifestSealer(signer))
 
@@ -78,6 +74,6 @@ class JobRunner:
             networks=self._networks.resolve(request, topology, accounts))
 
     def _files(self, request: ProjectRequest, revision: int) -> dict[str, str]:
-        files = self._bundle.render(request, self._synthesizer.synthesize(request))
+        files = self._project_files.render(request)
         return self._sealer.seal(kind=KIND, id=request.project_name, revision=revision, generator=GENERATOR,
                                  input=INPUT_FILE, files=files)

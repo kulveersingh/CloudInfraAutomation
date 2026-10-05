@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 import yaml
 
 from app.landing_zone.cloudformation.accounts import AccountsStack
+from app.landing_zone.cloudformation.backup import BackupStack
 from app.landing_zone.cloudformation.base import StackContext, StackRenderer
 from app.landing_zone.cloudformation.bootstrap import BootstrapStack
 from app.landing_zone.cloudformation.foundation import FoundationStack
@@ -16,7 +17,8 @@ from app.landing_zone.diagram import OuDiagramRenderer
 from app.landing_zone.edits import TreeEditor
 from app.synth.render import NoAliasDumper
 
-STACKS: list[StackRenderer] = [FoundationStack(), StructureStack(), AccountsStack(), NetworkStack(), BootstrapStack()]
+STACKS: list[StackRenderer] = [FoundationStack(), StructureStack(), AccountsStack(), NetworkStack(), BackupStack(),
+                               BootstrapStack()]
 STACK_FILES = {stack.name: f"stacks/{stack.name}.yaml" for stack in STACKS}
 POLICY_TYPES = ["SERVICE_CONTROL_POLICY", "RESOURCE_CONTROL_POLICY", "TAG_POLICY", "BACKUP_POLICY",
                 "AISERVICES_OPT_OUT_POLICY"]
@@ -86,7 +88,7 @@ class ApplyScript(BundleFile):
             '  echo "$bucket"',
             "}",
             "",
-            'echo "1/5 Organization, Control Tower roles, Log Archive, Audit and the landing zone"',
+            'echo "1/6 Organization, Control Tower roles, Log Archive, Audit and the landing zone"',
             (f'aws cloudformation deploy --region "$REGION" --s3-bucket "$(template_bucket "$REGION")" --stack-name lz-foundation --template-file {STACK_FILES["lz-foundation"]} '
             "--capabilities CAPABILITY_NAMED_IAM --no-fail-on-empty-changeset"),
             'ORG_ID="$(output "$REGION" lz-foundation OrganizationId)"',
@@ -109,16 +111,16 @@ class ApplyScript(BundleFile):
             ('IDENTITY_CENTER_ARN="$(aws controltower list-enabled-baselines --region "$REGION" '
             '--query "enabledBaselines[?baselineIdentifier==\'$(baseline_named IdentityCenterBaseline)\'].arn" --output text)"'),
             "",
-            'echo "2/5 OUs, policies, baselines and controls"',
+            'echo "2/6 OUs, policies, baselines and controls"',
             (f'aws cloudformation deploy --region "$REGION" --s3-bucket "$(template_bucket "$REGION")" --stack-name lz-structure --template-file {STACK_FILES["lz-structure"]} '
             '--no-fail-on-empty-changeset --parameter-overrides SecurityOuId="$SECURITY_OU_ID" SandboxOuId="$SANDBOX_OU_ID" '
             'ControlTowerBaselineArn="$BASELINE_ARN" IdentityCenterEnabledBaselineArn="$IDENTITY_CENTER_ARN"'),
             "",
-            'echo "3/5 Accounts through Account Factory"',
+            'echo "3/6 Accounts through Account Factory"',
             (f'aws cloudformation deploy --region "$REGION" --s3-bucket "$(template_bucket "$REGION")" --stack-name lz-accounts --template-file {STACK_FILES["lz-accounts"]} '
             '--no-fail-on-empty-changeset --parameter-overrides SecurityOuId="$SECURITY_OU_ID" SandboxOuId="$SANDBOX_OU_ID"'),
             "",
-            'echo "4/5 Network (shared VPCs, Transit Gateway, egress and inspection) in every governed region"',
+            'echo "4/6 Network (shared VPCs, Transit Gateway, egress and inspection) in every governed region"',
             *self._network_parameters(context),
             *self._assume_network_host(context),
             f"for region in {regions}; do",
@@ -127,7 +129,9 @@ class ApplyScript(BundleFile):
             "done",
             "unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN",
             "",
-            'echo "5/5 Account bootstrap StackSet"',
+            *self._backup_vaults(context),
+            "",
+            'echo "6/6 Account bootstrap StackSets"',
             (f'aws cloudformation deploy --region "$REGION" --s3-bucket "$(template_bucket "$REGION")" --stack-name lz-bootstrap --template-file {STACK_FILES["lz-bootstrap"]} '
             '--no-fail-on-empty-changeset --parameter-overrides PlatformAccountId="$PLATFORM_ACCOUNT_ID" '
             'SandboxOuId="$SANDBOX_OU_ID"'),
@@ -146,17 +150,25 @@ class ApplyScript(BundleFile):
                 lines.append(f'  "{key}=$(output "$REGION" lz-structure {key})"')
         return [*lines, ")"]
 
+    def _backup_vaults(self, context: StackContext) -> list[str]:
+        answers = context.design.answers
+        if "backup" not in answers.infrastructure:
+            return ['echo "5/6 No Backup account: teardowns are disabled."']
+        return [
+            'echo "5/6 Locked teardown backup vaults in the Backup account, in every governed region"',
+            'BACKUP_ACCOUNT_ID="$(output "$REGION" lz-accounts BackupAccountId)"',
+            *_assume_role("BACKUP_ACCOUNT_ID"),
+            f"for region in {' '.join(answers.governed_regions)}; do",
+            (f'  aws cloudformation deploy --region "$region" --s3-bucket "$(template_bucket "$region")" --stack-name lz-backup --template-file {STACK_FILES["lz-backup"]} '
+             '--capabilities CAPABILITY_NAMED_IAM --no-fail-on-empty-changeset --parameter-overrides OrganizationId="$ORG_ID" HomeRegion="$REGION"'),
+            "done",
+            "unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN",
+        ]
+
     def _assume_network_host(self, context: StackContext) -> list[str]:
         if network_host_suffix(context.design.answers) is None:
             return ["# No Network or Shared Services account: the shared VPCs live in the management account."]
-        return [
-            'NETWORK_ACCOUNT_ID="$(output "$REGION" lz-accounts NetworkAccountId)"',
-            ('CREDENTIALS="$(aws sts assume-role --role-arn "arn:aws:iam::$NETWORK_ACCOUNT_ID:role/AWSControlTowerExecution" '
-            '--role-session-name landing-zone --query Credentials --output json)"'),
-            'export AWS_ACCESS_KEY_ID="$(echo "$CREDENTIALS" | python3 -c "import json,sys;print(json.load(sys.stdin)[\'AccessKeyId\'])")"',
-            'export AWS_SECRET_ACCESS_KEY="$(echo "$CREDENTIALS" | python3 -c "import json,sys;print(json.load(sys.stdin)[\'SecretAccessKey\'])")"',
-            'export AWS_SESSION_TOKEN="$(echo "$CREDENTIALS" | python3 -c "import json,sys;print(json.load(sys.stdin)[\'SessionToken\'])")"',
-        ]
+        return ['NETWORK_ACCOUNT_ID="$(output "$REGION" lz-accounts NetworkAccountId)"', *_assume_role("NETWORK_ACCOUNT_ID")]
 
 
 class DeployWorkflow(BundleFile):
@@ -252,6 +264,17 @@ class LandingZoneBundle:
         for bundle_file in self._files:
             files.update(bundle_file.render(context))
         return files
+
+
+def _assume_role(account_variable: str) -> list[str]:
+    """Credentials for AWSControlTowerExecution in the account the variable names, exported for the next deploys."""
+    return [
+        (f'CREDENTIALS="$(aws sts assume-role --role-arn "arn:aws:iam::${account_variable}:role/AWSControlTowerExecution" '
+         '--role-session-name landing-zone --query Credentials --output json)"'),
+        *[f'export {variable}="$(echo "$CREDENTIALS" | python3 -c "import json,sys;print(json.load(sys.stdin)[\'{key}\'])")"'
+          for variable, key in (("AWS_ACCESS_KEY_ID", "AccessKeyId"), ("AWS_SECRET_ACCESS_KEY", "SecretAccessKey"),
+                                ("AWS_SESSION_TOKEN", "SessionToken"))],
+    ]
 
 
 def _control_row(enabled) -> str:

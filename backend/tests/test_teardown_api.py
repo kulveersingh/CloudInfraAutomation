@@ -508,3 +508,62 @@ def test_unknown_teardown(client, provisioned):
 
 def test_projects_list_their_environments(client, provisioned):
     assert client.get("/v1/projects").json()[0]["environments"] == ["dev", "test", "stage", "prod"]
+
+
+def test_retry_after_a_failed_backup_skips_the_vault_check_it_passed(client, settings, session_factory, provisioned):
+    backup(settings).fail_backups_of(f"arn:aws:s3:::invoice-ingest--uploads-{DEV_ACCOUNT}-us-east-1")
+    teardown = torn_down(client, settings, session_factory)
+    backup(settings).clear_failures()
+    decide(client, teardown["id"], "dev", "retry")
+    drain(settings, session_factory)
+    job = client.get(f"/v1/jobs/{environment(get(client, teardown['id']), 'dev')['job_id']}").json()
+    assert ([step["name"] for step in job["steps"]][:2], environment(get(client, teardown["id"]), "dev")["state"]) == (
+        ["backup:us-east-1:uploads", "verify-backups"], "completed")
+
+
+def test_nothing_is_deleted_without_a_locked_backup_in_the_vault(client, settings, session_factory, provisioned,
+                                                                 monkeypatch):
+    monkeypatch.setattr(LocalBackup, "recovery_point", lambda self, arn: None)
+    dev = environment(torn_down(client, settings, session_factory), "dev")
+    assert (dev["state"], dev["error"], aws(settings).operations()) == (
+        "failed_needs_attention", "No locked backup in the central vault for uploads (us-east-1); nothing was deleted.",
+        [])
+
+
+def test_decommissioned_projects_cannot_be_torn_down_again(client, settings, session_factory, provisioned):
+    decommissioned(client, settings, session_factory)
+    assert preview(client, "project", ()).json()["blockers"] == [
+        "Project 'invoice-ingest' is decommissioned; only active projects can be torn down."]
+
+
+def test_a_restored_teardown_cannot_be_restored_again(client, settings, session_factory, provisioned):
+    teardown = torn_down(client, settings, session_factory)
+    restore(client, teardown["id"])
+    restore(client, teardown["id"], "approve-restore", headers=SAM)
+    drain(settings, session_factory)
+    response = restore(client, teardown["id"])
+    assert (response.status_code, response.json()["detail"]) == (409, "This teardown was already restored.")
+
+
+def test_restore_refuses_an_environment_that_was_added_back(client, settings, session_factory, provisioned):
+    teardown = torn_down(client, settings, session_factory)
+    read_back = client.get(f"{PROJECT}/repository:read-back").json()
+    request_with_dev = {**read_back["request"], "environments": [*read_back["request"]["environments"], "dev"]}
+    change = client.post(f"{PROJECT}/changes", json={"request": request_with_dev,
+                                                     "base_commit": read_back["commit_sha"]}).json()
+    drain(settings, session_factory)
+    client.post(f"{PROJECT}/changes/{change['id']}:merge")
+    response = restore(client, teardown["id"])
+    assert (response.status_code, response.json()["detail"]) == (
+        409, "dev exists in the project again, so it cannot be restored over.")
+
+
+def test_restore_fails_when_a_backup_disappears_before_it_runs(client, settings, session_factory, provisioned):
+    teardown = torn_down(client, settings, session_factory)
+    restore(client, teardown["id"])
+    [point] = environment(teardown, "dev")["recovery_points"]
+    backup(settings).delete_recovery_point(point["recovery_point_arn"], role="CloudInfraBackupSuperUser",
+                                           at=datetime.now(UTC) + timedelta(days=61))
+    restore(client, teardown["id"], "approve-restore", headers=SAM)
+    drain(settings, session_factory)
+    assert get(client, teardown["id"])["restore"]["state"] == "failed"

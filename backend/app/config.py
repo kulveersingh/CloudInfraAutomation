@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     # the local key is fixed and not secret.
     manifest_signing_keys: dict[str, str] = {"local-dev": "local-development-key-not-secret"}
     manifest_active_key: str = "local-dev"
+    # The central Backup account whose locked vaults keep teardown backups (§21.9). When unset, the landing zone's
+    # Backup account is used; without either, teardowns are refused.
+    backup_account_id: str | None = None
     worker_poll_seconds: float = 2.0
     cors_origins: list[str] = ["http://localhost:5173", "http://localhost:8080"]
 

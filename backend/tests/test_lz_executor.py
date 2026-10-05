@@ -47,7 +47,7 @@ def test_runs_are_recorded(tmp_path):
     executor = LocalLandingZoneExecutor(tmp_path)
     executor.apply(LandingZoneDesigner.default().design(answers(), CATALOG))
     assert executor.history()[0]["stacks"] == ["lz-foundation", "lz-structure", "lz-accounts", "lz-network",
-                                               "lz-bootstrap"]
+                                               "lz-backup", "lz-bootstrap"]
 
 
 def test_empty_history(tmp_path):

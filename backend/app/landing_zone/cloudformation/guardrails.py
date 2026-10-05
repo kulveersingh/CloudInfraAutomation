@@ -14,6 +14,7 @@ CONTROL_TOWER_EXECUTION = "arn:aws:iam::*:role/AWSControlTowerExecution"
 BREAK_GLASS = "arn:aws:iam::*:role/BreakGlass"
 RELEASE_EXECUTOR = "arn:aws:iam::*:role/PlatformReleaseExecutor"
 NETWORK_ADMIN = "arn:aws:iam::*:role/NetworkAdmin"
+BACKUP_SUPER_USER = "arn:aws:iam::*:role/CloudInfraBackupSuperUser"
 BASELINE_KINDS = frozenset({"environment", "parent", "compliance", "policy_staging", "exceptions", "business_users",
                             "automations", "custom_domain"})
 GLOBAL_SERVICES = ["iam:*", "organizations:*", "sts:*", "support:*", "cloudfront:*", "route53:*", "route53domains:*",
@@ -33,6 +34,13 @@ class PolicySpec:
 def _statement(sid: str, actions, condition: dict | None = None, **extra) -> dict:
     statement = {"Sid": sid, "Effect": "Deny", "Action": actions, "Resource": "*", **extra}
     return {**statement, "Condition": condition} if condition else statement
+
+
+def _recovery_point_protection() -> dict:
+    """Backups taken before a teardown can be deleted only by the backup super user (§21.9.1)."""
+    return _statement("DenyRecoveryPointDeletion",
+                      ["backup:DeleteRecoveryPoint", "backup:DeleteBackupVaultLockConfiguration"],
+                      _exempt(BACKUP_SUPER_USER))
 
 
 def _document(*statements: dict) -> dict:
@@ -114,7 +122,8 @@ class PolicyBuilder:
             {"Sid": "DenyUngovernedRegions", "Effect": "Deny", "NotAction": GLOBAL_SERVICES, "Resource": "*",
              "Condition": {"StringNotEquals": {"aws:RequestedRegion": self._answers.governed_regions},
                            **_exempt(CONTROL_TOWER_EXECUTION)}},
-            _statement("DenyRootUser", "*", {"StringLike": {"aws:PrincipalARN": "arn:aws:iam::*:root"}}))
+            _statement("DenyRootUser", "*", {"StringLike": {"aws:PrincipalARN": "arn:aws:iam::*:root"}}),
+            _recovery_point_protection())
         return PolicySpec(f"{self._prefix}-workload-baseline", SCP, content, self._baseline_targets())
 
     def _isolation(self, ou: OuNode) -> PolicySpec:
@@ -138,7 +147,7 @@ class PolicyBuilder:
         content = _document(_statement(
             "DenyDeletingProductionData",
             ["cloudformation:DeleteStack", "dynamodb:DeleteTable", "rds:DeleteDBCluster", "rds:DeleteDBInstance",
-             "s3:DeleteBucket", "backup:DeleteRecoveryPoint"],
+             "s3:DeleteBucket"],
             _exempt(RELEASE_EXECUTOR, BREAK_GLASS, CONTROL_TOWER_EXECUTION)))
         targets = [ou for ou in self._design.environment_ous() if ou.tier == "prod"]
         return PolicySpec(f"{self._prefix}-production-protection", SCP, content, targets)
@@ -157,7 +166,7 @@ class PolicyBuilder:
             "OnlyNetworkAdminsChangeTheHub",
             ["ec2:CreateTransitGateway*", "ec2:DeleteTransitGateway*", "ec2:ModifyTransitGateway*",
              "network-firewall:Delete*", "network-firewall:Update*", "ram:DisassociateResourceShare"],
-            _exempt(NETWORK_ADMIN, CONTROL_TOWER_EXECUTION, BREAK_GLASS)))
+            _exempt(NETWORK_ADMIN, CONTROL_TOWER_EXECUTION, BREAK_GLASS)), _recovery_point_protection())
         return PolicySpec(f"{self._prefix}-network-admin-only", SCP, content, self._of_kind("infrastructure"))
 
     def _security(self) -> PolicySpec:

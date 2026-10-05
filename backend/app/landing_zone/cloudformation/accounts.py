@@ -5,6 +5,7 @@ from app.landing_zone.designer import network_host_suffix
 
 ACCOUNT_FACTORY = "AWS Control Tower Account Factory"
 FOUNDATION_ACCOUNTS = ("log-archive", "audit")
+BACKUP_ACCOUNT = "backup"
 
 
 class AccountsStack(StackRenderer):
@@ -28,6 +29,9 @@ class AccountsStack(StackRenderer):
                 if suffix == host:
                     outputs["NetworkAccountId"] = export(context, "NetworkAccountId",
                                                          {"Fn::GetAtt": [key, "Outputs.AccountId"]})
+                if suffix == BACKUP_ACCOUNT:
+                    outputs["BackupAccountId"] = export(context, "BackupAccountId",
+                                                        {"Fn::GetAtt": [key, "Outputs.AccountId"]})
         return {"Parameters": self._parameters(context), "Resources": resources, "Outputs": outputs}
 
     def _parameters(self, context: StackContext) -> dict:

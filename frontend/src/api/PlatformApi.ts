@@ -1,5 +1,6 @@
 import type {
-  ChangeRequestBody, ProjectChange, ProjectChangePreview, ProjectReadBack,
+  ChangeRequestBody, EnvironmentDecision, ProjectChange, ProjectChangePreview, ProjectReadBack, RestoreAction, Teardown,
+  TeardownPreview, TeardownRequestBody,
   CatalogEntry, CloudFormationType, CostCenterChange, CostCenterSettings, EnvironmentInfo, Identity, JobStatus,
   ControlPackCatalog, IndustryTemplate, LandingZoneDesign, LandingZoneDesignDetail, LandingZoneProposal, LandingZoneReadBack,
   LandingZoneRequest,
@@ -157,6 +158,26 @@ export class PlatformApi implements PlatformApiPort {
 
   closeChange(projectName: string, changeId: string) {
     return this.send<ProjectChange>("POST", `/v1/projects/${projectName}/changes/${changeId}:close`);
+  }
+
+  previewTeardown(projectName: string, body: TeardownRequestBody) {
+    return this.send<TeardownPreview>("POST", `/v1/projects/${projectName}/teardowns:preview`, body);
+  }
+
+  requestTeardown(projectName: string, body: TeardownRequestBody) {
+    return this.send<Teardown>("POST", `/v1/projects/${projectName}/teardowns`, body);
+  }
+
+  teardowns() { return this.send<Teardown[]>("GET", "/v1/teardowns"); }
+
+  decideTeardownEnvironment(projectName: string, teardownId: string, environment: string, decision: EnvironmentDecision,
+    comment: string) {
+    return this.send<Teardown>("POST",
+      `/v1/projects/${projectName}/teardowns/${teardownId}/environments/${environment}:${decision}`, { comment });
+  }
+
+  restoreTeardown(projectName: string, teardownId: string, action: RestoreAction, comment: string) {
+    return this.send<Teardown>("POST", `/v1/projects/${projectName}/teardowns/${teardownId}:${action}`, { comment });
   }
 
   private decide(releaseId: string, decision: string, comment: string) {

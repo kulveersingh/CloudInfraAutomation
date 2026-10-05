@@ -169,7 +169,83 @@ export interface ProjectSummary {
   status: string;
   revision: number;
   open_change: OpenChange | null;
+  environments: string[];
 }
+
+export type TeardownScope = "environment" | "project";
+export type ApproverRole = "reviewer" | "platform-admin";
+
+export interface DataStoreInfo {
+  service_id: string;
+  resource_type: string;
+  physical_name: string;
+  region: string;
+  retained: boolean;
+}
+
+export interface TeardownPreview {
+  scope: TeardownScope;
+  backup_account: string | null;
+  retention_days: number;
+  blockers: string[];
+  environments: Array<{
+    environment: string; account_id: string; regions: string[]; approver_role: ApproverRole; stacks: string[];
+    data_stores: DataStoreInfo[]; not_backed_up: string[];
+  }>;
+}
+
+export interface RecoveryPointInfo {
+  service_id: string;
+  resource_type: string;
+  physical_name: string;
+  region: string;
+  account_id: string;
+  recovery_point_arn: string;
+  vault: string;
+  completed_at: string;
+  locked_until: string;
+}
+
+export interface TeardownEnvironment {
+  environment: string;
+  state: string;
+  approver_role: ApproverRole;
+  decided_by: string | null;
+  decision_comment: string | null;
+  revision: number | null;
+  error: string | null;
+  job_id: string | null;
+  recovery_points: RecoveryPointInfo[];
+}
+
+export interface TeardownRestore {
+  state: string;
+  requested_by: string | null;
+  decided_by: string | null;
+  job_id: string | null;
+}
+
+export interface Teardown {
+  id: string;
+  project_name: string;
+  scope: TeardownScope;
+  state: string;
+  requested_by: string;
+  base_revision: number;
+  base_commit: string | null;
+  created_at: string;
+  environments: TeardownEnvironment[];
+  restore: TeardownRestore | null;
+}
+
+export interface TeardownRequestBody {
+  scope: TeardownScope;
+  environments: string[];
+  confirmation?: string;
+}
+
+export type EnvironmentDecision = "approve" | "reject" | "retry";
+export type RestoreAction = "restore" | "approve-restore" | "reject-restore";
 
 export type ChangeState = "queued" | "open" | "merged" | "closed" | "failed";
 
@@ -501,6 +577,12 @@ export interface PlatformApiPort {
   projectChange(projectName: string, changeId: string): Promise<ProjectChange>;
   mergeChange(projectName: string, changeId: string): Promise<ProjectChange>;
   closeChange(projectName: string, changeId: string): Promise<ProjectChange>;
+  previewTeardown(projectName: string, body: TeardownRequestBody): Promise<TeardownPreview>;
+  requestTeardown(projectName: string, body: TeardownRequestBody): Promise<Teardown>;
+  teardowns(): Promise<Teardown[]>;
+  decideTeardownEnvironment(projectName: string, teardownId: string, environment: string, decision: EnvironmentDecision,
+    comment: string): Promise<Teardown>;
+  restoreTeardown(projectName: string, teardownId: string, action: RestoreAction, comment: string): Promise<Teardown>;
 }
 
 export type ProjectChangePreview = PreviewResult & { summary: ChangeSummary };

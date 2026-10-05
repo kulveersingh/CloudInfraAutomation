@@ -218,3 +218,68 @@ class LandingZoneDesignRecord(Base):
     commit_sha: Mapped[str | None] = mapped_column(String(64))
     accounts: Mapped[dict | None] = mapped_column(JsonDocument)
     created_at: Mapped[datetime] = mapped_column(default=utc_now)
+
+
+class Teardown(Base):
+    """Removing an environment or decommissioning a project, backup-first, with what it needs for a restore (§21.9)."""
+
+    __tablename__ = "teardowns"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    project_name: Mapped[str] = mapped_column(ForeignKey("projects.name"), index=True)
+    scope: Mapped[str] = mapped_column(String(16))
+    state: Mapped[str] = mapped_column(String(32))
+    requested_by: Mapped[str] = mapped_column(String(128))
+    base_revision: Mapped[int]
+    base_request: Mapped[dict] = mapped_column(JsonDocument)
+    base_commit: Mapped[str | None] = mapped_column(String(64))
+    backup_account_id: Mapped[str] = mapped_column(String(12))
+    restore_state: Mapped[str | None] = mapped_column(String(16))
+    restore_requested_by: Mapped[str | None] = mapped_column(String(128))
+    restore_decided_by: Mapped[str | None] = mapped_column(String(128))
+    restore_job_id: Mapped[uuid.UUID | None]
+    restore_steps: Mapped[list] = mapped_column(JsonDocument, default=list)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now)
+
+
+class TeardownEnvironment(Base):
+    """One environment of a teardown: its own approval, job and checkpoints."""
+
+    __tablename__ = "teardown_environments"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    teardown_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("teardowns.id"), index=True)
+    environment: Mapped[str] = mapped_column(String(16))
+    position: Mapped[int]
+    approver_role: Mapped[str] = mapped_column(String(32))
+    account_id: Mapped[str] = mapped_column(String(12))
+    regions: Mapped[list] = mapped_column(JsonDocument)
+    state: Mapped[str] = mapped_column(String(32))
+    decided_by: Mapped[str | None] = mapped_column(String(128))
+    decision_comment: Mapped[str | None] = mapped_column(Text)
+    decided_at: Mapped[datetime | None]
+    revision: Mapped[int | None]
+    error: Mapped[str | None] = mapped_column(Text)
+    job_id: Mapped[uuid.UUID | None]
+    completed_steps: Mapped[list] = mapped_column(JsonDocument, default=list)
+
+
+class TeardownRecoveryPoint(Base):
+    """A backup in the central locked vault, taken before the environment's data store was deleted."""
+
+    __tablename__ = "teardown_recovery_points"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    teardown_environment_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("teardown_environments.id"), index=True)
+    service_id: Mapped[str] = mapped_column(String(64))
+    logical_id: Mapped[str] = mapped_column(String(255))
+    resource_type: Mapped[str] = mapped_column(String(128))
+    physical_name: Mapped[str] = mapped_column(String(255))
+    region: Mapped[str] = mapped_column(String(32))
+    account_id: Mapped[str] = mapped_column(String(12))
+    recovery_point_arn: Mapped[str] = mapped_column(String(512))
+    vault: Mapped[str] = mapped_column(String(128))
+    completed_at: Mapped[datetime]
+    locked_until: Mapped[datetime]
+

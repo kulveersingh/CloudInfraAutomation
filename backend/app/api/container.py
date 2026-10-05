@@ -14,6 +14,7 @@ from app.readback.manifest import ManifestSigner
 from app.readback.reader import RepositoryReader
 from app.registry.service import RegistryService
 from app.releases.service import ReleaseService
+from app.teardown.service import TeardownService
 
 
 class ServiceContainer:
@@ -31,6 +32,8 @@ class ServiceContainer:
                                                            settings.github_owner, signer)
         self.read_back = RepositoryReader.default(github, settings.github_owner, signer)
         self.project_changes = ProjectChangeService.for_session(session, github, settings.github_owner)
+        self.teardowns = TeardownService.for_session(session, adapters.aws(settings), settings.github_owner,
+                                                     settings.backup_account_id)
 
     @classmethod
     def provide(cls, request: Request) -> Iterator["ServiceContainer"]:

@@ -83,3 +83,9 @@ def test_restore_of_a_deleted_recovery_point_fails(backup):
     backup.delete_recovery_point(point.arn, role="CloudInfraBackupSuperUser", at=NOW + timedelta(days=60))
     with pytest.raises(KeyError):
         backup.restore(point.arn, account_id="222222222222", region="us-east-1", physical_name="demo--uploads")
+
+
+def test_cleared_failures_back_up_again(backup):
+    backup.fail_backups_of(SOURCE.source_arn)
+    backup.clear_failures()
+    assert backup.back_up(SOURCE).source_arn == SOURCE.source_arn
