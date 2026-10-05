@@ -1,13 +1,11 @@
 """Helpers for reading synthesized templates in tests."""
 
-from app.synth.binders.registry import BinderRegistry
-from app.synth.blocks.registry import BlockRegistry
+from app.providers.aws.project.toolkit import aws_synthesizer
 from app.synth.request import ProjectRequest
-from app.synth.synthesizer import TemplateSynthesizer
 
 
 def synthesize(payload: dict) -> dict:
-    synthesizer = TemplateSynthesizer(BlockRegistry.default(), BinderRegistry.default())
+    synthesizer = aws_synthesizer()
     return synthesizer.synthesize(ProjectRequest.model_validate(payload))
 
 

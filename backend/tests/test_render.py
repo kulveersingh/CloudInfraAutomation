@@ -3,15 +3,16 @@ import re
 
 import yaml
 
-from app.synth.lint import CfnLintRunner
-from app.synth.render import FileRenderer, RepositoryBundle, TemplateYamlRenderer
+from app.providers.aws.project.lint import CfnLintRunner
+from app.providers.aws.project.render import TemplateYamlRenderer, aws_bundle
+from app.synth.render import FileRenderer, RepositoryBundle
 from app.synth.request import ProjectRequest
 from tests.factories import dr_request_dict, request_dict, with_resources
 from tests.synth_helpers import synthesize
 
 
 def render(payload: dict) -> dict:
-    return RepositoryBundle.default().render(ProjectRequest.model_validate(payload), synthesize(payload))
+    return aws_bundle().render(ProjectRequest.model_validate(payload), synthesize(payload))
 
 
 def test_expected_files():

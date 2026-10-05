@@ -1,7 +1,6 @@
 import pytest
 
-from app.synth.binders.registry import BinderRegistry
-from app.synth.blocks.registry import BlockRegistry
+from app.providers.aws.project.toolkit import aws_binders, aws_blocks
 from app.synth.request import ProjectRequest
 from app.synth.validation import RequestValidationError, RequestValidator
 from tests.factories import dr_request_dict, request_dict, with_resources
@@ -9,7 +8,7 @@ from tests.factories import dr_request_dict, request_dict, with_resources
 
 @pytest.fixture
 def validator() -> RequestValidator:
-    return RequestValidator.default(BlockRegistry.default(), BinderRegistry.default())
+    return RequestValidator.default(aws_blocks(), aws_binders())
 
 
 def messages(validator: RequestValidator, payload: dict) -> list[str]:
@@ -42,7 +41,7 @@ def test_unknown_resource_type(validator):
 
 def test_event_notify_direction_enforced(validator):
     payload = request_dict(connections=[{"kind": "event.notify", "source": "processor", "target": "uploads"}])
-    assert messages(validator, payload) == ["event.notify cannot connect lambda.function to s3.bucket."]
+    assert messages(validator, payload) == ["event.notify cannot connect compute.function to storage.bucket."]
 
 
 def test_iam_access_requires_access_level(validator):
@@ -53,7 +52,7 @@ def test_iam_access_requires_access_level(validator):
 def test_iam_access_target_must_be_access_target(validator):
     payload = with_resources({"id": "other", "type": "lambda.function"}, connections=[
         {"kind": "iam.access", "source": "processor", "target": "other", "access": "read"}])
-    assert messages(validator, payload) == ["iam.access cannot connect lambda.function to lambda.function."]
+    assert messages(validator, payload) == ["iam.access cannot connect compute.function to compute.function."]
 
 
 def test_unknown_connection_kind(validator):

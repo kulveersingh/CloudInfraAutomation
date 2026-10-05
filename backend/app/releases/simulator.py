@@ -1,10 +1,9 @@
 import hashlib
 import secrets
 
+from app.providers.aws.project.toolkit import aws_project
 from app.releases.plan import ChangeSpec, Evidence, PlanSubmission
 from app.releases.risk import STATEFUL_TYPES
-from app.synth.binders.registry import BinderRegistry
-from app.synth.blocks.registry import BlockRegistry
 from app.synth.request import ProjectRequest
 from app.synth.synthesizer import TemplateSynthesizer
 
@@ -19,7 +18,7 @@ class LocalPipelineSimulator:
 
     @classmethod
     def default(cls) -> "LocalPipelineSimulator":
-        return cls(TemplateSynthesizer(BlockRegistry.default(), BinderRegistry.default()))
+        return cls(aws_project().synthesizer)
 
     def plan(self, request: ProjectRequest, environment: str, requested_by: str, high_risk: bool = False) -> PlanSubmission:
         resources = self._synthesizer.synthesize(request)["Resources"]

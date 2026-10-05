@@ -3,7 +3,7 @@
 import pytest
 from cfnlint.api import ManualArgs, lint
 
-from app.synth.render import RepositoryBundle
+from app.providers.aws.project.render import aws_bundle
 from app.synth.request import ProjectRequest
 from tests.factories import dr_request_dict, request_dict, with_resources
 from tests.synth_helpers import synthesize
@@ -37,7 +37,7 @@ VARIANTS = {
 
 
 def findings(payload: dict) -> list[str]:
-    files = RepositoryBundle.default().render(ProjectRequest.model_validate(payload), synthesize(payload))
+    files = aws_bundle().render(ProjectRequest.model_validate(payload), synthesize(payload))
     return [str(match) for match in lint(files["template.yaml"], config=ManualArgs(regions=["us-east-1", "us-east-2"]))]
 
 

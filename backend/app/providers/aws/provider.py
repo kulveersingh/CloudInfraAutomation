@@ -1,4 +1,5 @@
 from app.providers.base import CloudProvider, Vocabulary
+from app.synth.toolkit import ProjectToolkit
 
 
 class AwsProvider(CloudProvider):
@@ -12,3 +13,8 @@ class AwsProvider(CloudProvider):
 
     def default_regions(self):
         return ("us-east-1", "us-east-2")
+
+    def project(self) -> ProjectToolkit:
+        from app.providers.aws.project.toolkit import aws_project
+
+        return aws_project()

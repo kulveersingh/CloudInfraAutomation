@@ -2,12 +2,13 @@ import re
 from functools import cached_property
 from typing import ClassVar
 
+from app.providers.aws.project.capabilities import AwsBlock
+from app.providers.aws.project.template import Template
 from app.synth.blocks.base import Block
 from app.synth.request import ResourceSpec
-from app.synth.template import Template
+from app.synth.toolkit import SEARCH_LIMIT, ResourceTypeCatalog
 
 SCHEMA_REGION = "us-east-1"
-SEARCH_LIMIT = 50
 TIER_2_CATEGORY = "Schema-driven (Tier 2)"
 AWS_TYPE_PATTERN = re.compile(r"^AWS::[A-Za-z0-9]+::[A-Za-z0-9]+$")
 PLATFORM_MANAGED_PREFIXES = ("AWS::IAM::", "AWS::Organizations::", "AWS::SSO::", "AWS::IdentityStore::",
@@ -18,7 +19,7 @@ class UnknownResourceTypeError(KeyError):
     pass
 
 
-class CloudFormationSchemaCatalog:
+class CloudFormationSchemaCatalog(ResourceTypeCatalog):
     """Every CloudFormation resource type, from the official resource schemas bundled with cfn-lint."""
 
     def __init__(self, schema_manager, region: str):
@@ -62,7 +63,7 @@ class CloudFormationSchemaCatalog:
                 for type_name in matches]
 
 
-class SchemaDrivenBlock(Block):
+class SchemaDrivenBlock(AwsBlock):
     """Tier 2: any CloudFormation resource type, with properties passed through from the request."""
 
     category = TIER_2_CATEGORY

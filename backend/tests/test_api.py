@@ -23,7 +23,7 @@ def test_org_registry(client):
 
 
 def test_catalog(client):
-    assert "s3.bucket" in [entry["type"] for entry in client.get("/v1/catalog").json()]
+    assert "storage.bucket" in [entry["type"] for entry in client.get("/v1/catalog").json()]
 
 
 def test_environments(client):

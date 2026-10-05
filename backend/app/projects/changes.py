@@ -15,7 +15,6 @@ from app.provisioning.queue import JobQueue
 from app.provisioning.states import ProjectStatus
 from app.readback.manifest import MANIFEST_PATH
 from app.registry.service import require
-from app.synth.blocks.registry import BlockRegistry
 from app.synth.request import ProjectRequest
 from app.teardown.blockers import active_teardown_message
 from app.teardown.repository import TeardownRepository
@@ -35,7 +34,7 @@ class ProjectChangeService:
     """Change infrastructure (§21.8): preview, open as a change job that raises a pull request, merge or close."""
 
     def __init__(self, projects: ProjectRepository, changes: ProjectChangeRepository, service: ProjectService,
-                 queue: JobQueue, github: GitHubPort, owner: str, blocks: BlockRegistry, rules: ChangeRules,
+                 queue: JobQueue, github: GitHubPort, owner: str, rules: ChangeRules,
                  teardowns: TeardownRepository):
         self._projects = projects
         self._changes = changes
@@ -43,14 +42,13 @@ class ProjectChangeService:
         self._queue = queue
         self._github = github
         self._owner = owner
-        self._blocks = blocks
         self._rules = rules
         self._teardowns = teardowns
 
     @classmethod
     def for_session(cls, session: Session, github: GitHubPort, owner: str) -> "ProjectChangeService":
         return cls(ProjectRepository(session), ProjectChangeRepository(session), ProjectService.for_session(session),
-                   JobQueue(session), github, owner, BlockRegistry.default(), ChangeRules.default(),
+                   JobQueue(session), github, owner, ChangeRules.default(),
                    TeardownRepository(session))
 
     def preview(self, project_name: str, change: ChangeRequest) -> dict:
@@ -148,10 +146,11 @@ class ProjectChangeService:
 
     def _summary(self, project: models.Project, proposed: ProjectRequest) -> dict:
         current = ProjectRequest.model_validate(project.request)
+        blocks = self._service.toolkit(project.provider).blocks
         before = {resource.id: resource for resource in current.resources}
         after = {resource.id: resource for resource in proposed.resources}
         removed = [{"id": resource.id, "type": resource.type,
-                    "retained": self._blocks.block_class(resource.type).retained_on_removal}
+                    "retained": blocks.block_class(resource.type).retained_on_removal}
                    for resource in current.resources if resource.id not in after]
         repository = self._github.read_files(self._owner, repository_name(project.name)).files
         generated = self._service.render(proposed)

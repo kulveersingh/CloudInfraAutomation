@@ -1,10 +1,8 @@
 from abc import ABC, abstractmethod
 from collections import Counter
 
-from app.providers.base import ProviderRegistry, unknown_provider
 from app.synth.access import WRITE_LEVELS
-from app.synth.binders.event_notify import EventNotifyBinder
-from app.synth.binders.iam_access import IamAccessBinder
+from app.synth.binders.kinds import ACCESS_GRANT, EVENT_NOTIFY
 from app.synth.binders.registry import BinderRegistry
 from app.synth.blocks.registry import BlockRegistry
 from app.synth.request import ConnectionSpec, ProjectRequest
@@ -22,14 +20,6 @@ class RequestRule(ABC):
     @abstractmethod
     def messages(self, request: ProjectRequest) -> list[str]:
         ...
-
-
-class ProviderRule(RequestRule):
-    def __init__(self, providers: ProviderRegistry):
-        self._providers = providers
-
-    def messages(self, request):
-        return [] if self._providers.has(request.provider) else [unknown_provider(request.provider)]
 
 
 class UniqueResourceIdsRule(RequestRule):
@@ -94,13 +84,16 @@ class BlockNamingRule(RequestRule):
 
 
 class RecursiveInvocationRule(RequestRule):
+    def __init__(self, binders: BinderRegistry):
+        self._binders = binders
+
     def messages(self, request):
         writes = [connection for connection in request.connections
-                  if connection.kind == IamAccessBinder.kind and connection.access in WRITE_LEVELS]
+                  if self._binders.canonical(connection.kind) == ACCESS_GRANT and connection.access in WRITE_LEVELS]
         return [self._message(write) for write in writes if self._triggers_writer(request, write)]
 
     def _triggers_writer(self, request: ProjectRequest, write: ConnectionSpec) -> bool:
-        return any(connection.kind == EventNotifyBinder.kind and connection.source == write.target
+        return any(self._binders.canonical(connection.kind) == EVENT_NOTIFY and connection.source == write.target
                    and connection.target == write.source and self._overlap(connection.prefix, write.prefix)
                    for connection in request.connections)
 
@@ -118,9 +111,9 @@ class RequestValidator:
 
     @classmethod
     def default(cls, blocks: BlockRegistry, binders: BinderRegistry) -> "RequestValidator":
-        return cls([ProviderRule(ProviderRegistry.default()), UniqueResourceIdsRule(), ResourceTypeRule(blocks), ConnectionEndpointsRule(),
+        return cls([UniqueResourceIdsRule(), ResourceTypeRule(blocks), ConnectionEndpointsRule(),
                     ConnectionCompatibilityRule(blocks, binders), ResilienceRegionsRule(), BlockNamingRule(blocks),
-                    RecursiveInvocationRule()])
+                    RecursiveInvocationRule(binders)])
 
     def validate(self, request: ProjectRequest) -> None:
         messages = [message for rule in self._rules for message in rule.messages(request)]

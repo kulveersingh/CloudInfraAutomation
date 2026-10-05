@@ -1,7 +1,7 @@
-from app.synth.blocks.base import Block, InvocableFunction, RuntimePrincipal
+from app.providers.aws.project.capabilities import AwsBlock, InvocableFunction, RuntimePrincipal
+from app.providers.aws.project.policies import POLICY_VERSION
+from app.providers.aws.project.template import Template
 from app.synth.blocks.settings import ChoiceSetting, IntegerSetting, TextSetting
-from app.synth.policies import POLICY_VERSION
-from app.synth.template import Template
 
 DEFAULT_RUNTIME = "python3.13"
 DEFAULT_HANDLER = "lambda_function.lambda_handler"
@@ -17,13 +17,14 @@ HTTPS_PORT = 443
 PERMISSIONS_BOUNDARY = {"Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/cloudinfra-app-boundary"}
 
 
-class LambdaFunctionBlock(Block, RuntimePrincipal, InvocableFunction):
-    type_name = "lambda.function"
+class LambdaFunctionBlock(AwsBlock, RuntimePrincipal, InvocableFunction):
+    type_name = "compute.function"
+    aliases = ("lambda.function",)
     display_name = "Lambda function"
     category = "Compute"
     multi_region = "replicated"
     logical_id_suffix = "Function"
-    cloudformation_types = ("AWS::Lambda::Function",)
+    provider_types = ("AWS::Lambda::Function",)
     settings = (
         ChoiceSetting("runtime", "Runtime", DEFAULT_RUNTIME, RUNTIMES),
         TextSetting("handler", "Handler", DEFAULT_HANDLER, r"^[A-Za-z0-9_.:/$-]{1,128}$",

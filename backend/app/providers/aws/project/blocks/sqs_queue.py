@@ -1,16 +1,17 @@
-from app.synth.access import SAME_TAG_RESOURCE_CONDITION, AccessActions
-from app.synth.blocks.base import AccessTarget, Block
-from app.synth.policies import SameTagPolicy
-from app.synth.template import Template
+from app.providers.aws.project.access import SAME_TAG_RESOURCE_CONDITION, AccessActions
+from app.providers.aws.project.capabilities import AccessTarget, AwsBlock
+from app.providers.aws.project.policies import SameTagPolicy
+from app.providers.aws.project.template import Template
 
 
-class SqsQueueBlock(Block, AccessTarget):
-    type_name = "sqs.queue"
+class SqsQueueBlock(AwsBlock, AccessTarget):
+    type_name = "messaging.queue"
+    aliases = ("sqs.queue",)
     display_name = "SQS queue"
     category = "Integration"
     multi_region = "regional"
     logical_id_suffix = "Queue"
-    cloudformation_types = ("AWS::SQS::Queue",)
+    provider_types = ("AWS::SQS::Queue",)
 
     ACTIONS = AccessActions(
         read=["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:ChangeMessageVisibility", "sqs:GetQueueAttributes"],

@@ -1,10 +1,10 @@
 from abc import ABC, abstractmethod
 
-from app.synth.access import SAME_TAG_RESOURCE_CONDITION, AccessActions
-from app.synth.blocks.base import AccessTarget, Block
+from app.providers.aws.project.access import SAME_TAG_RESOURCE_CONDITION, AccessActions
+from app.providers.aws.project.capabilities import AccessTarget, AwsBlock
+from app.providers.aws.project.policies import SameTagPolicy
+from app.providers.aws.project.template import Template
 from app.synth.blocks.settings import TextSetting
-from app.synth.policies import SameTagPolicy
-from app.synth.template import Template
 
 DEFAULT_PARTITION_KEY = "pk"
 STRING_ATTRIBUTE = "S"
@@ -60,13 +60,14 @@ class GlobalTableShape(TableShape):
 TABLE_SHAPES = {"single": RegionalTableShape, "dr": GlobalTableShape, "ha": GlobalTableShape}
 
 
-class DynamoDbTableBlock(Block, AccessTarget):
-    type_name = "dynamodb.table"
+class DynamoDbTableBlock(AwsBlock, AccessTarget):
+    type_name = "database.table"
+    aliases = ("dynamodb.table",)
     display_name = "DynamoDB table"
     category = "Databases"
     multi_region = "global"
     logical_id_suffix = "Table"
-    cloudformation_types = ("AWS::DynamoDB::Table", "AWS::DynamoDB::GlobalTable")
+    provider_types = ("AWS::DynamoDB::Table", "AWS::DynamoDB::GlobalTable")
     retained_on_removal = True
     settings = (
         TextSetting("partition_key", "Partition key", DEFAULT_PARTITION_KEY, KEY_PATTERN, KEY_RULE),

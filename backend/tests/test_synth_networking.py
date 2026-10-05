@@ -1,5 +1,5 @@
-from app.synth.lint import CfnLintRunner
-from app.synth.render import RepositoryBundle
+from app.providers.aws.project.lint import CfnLintRunner
+from app.providers.aws.project.render import aws_bundle
 from app.synth.request import ProjectRequest
 from tests.factories import dr_request_dict, request_dict
 from tests.synth_helpers import properties, synthesize
@@ -59,7 +59,7 @@ def test_project_without_compute_has_no_network_parameters():
 
 
 def render_workflow(payload: dict) -> str:
-    return RepositoryBundle.default().render(ProjectRequest.model_validate(payload), synthesize(payload))[
+    return aws_bundle().render(ProjectRequest.model_validate(payload), synthesize(payload))[
         ".github/workflows/deploy.yml"]
 
 
@@ -80,5 +80,5 @@ def test_detached_workflow_has_no_network_variables():
 
 def test_networked_template_passes_cfn_lint():
     payload = dr_request_dict()
-    files = RepositoryBundle.default().render(ProjectRequest.model_validate(payload), synthesize(payload))
+    files = aws_bundle().render(ProjectRequest.model_validate(payload), synthesize(payload))
     assert CfnLintRunner().errors(files["template.yaml"]) == []

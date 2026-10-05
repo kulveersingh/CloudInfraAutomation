@@ -15,7 +15,7 @@ from app.landing_zone.design import LandingZoneDesign, OrgCatalog, OuNode
 from app.landing_zone.designer import network_host_suffix
 from app.landing_zone.diagram import OuDiagramRenderer
 from app.landing_zone.edits import TreeEditor
-from app.synth.render import NoAliasDumper
+from app.providers.aws.project.render import NoAliasDumper
 
 STACKS: list[StackRenderer] = [FoundationStack(), StructureStack(), AccountsStack(), NetworkStack(), BackupStack(),
                                BootstrapStack()]

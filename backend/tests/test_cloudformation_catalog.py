@@ -1,6 +1,9 @@
 import pytest
 
-from app.synth.blocks.cloudformation import CloudFormationSchemaCatalog, UnknownResourceTypeError
+from app.providers.aws.project.blocks.cloudformation import (
+    CloudFormationSchemaCatalog,
+    UnknownResourceTypeError,
+)
 
 CATALOG = CloudFormationSchemaCatalog.bundled()
 

@@ -117,7 +117,7 @@ export class PlatformApi implements PlatformApiPort {
   catalog() { return this.send<CatalogEntry[]>("GET", "/v1/catalog"); }
 
   searchCloudFormation(text: string) {
-    return this.send<CloudFormationType[]>("GET", `/v1/catalog/cloudformation?search=${encodeURIComponent(text)}`);
+    return this.send<CloudFormationType[]>("GET", `/v1/catalog/aws/types?search=${encodeURIComponent(text)}`);
   }
 
   costCenters() { return this.send<CostCenterSettings>("GET", "/v1/admin/cost-centers"); }

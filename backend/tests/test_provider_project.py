@@ -109,8 +109,7 @@ def test_resource_types_of_an_unknown_provider(client):
 
 
 def test_catalog_is_per_provider(client):
-    assert [entry["type"] for entry in client.get("/v1/catalog", params={"provider": "aws"}).json()][0] == (
-        "compute.function")
+    assert client.get("/v1/catalog", params={"provider": "aws"}).json()[0]["type"] == "compute.function"
 
 
 # ---- the core stays cloud-neutral ----

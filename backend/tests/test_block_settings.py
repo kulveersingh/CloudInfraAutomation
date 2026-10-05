@@ -1,11 +1,9 @@
 import pytest
 
-from app.synth.binders.registry import BinderRegistry
-from app.synth.blocks.registry import BlockRegistry
+from app.providers.aws.project.toolkit import aws_binders, aws_blocks, aws_synthesizer
 from app.synth.blocks.settings import ChoiceSetting, IntegerSetting, TextSetting
 from app.synth.catalog import ServiceCatalog
 from app.synth.request import ProjectRequest
-from app.synth.synthesizer import TemplateSynthesizer
 from app.synth.validation import RequestValidationError, RequestValidator
 from tests.factories import request_dict
 
@@ -19,7 +17,7 @@ def resource(type_name: str, config: dict, resource_id: str = "thing") -> dict:
 def messages(*resources: dict) -> list[str]:
     payload = request_dict(resources=list(resources), connections=[])
     try:
-        RequestValidator.default(BlockRegistry.default(), BinderRegistry.default()).validate(
+        RequestValidator.default(aws_blocks(), aws_binders()).validate(
             ProjectRequest.model_validate(payload))
     except RequestValidationError as error:
         return error.messages
@@ -28,14 +26,14 @@ def messages(*resources: dict) -> list[str]:
 
 def function_properties(config: dict) -> dict:
     payload = request_dict(resources=[resource("lambda.function", config, "processor")], connections=[])
-    template = TemplateSynthesizer(BlockRegistry.default(), BinderRegistry.default()).synthesize(
+    template = aws_synthesizer().synthesize(
         ProjectRequest.model_validate(payload))
     return template["Resources"]["ProcessorFunction"]["Properties"]
 
 
 def table_keys(config: dict) -> list:
     payload = request_dict(resources=[resource("dynamodb.table", config, "orders")], connections=[])
-    template = TemplateSynthesizer(BlockRegistry.default(), BinderRegistry.default()).synthesize(
+    template = aws_synthesizer().synthesize(
         ProjectRequest.model_validate(payload))
     return template["Resources"]["OrdersTable"]["Properties"]["KeySchema"]
 
@@ -172,26 +170,26 @@ def test_table_sort_key_is_added_when_chosen():
 # ---- catalog ----
 
 def entries() -> dict:
-    return {entry["type"]: entry for entry in ServiceCatalog(BlockRegistry.default()).entries()}
+    return {entry["type"]: entry for entry in ServiceCatalog(aws_blocks()).entries()}
 
 
 def test_catalog_describes_lambda_settings():
-    assert [(setting["name"], setting["kind"]) for setting in entries()["lambda.function"]["settings"]] == [
+    assert [(setting["name"], setting["kind"]) for setting in entries()["compute.function"]["settings"]] == [
         ("runtime", "choice"), ("handler", "text"), ("memory_mb", "integer"), ("timeout_sec", "integer")]
 
 
 def test_catalog_describes_table_settings():
-    settings = entries()["dynamodb.table"]["settings"]
+    settings = entries()["database.table"]["settings"]
     assert [(setting["name"], setting["default"], setting["optional"]) for setting in settings] == [
         ("partition_key", "pk", False), ("sort_key", None, True)]
 
 
 def test_services_without_settings_list_none():
-    assert (entries()["s3.bucket"]["settings"], entries()["sqs.queue"]["settings"]) == ([], [])
+    assert (entries()["storage.bucket"]["settings"], entries()["messaging.queue"]["settings"]) == ([], [])
 
 
 def test_catalog_api_includes_settings(client):
-    lambda_entry = next(entry for entry in client.get("/v1/catalog").json() if entry["type"] == "lambda.function")
+    lambda_entry = next(entry for entry in client.get("/v1/catalog").json() if entry["type"] == "compute.function")
     assert lambda_entry["settings"][2] == {"kind": "integer", "name": "memory_mb", "label": "Memory", "default": 256,
                                            "minimum": 128, "maximum": 10240, "unit": "MB"}
 

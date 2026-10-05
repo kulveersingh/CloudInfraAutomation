@@ -1,10 +1,13 @@
-from app.synth.binders.base import Binder
-from app.synth.blocks.base import (
+from app.providers.aws.project.capabilities import (
     FunctionNotification,
     InvocableFunction,
     NotificationSource,
     RuntimePrincipal,
 )
+from app.synth.binders.base import Binder
+from app.synth.binders.kinds import EVENT_NOTIFY
+
+DEFAULT_EVENTS = ("s3:ObjectCreated:*",)
 
 
 class EventNotifyBinder(Binder):
@@ -13,7 +16,7 @@ class EventNotifyBinder(Binder):
     The invoke permission uses the source's built ARN, and the source waits for the permission.
     """
 
-    kind = "event.notify"
+    kind = EVENT_NOTIFY
 
     def accepts(self, source_type, target_type) -> bool:
         return issubclass(source_type, NotificationSource) and issubclass(target_type, InvocableFunction)
@@ -27,7 +30,7 @@ class EventNotifyBinder(Binder):
             "SourceArn": source.source_arn(),
             "SourceAccount": {"Ref": "AWS::AccountId"}}})
         source.add_notification(FunctionNotification(
-            events=connection.events, function_arn=target.arn(), prefix=connection.prefix,
+            events=connection.events or list(DEFAULT_EVENTS), function_arn=target.arn(), prefix=connection.prefix,
             suffix=connection.suffix, permission_id=permission_id))
         self._give_function_access(connection, source, target)
 

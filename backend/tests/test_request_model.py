@@ -14,7 +14,7 @@ def test_valid_request_parses():
 
 
 def test_event_notify_defaults_to_object_created():
-    assert parse(request_dict()).connections[0].events == ["s3:ObjectCreated:*"]
+    assert parse(request_dict()).connections[0].events == []
 
 
 def test_resource_lookup_by_id():

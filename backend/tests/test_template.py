@@ -1,6 +1,6 @@
 import pytest
 
-from app.synth.template import DuplicateLogicalIdError, Template
+from app.providers.aws.project.template import DuplicateLogicalIdError, Template
 
 
 def test_empty_template_has_format_version():

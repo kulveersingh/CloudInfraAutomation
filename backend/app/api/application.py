@@ -13,9 +13,6 @@ from app.config import Settings
 from app.db.database import Database
 from app.errors import DomainError
 from app.providers.base import ProviderRegistry
-from app.synth.blocks.cloudformation import CloudFormationSchemaCatalog
-from app.synth.blocks.registry import BlockRegistry
-from app.synth.catalog import ServiceCatalog
 from app.synth.synthesizer import ENGINE_VERSION
 
 TITLE = "CloudInfra Platform API"
@@ -46,7 +43,8 @@ class ApplicationFactory:
         return app
 
     def _routers(self) -> list:
-        catalog = CatalogRouter(ServiceCatalog(BlockRegistry.default()), CloudFormationSchemaCatalog.bundled())
+        providers = ProviderRegistry.default()
+        catalog = CatalogRouter(providers)
         local = self._settings.github_mode == LOCAL_MODE
-        return [HealthRouter(), ProviderRouter(ProviderRegistry.default()), catalog, RegistryRouter(), ProjectRouter(), ChangeRouter(simulation_enabled=local),
+        return [HealthRouter(), ProviderRouter(providers), catalog, RegistryRouter(), ProjectRouter(), ChangeRouter(simulation_enabled=local),
                 ReleaseRouter(simulation_enabled=local), NetworkRouter(), LandingZoneRouter(), TeardownRouter()]

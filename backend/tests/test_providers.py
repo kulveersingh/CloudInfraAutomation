@@ -21,6 +21,9 @@ class ExampleProvider(CloudProvider):
     def default_regions(self):
         return ("north-1", "south-1")
 
+    def project(self):
+        return AwsProvider().project()
+
 
 # ---- registry ----
 

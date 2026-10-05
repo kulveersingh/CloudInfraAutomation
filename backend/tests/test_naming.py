@@ -1,4 +1,4 @@
-from app.synth.naming import ResourceNaming
+from app.providers.aws.project.naming import ResourceNaming
 
 
 def test_logical_id_is_pascal_case_with_suffix():

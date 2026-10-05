@@ -1,17 +1,21 @@
+import dataclasses
+
 import pytest
 
 from app.errors import ValidationFailedError
 from app.projects.service import ProjectService
-from app.synth.binders.registry import BinderRegistry
-from app.synth.blocks.registry import BlockRegistry
-from app.synth.lint import CfnLintRunner, LintRule, TemplateLinter
-from app.synth.render import RepositoryBundle
+from app.providers.aws.project.lint import CfnLintRunner
+from app.providers.aws.project.render import aws_bundle
+from app.providers.aws.project.toolkit import aws_binders, aws_blocks
+from app.providers.aws.provider import AwsProvider
+from app.providers.base import ProviderRegistry
+from app.synth.lint import LintRule, TemplateLinter
 from app.synth.request import ProjectRequest
 from app.synth.validation import RequestValidationError, RequestValidator
 from tests.factories import request_dict
 from tests.synth_helpers import synthesize
 
-BLOCKS = BlockRegistry.default()
+BLOCKS = aws_blocks()
 TOPIC = {"id": "alerts", "type": "AWS::SNS::Topic", "config": {"properties": {"DisplayName": "Alerts"}}}
 
 
@@ -21,7 +25,7 @@ def payload_with(*resources: dict, connections: list | None = None) -> dict:
 
 def messages(payload: dict) -> list[str]:
     try:
-        RequestValidator.default(BLOCKS, BinderRegistry.default()).validate(ProjectRequest.model_validate(payload))
+        RequestValidator.default(BLOCKS, aws_binders()).validate(ProjectRequest.model_validate(payload))
     except RequestValidationError as error:
         return error.messages
     return []
@@ -84,7 +88,7 @@ def test_missing_required_property():
 
 def test_raw_type_with_curated_block_is_redirected():
     assert messages(payload_with({"id": "raw", "type": "AWS::S3::Bucket"})) == [
-        "Use the curated service 's3.bucket' instead of 'AWS::S3::Bucket' for 'raw'."]
+        "Use the curated service 'storage.bucket' instead of 'AWS::S3::Bucket' for 'raw'."]
 
 
 def test_platform_managed_type_is_refused():
@@ -100,19 +104,19 @@ def test_unknown_aws_type_is_reported():
 def test_generic_resource_cannot_be_an_access_target():
     payload = payload_with({"id": "processor", "type": "lambda.function"}, TOPIC, connections=[
         {"kind": "iam.access", "source": "processor", "target": "alerts", "access": "write"}])
-    assert messages(payload) == ["iam.access cannot connect lambda.function to AWS::SNS::Topic."]
+    assert messages(payload) == ["iam.access cannot connect compute.function to AWS::SNS::Topic."]
 
 
 def test_generic_template_passes_cfn_lint():
     subscription = {"id": "sub", "type": "AWS::SNS::Subscription", "config": {"properties": {
         "Protocol": "email", "Endpoint": "ops@example.com", "TopicArn": {"Ref": "AlertsTopic"}}}}
     payload = payload_with(TOPIC, subscription)
-    files = RepositoryBundle.default().render(ProjectRequest.model_validate(payload), synthesize(payload))
+    files = aws_bundle().render(ProjectRequest.model_validate(payload), synthesize(payload))
     assert CfnLintRunner().errors(files["template.yaml"]) == []
 
 
 def test_curated_types_listed_in_catalog_stay_curated():
-    assert BLOCKS.type_names() == ["dynamodb.table", "lambda.function", "s3.bucket", "sqs.queue"]
+    assert BLOCKS.type_names() == ["compute.function", "database.table", "messaging.queue", "storage.bucket"]
 
 
 # ---- creation refuses templates with lint findings ----
@@ -122,9 +126,18 @@ class AlwaysFinding(LintRule):
         return ["AlertsTopic: not allowed in this test"]
 
 
+class LintingAwsProvider(AwsProvider):
+    """AWS, with a linter that always finds something."""
+
+    def project(self):
+        return dataclasses.replace(super().project(), linter=TemplateLinter([AlwaysFinding()]))
+
+
 def test_create_refuses_templates_with_lint_findings(seeded):
+    providers = ProviderRegistry()
+    providers.register(LintingAwsProvider())
     service = ProjectService.for_session(seeded)
-    service._linter = TemplateLinter([AlwaysFinding()])
+    service._providers = providers
     with pytest.raises(ValidationFailedError, match="not allowed in this test"):
         service.create(ProjectRequest.model_validate(payload_with(TOPIC)), "key-lint")
 

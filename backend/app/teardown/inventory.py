@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from app.synth.binders.registry import BinderRegistry
+from app.providers.aws.project.toolkit import aws_project
 from app.synth.blocks.registry import BlockRegistry
 from app.synth.request import ProjectRequest
 from app.synth.synthesizer import TemplateSynthesizer
@@ -79,8 +79,8 @@ class DataStoreInventory:
 
     @classmethod
     def default(cls) -> "DataStoreInventory":
-        blocks = BlockRegistry.default()
-        return cls(TemplateSynthesizer(blocks, BinderRegistry.default()), blocks,
+        toolkit = aws_project()
+        return cls(toolkit.synthesizer, toolkit.blocks,
                    [S3BucketTarget(), DynamoDbTableTarget(), RdsClusterTarget(), RdsInstanceTarget(),
                     EfsFileSystemTarget()])
 

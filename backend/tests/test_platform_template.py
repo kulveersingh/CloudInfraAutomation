@@ -5,7 +5,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from app.synth.lint import CfnLintRunner, TemplateLinter, WildcardActionRule, WildcardResourceRule
+from app.providers.aws.project.lint import CfnLintRunner, WildcardActionRule, WildcardResourceRule
+from app.synth.lint import TemplateLinter
 
 TEMPLATE_PATH = Path(__file__).resolve().parents[2] / "infra" / "platform" / "platform.yaml"
 

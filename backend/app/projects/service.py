@@ -8,31 +8,25 @@ from app.projects.files import ProjectFiles
 from app.projects.readback import ProjectSubject
 from app.projects.repository import ProjectRepository
 from app.projects.tags import TagSet
+from app.providers.base import ProviderRegistry, unknown_provider
 from app.provisioning.queue import JobQueue
 from app.provisioning.states import ProjectStatus
 from app.provisioning.topology import TopologyFactory
 from app.registry.service import RegistryService, require
-from app.synth.binders.registry import BinderRegistry
-from app.synth.blocks.registry import BlockRegistry
-from app.synth.lint import LintError, TemplateLinter
-from app.synth.render import RepositoryBundle
+from app.synth.lint import LintError
 from app.synth.request import ProjectRequest
-from app.synth.synthesizer import TemplateSynthesizer
-from app.synth.validation import RequestValidationError, RequestValidator
+from app.synth.toolkit import ProjectToolkit
+from app.synth.validation import RequestValidationError
 
 
 class ProjectService:
     """Project use cases: preview what will be created, and start provisioning."""
 
-    def __init__(self, registry: RegistryService, synthesizer: TemplateSynthesizer, validator: RequestValidator,
-                 linter: TemplateLinter, bundle: RepositoryBundle, topologies: TopologyFactory, queue: JobQueue,
-                 projects: ProjectRepository, networks: NetworkService, changes: ProjectChangeRepository,
-                 files: ProjectFiles):
+    def __init__(self, registry: RegistryService, providers: ProviderRegistry, topologies: TopologyFactory,
+                 queue: JobQueue, projects: ProjectRepository, networks: NetworkService,
+                 changes: ProjectChangeRepository, files: ProjectFiles):
         self._registry = registry
-        self._synthesizer = synthesizer
-        self._validator = validator
-        self._linter = linter
-        self._bundle = bundle
+        self._providers = providers
         self._topologies = topologies
         self._queue = queue
         self._projects = projects
@@ -42,27 +36,24 @@ class ProjectService:
 
     @classmethod
     def for_session(cls, session: Session) -> "ProjectService":
-        blocks, binders = BlockRegistry.default(), BinderRegistry.default()
-        return cls(RegistryService.for_session(session), TemplateSynthesizer(blocks, binders),
-                   RequestValidator.default(blocks, binders), TemplateLinter.default(), RepositoryBundle.default(),
-                   TopologyFactory.default(), JobQueue(session), ProjectRepository(session),
+        return cls(RegistryService.for_session(session), ProviderRegistry.default(), TopologyFactory.default(), JobQueue(session), ProjectRepository(session),
                    NetworkService.for_session(session), ProjectChangeRepository(session),
                    ProjectFiles.for_session(session))
 
     def preview(self, request: ProjectRequest) -> dict:
-        self._validate(request)
-        template = self._synthesizer.synthesize(request)
+        toolkit = self._validate(request)
+        template = toolkit.synthesizer.synthesize(request)
         ownership = request.ownership
         cost_center = self._registry.resolve_cost_center(ownership.portfolio_id, ownership.product_id,
                                                          request.project_name)
-        return {"files": self._bundle.render(request, template), "tags": TagSet(request, cost_center).as_dict(),
-                "targets": self._targets(request), "lint": self._linter.lint(template)}
+        return {"files": toolkit.bundle.render(request, template), "tags": TagSet(request, cost_center).as_dict(),
+                "targets": self._targets(request), "lint": toolkit.linter.lint(template)}
 
     def check(self, request: ProjectRequest) -> None:
         """Everything that must hold before the platform provisions or changes a project."""
-        self._validate(request)
+        toolkit = self._validate(request)
         self._targets(request)
-        self._reject_lint_findings(self._synthesizer.synthesize(request))
+        self._reject_lint_findings(toolkit, toolkit.synthesizer.synthesize(request))
 
     def create(self, request: ProjectRequest, idempotency_key: str) -> models.Job:
         self.check(request)
@@ -92,18 +83,26 @@ class ProjectService:
     def render(self, request: ProjectRequest) -> dict[str, str]:
         return self._files.render(request)
 
-    def _validate(self, request: ProjectRequest) -> None:
+    def toolkit(self, provider: str) -> ProjectToolkit:
+        """The provider's project toolkit; an unknown provider is an invalid request."""
+        if not self._providers.has(provider):
+            raise ValidationFailedError(unknown_provider(provider))
+        return self._providers.get(provider).project()
+
+    def _validate(self, request: ProjectRequest) -> ProjectToolkit:
+        toolkit = self.toolkit(request.provider)
         try:
-            self._validator.validate(request)
+            toolkit.validator.validate(request)
         except RequestValidationError as error:
             raise ValidationFailedError(str(error)) from error
         self._registry.validate_ownership(request.ownership.portfolio_id, request.ownership.product_id)
         self._registry.validate_environments(request.environments)
         self._registry.validate_regions(request.provider, request.resilience)
+        return toolkit
 
-    def _reject_lint_findings(self, template: dict) -> None:
+    def _reject_lint_findings(self, toolkit: ProjectToolkit, template: dict) -> None:
         try:
-            self._linter.assert_clean(template)
+            toolkit.linter.assert_clean(template)
         except LintError as error:
             raise ValidationFailedError(str(error)) from error
 

@@ -1,6 +1,6 @@
 import json
 
-from app.synth.naming import ResourceNaming
+from app.providers.aws.project.naming import ResourceNaming
 from app.synth.synthesizer import ENGINE_VERSION
 from tests.factories import dr_request_dict, request_dict, with_resources
 from tests.synth_helpers import (

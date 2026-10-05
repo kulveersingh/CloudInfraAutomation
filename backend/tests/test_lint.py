@@ -1,6 +1,7 @@
 import pytest
 
-from app.synth.lint import CfnLintRunner, LintError, LintRule, TemplateLinter
+from app.providers.aws.project.lint import CfnLintRunner, aws_linter
+from app.synth.lint import LintError, LintRule, TemplateLinter
 from tests.factories import request_dict
 from tests.synth_helpers import synthesize
 
@@ -28,7 +29,7 @@ def same_tag_policy(policy_type: str, target_key: str, target_ref: str, sids: li
     return {"Type": policy_type, "Properties": {target_key: target_ref, "PolicyDocument": {"Statement": statements}}}
 
 
-LINTER = TemplateLinter.default()
+LINTER = aws_linter()
 
 
 def test_clean_role_has_no_findings():

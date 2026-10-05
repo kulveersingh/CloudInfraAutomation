@@ -1,6 +1,4 @@
 from app.synth.binders.base import Binder
-from app.synth.binders.event_notify import EventNotifyBinder
-from app.synth.binders.iam_access import IamAccessBinder
 
 
 class UnknownConnectionKindError(KeyError):
@@ -8,27 +6,25 @@ class UnknownConnectionKindError(KeyError):
 
 
 class BinderRegistry:
-    """Maps connection kinds to binders. New kinds are added with register()."""
+    """Maps connection kinds (and their aliases) to binders. New kinds are added with register()."""
 
     def __init__(self):
         self._binders: dict[str, Binder] = {}
+        self._aliases: dict[str, str] = {}
 
-    @classmethod
-    def default(cls) -> "BinderRegistry":
-        registry = cls()
-        for binder in (EventNotifyBinder(), IamAccessBinder()):
-            registry.register(binder)
-        return registry
-
-    def register(self, binder: Binder) -> None:
+    def register(self, binder: Binder, aliases: tuple[str, ...] = ()) -> None:
         self._binders[binder.kind] = binder
+        self._aliases.update({alias: binder.kind for alias in aliases})
+
+    def canonical(self, kind: str) -> str:
+        return self._aliases.get(kind, kind)
 
     def has_kind(self, kind: str) -> bool:
-        return kind in self._binders
+        return self.canonical(kind) in self._binders
 
     def binder(self, kind: str) -> Binder:
         try:
-            return self._binders[kind]
+            return self._binders[self.canonical(kind)]
         except KeyError:
             raise UnknownConnectionKindError(kind) from None
 

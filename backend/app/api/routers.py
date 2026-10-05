@@ -8,9 +8,8 @@ from app.api.container import ServiceContainer
 from app.errors import BadRequestError, NotFoundError
 from app.providers.base import DEFAULT_PROVIDER, ProviderRegistry
 from app.registry.service import CostCenterChange
-from app.synth.blocks.cloudformation import SEARCH_LIMIT, CloudFormationSchemaCatalog
-from app.synth.catalog import ServiceCatalog
 from app.synth.request import ProjectRequest
+from app.synth.toolkit import SEARCH_LIMIT
 
 Services = Annotated[ServiceContainer, Depends(ServiceContainer.provide)]
 DEFAULT_ACTOR = "local-user"
@@ -30,18 +29,19 @@ class HealthRouter:
 
 
 class CatalogRouter:
-    def __init__(self, catalog: ServiceCatalog, cloudformation: CloudFormationSchemaCatalog):
-        self._catalog = catalog
-        self._cloudformation = cloudformation
+    """Each provider's curated services and the raw resource types it publishes (Tier 2)."""
+
+    def __init__(self, providers: ProviderRegistry):
+        self._providers = providers
         self.router = APIRouter(prefix="/v1", tags=["catalog"])
         self.router.add_api_route("/catalog", self.catalog, methods=["GET"])
-        self.router.add_api_route("/catalog/cloudformation", self.cloudformation_types, methods=["GET"])
+        self.router.add_api_route("/catalog/{provider}/types", self.types, methods=["GET"])
 
-    def catalog(self) -> list[dict]:
-        return self._catalog.entries()
+    def catalog(self, provider: str = DEFAULT_PROVIDER) -> list[dict]:
+        return self._providers.get(provider).project().catalog()
 
-    def cloudformation_types(self, search: str = "", limit: int = SEARCH_LIMIT) -> list[dict]:
-        return self._cloudformation.search(search, limit)
+    def types(self, provider: str, search: str = "", limit: int = SEARCH_LIMIT) -> list[dict]:
+        return self._providers.get(provider).project().types.search(search, limit)
 
 
 class RegistryRouter:

@@ -1,8 +1,11 @@
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from app.errors import NotFoundError
+
+if TYPE_CHECKING:
+    from app.synth.toolkit import ProjectToolkit
 
 DEFAULT_PROVIDER = "aws"
 
@@ -34,6 +37,10 @@ class CloudProvider(ABC):
     @abstractmethod
     def default_regions(self) -> tuple[str, str]:
         """The primary and secondary region a new project starts with."""
+
+    @abstractmethod
+    def project(self) -> "ProjectToolkit":
+        """Blocks, binders, IaC dialect, validation, linting and repository files for projects on this cloud."""
 
     def describe(self) -> dict:
         primary, secondary = self.default_regions()

@@ -1,20 +1,27 @@
-from app.synth.access import READ_LEVELS, AccessActions
-from app.synth.blocks.base import AccessTarget, Block, FunctionNotification, NotificationSource
-from app.synth.policies import InsecureTransportDenial, SameTagPolicy
-from app.synth.template import Template
+from app.providers.aws.project.access import AccessActions
+from app.providers.aws.project.capabilities import (
+    AccessTarget,
+    AwsBlock,
+    FunctionNotification,
+    NotificationSource,
+)
+from app.providers.aws.project.policies import InsecureTransportDenial, SameTagPolicy
+from app.providers.aws.project.template import Template
+from app.synth.access import READ_LEVELS
 
 S3_NAME_BUDGET = 31
 NONCURRENT_VERSION_DAYS = 30
 ABORT_UPLOAD_DAYS = 7
 
 
-class S3BucketBlock(Block, AccessTarget, NotificationSource):
-    type_name = "s3.bucket"
+class S3BucketBlock(AwsBlock, AccessTarget, NotificationSource):
+    type_name = "storage.bucket"
+    aliases = ("s3.bucket",)
     display_name = "S3 bucket"
     category = "Storage"
     multi_region = "replicated"
     logical_id_suffix = "Bucket"
-    cloudformation_types = ("AWS::S3::Bucket",)
+    provider_types = ("AWS::S3::Bucket",)
     notification_principal = "s3.amazonaws.com"
     retained_on_removal = True
 

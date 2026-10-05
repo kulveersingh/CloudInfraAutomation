@@ -7,7 +7,6 @@ RESOURCE_ID_PATTERN = r"^[a-z][a-z0-9-]{0,19}$"
 MIN_PROJECT_NAME_LENGTH = 3
 MAX_PROJECT_NAME_LENGTH = 30
 MAX_RESOURCES = 20
-DEFAULT_EVENTS = ("s3:ObjectCreated:*",)
 
 Classification = Literal["public", "internal", "confidential", "restricted"]
 AccessLevel = Literal["read", "write", "readwrite"]
@@ -26,7 +25,7 @@ class ConnectionSpec(BaseModel):
     source: str
     target: str
     access: AccessLevel | None = None
-    events: list[str] = Field(default_factory=lambda: list(DEFAULT_EVENTS))
+    events: list[str] = Field(default_factory=list)  # empty: the provider's default (new objects)
     prefix: str = ""
     suffix: str = ""
 
