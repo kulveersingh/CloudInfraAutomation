@@ -3689,3 +3689,30 @@ Each phase gets its own detailed design section and TDD, like §21.
 | MC7 | Platform credentials for Google Cloud and Azure | Control plane stays on AWS. **Google Cloud:** Workload Identity Federation trusting the platform's AWS role (supported). **Azure:** a federated credential if the platform can present an OIDC token, else a certificate in Secrets Manager. **Open question:** verify the AWS-to-Azure federation path in MC-4. |
 | MC8 | Order | **MC-1 → MC-2 → MC-3 → MC-4 → MC-5**: Google Cloud before Azure, as asked |
 | MC9 | Technology policy | Extend §1 to AWS, Google Cloud, Azure, GitHub and open source |
+
+### 22.8 MC-1 in detail: the neutral core, with AWS as its first provider
+
+Goal: the same behaviour as today, with every AWS-specific piece reached through a `CloudProvider`. It is delivered in five steps, each with its own TDD commits (red, then green) and the full suite at 100% coverage.
+
+| Step | What moves or changes | Visible change |
+|---|---|---|
+| **MC-1a Provider registry and dimension** | `app/providers/base.py`: `CloudProvider` ABC, `Vocabulary`, `ProviderRegistry.default()` (AWS only). `provider` on `ProjectRequest` (default `aws`), projects, regions (key `(provider, id)`), account bindings (unique per environment, portfolio and provider; ids widened to 64 characters with a provider validator), networks, landing-zone designs and teardowns. The migration backfills `aws`. `GET /v1/providers` (id, name, vocabulary, default region pair). | New endpoint; `provider` in responses |
+| **MC-1b Project synthesis** | Moves to `app/providers/aws/project/`: S3/Lambda/DynamoDB/SQS blocks, AWS binder bodies, naming, IAM policies and access actions, the CloudFormation `Template`, AWS lint rules and cfn-lint, the CloudFormation schema catalog, `template.yaml`/`config/{env}.json`/deploy-workflow renderers, and the GitHub environment variables. The core keeps the request model, validation, settings, block and binder base classes with neutral contracts, the synthesizer orchestration over an `IacDocument` ABC, and `infra.json`/README rendering. Neutral contracts:<ul><li>`cloudformation_types` → `provider_types`</li><li>`arn()` → `resource_ref()`</li><li>new block metadata `stateful` and `permission`</li></ul>Curated kinds are neutral (`storage.bucket`, `compute.function`, `database.table`, `messaging.queue`; connection `access.grant`), with the AWS ids (`s3.bucket`, …, `iam.access`) as **aliases**. Stored requests are not rewritten, so existing repositories still read back verified. | Catalog returns neutral kinds; the Tier-2 search moves to `GET /v1/catalog/{provider}/types` |
+| **MC-1c Provisioning, teardown, releases** | `AwsPort` → `ProviderPort` (the AWS adapter keeps its methods). `ProvisioningContext.aws` → `cloud`. The worker picks the provider from the request. `BackupTarget`s → AWS `BackupStrategy`s; recovery points keep `recovery_point_ref`. Release risk uses block metadata instead of `STATEFUL_TYPES` and the IAM type checks. | `recovery_point_arn` → `recovery_point_ref` |
+| **MC-1d Landing zone** | `LandingZoneProvider` ABC. The AWS implementation takes `landing_zone/cloudformation/*`, the control catalog and refresh, AWS limits (OU depth, Control Tower registration, SCP quota, 500 resources) and AWS-only design rules. The core keeps the questionnaire handlers, the design tree and edits, selectors, the pack resolver, templates, IPAM and validation/advice registries. | None |
+| **MC-1e UI and networks** | UI words come from the provider's vocabulary (account/OU/CloudFormation/VPC/Control Tower). The provider picker stays hidden while only one provider is registered. Networks become `network_ref`, `subnet_refs`, `firewall_refs`, with AWS validators (`vpc-`, `subnet-`, `sg-`, 12-digit accounts). | Networks API and screen field names |
+
+**Kept for later phases (on purpose):**
+- Pack files and landing-zone answers stay in their current AWS shape.
+- Splitting them into neutral definitions plus provider mappings happens in **MC-3**, when Google Cloud gives a second implementation to abstract from.
+- This keeps stored designs and `design.json` readable.
+
+#### MC-1 decisions
+
+| # | Decision | Recommendation |
+|---|---|---|
+| MC1-1 | Move the AWS code into `app/providers/aws/`, rather than leaving it in place behind adapters | **Move.** The core then has no AWS imports, and a lint test enforces it. |
+| MC1-2 | Neutral kind ids with AWS aliases; stored requests are never rewritten | **Yes** |
+| MC1-3 | API and DB renames: networks refs, `recovery_point_ref`, widened ids, `provider` everywhere (default `aws`) | **Yes**, in one migration |
+| MC1-4 | Split packs and landing-zone answers in MC-3, not MC-1 | **Yes** |
+| MC1-5 | Hide the provider picker until a second provider exists | **Yes** |
