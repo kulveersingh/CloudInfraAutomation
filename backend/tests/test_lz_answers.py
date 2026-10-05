@@ -93,8 +93,20 @@ def test_organization_name_is_lowercase():
     assert invalid(organization_name="Acme")
 
 
-def test_management_email_is_checked():
-    assert invalid(management_email="not-an-email")
+def test_the_management_email_is_an_aws_answer():
+    assert (answers().provider_answers, "management_email" in answers().model_dump()) == (
+        {"management_email": "aws-management@acme.example"}, False)
+
+
+def test_aws_checks_the_management_email():
+    from app.providers.aws.provider import AwsProvider
+
+    with pytest.raises(ValidationError):
+        AwsProvider().landing_zone().answers.model_validate({"management_email": "not-an-email"})
+
+
+def test_a_direct_connect_link_is_a_dedicated_link():
+    assert answers(network={"on_premises": "direct_connect"}).network.on_premises == "dedicated"
 
 
 def test_at_least_two_governed_regions():

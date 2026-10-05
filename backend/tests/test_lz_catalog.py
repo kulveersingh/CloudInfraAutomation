@@ -1,9 +1,10 @@
 import pytest
+from app.landing_zone.catalog.mappings import PackMappings
 
 from app.landing_zone.catalog.controls import CatalogError, ControlCatalogSnapshot
 from app.landing_zone.catalog.packs import PackRegistry
 from app.landing_zone.catalog.templates import TemplateRegistry
-from app.providers.aws.landing_zone.controls import control_identifier
+from app.providers.aws.landing_zone.controls import aws_controls, aws_snapshot, control_identifier
 
 ROOT_USER = "5kvme4m5d2b4d7if2fs5yg2ui"
 REGION_DENY = "ka8e3pkqefnjsxuyc26ji580"
@@ -18,36 +19,36 @@ def write(path, text: str):
 # ---- control catalog snapshot ----
 
 def test_controls_use_global_identifiers():
-    assert control_identifier(ControlCatalogSnapshot.default().get(ROOT_USER).id) == f"arn:aws:controlcatalog:::control/{ROOT_USER}"
+    assert control_identifier(aws_snapshot().get(ROOT_USER).id) == f"arn:aws:controlcatalog:::control/{ROOT_USER}"
 
 
 def test_snapshot_records_behavior_severity_and_implementation():
-    control = ControlCatalogSnapshot.default().get(RDS_ENCRYPTED)
+    control = aws_snapshot().get(RDS_ENCRYPTED)
     assert (control.behavior, control.severity, control.implementation, control.is_scp) == (
         "DETECTIVE", "HIGH", "CONFIG_RULE", False)
 
 
 def test_scp_based_controls_are_recognised():
-    assert ControlCatalogSnapshot.default().get(ROOT_USER).is_scp is True
+    assert aws_snapshot().get(ROOT_USER).is_scp is True
 
 
 def test_parameterized_controls_list_their_parameters():
-    assert ControlCatalogSnapshot.default().get(REGION_DENY).parameters == (
+    assert aws_snapshot().get(REGION_DENY).parameters == (
         "AllowedRegions", "ExemptedPrincipalArns", "ExemptedActions")
 
 
 def test_framework_mappings_are_unverified_until_refreshed():
-    snapshot = ControlCatalogSnapshot.default()
+    snapshot = aws_snapshot()
     assert (snapshot.mappings_refreshed, snapshot.get(ROOT_USER).frameworks) == (None, ())
 
 
 def test_proactive_prerequisite_is_unknown_until_refreshed():
-    assert ControlCatalogSnapshot.default().proactive_prerequisite is None
+    assert aws_snapshot().proactive_prerequisite is None
 
 
 def test_unknown_control_is_an_error():
     with pytest.raises(CatalogError, match="Unknown control 'nope'"):
-        ControlCatalogSnapshot.default().get("nope")
+        aws_snapshot().get("nope")
 
 
 def test_snapshot_loads_refreshed_mappings(tmp_path):
@@ -65,8 +66,14 @@ controls:
 # ---- control packs ----
 
 def test_every_pack_control_is_in_the_snapshot():
-    snapshot = ControlCatalogSnapshot.default()
-    assert all(snapshot.get(control_id) for pack in PackRegistry.default().all() for control_id in pack.control_ids)
+    snapshot, mappings = aws_snapshot(), aws_controls().mappings
+    assert all(snapshot.get(control_id) for pack in PackRegistry.default().all()
+               for control_id in mappings.controls_for(pack.id))
+
+
+def test_every_pack_has_an_aws_mapping():
+    mappings = aws_controls().mappings
+    assert [pack.id for pack in PackRegistry.default().all() if not mappings.controls_for(pack.id)] == []
 
 
 def test_packs_are_listed_in_a_stable_order():
@@ -84,17 +91,29 @@ def test_unknown_pack_is_an_error():
         PackRegistry.default().get("nope")
 
 
-def test_pack_with_an_unknown_control_fails_to_load(tmp_path):
-    write(tmp_path / "bad.yaml", "id: bad\nversion: 1\nname: Bad\ndescription: x\nselectors: [workloads]\ncontrols: [nope]\n")
-    with pytest.raises(CatalogError, match="Pack 'bad' uses unknown control 'nope'"):
-        PackRegistry.load(tmp_path, ControlCatalogSnapshot.default())
+def test_a_mapping_with_an_unknown_control_fails_to_load(tmp_path):
+    write(tmp_path / "foundation.yaml", "pack: foundation\ncontrols: [nope]\n")
+    with pytest.raises(CatalogError, match="Mapping of pack 'foundation' uses unknown control 'nope'"):
+        PackMappings.load(tmp_path, aws_snapshot(), PackRegistry.default())
+
+
+def test_a_mapping_of_an_unknown_pack_fails_to_load(tmp_path):
+    write(tmp_path / "bad.yaml", f"pack: bad\ncontrols: [{ROOT_USER}]\n")
+    with pytest.raises(CatalogError, match="Unknown control pack 'bad'"):
+        PackMappings.load(tmp_path, aws_snapshot(), PackRegistry.default())
+
+
+def test_packs_are_neutral_definitions(tmp_path):
+    write(tmp_path / "bad.yaml", f"id: bad\nversion: 1\nname: Bad\ndescription: x\nselectors: [workloads]\n"
+                                 f"controls: [{ROOT_USER}]\n")
+    with pytest.raises(CatalogError, match="Pack 'bad' lists controls; they belong in each cloud's mapping"):
+        PackRegistry.load(tmp_path)
 
 
 def test_pack_with_an_unknown_selector_fails_to_load(tmp_path):
-    write(tmp_path / "bad.yaml", f"id: bad\nversion: 1\nname: Bad\ndescription: x\nselectors: [everywhere]\n"
-                                 f"controls: [{ROOT_USER}]\n")
+    write(tmp_path / "bad.yaml", "id: bad\nversion: 1\nname: Bad\ndescription: x\nselectors: [everywhere]\n")
     with pytest.raises(CatalogError, match="Pack 'bad' uses unknown selector 'everywhere'"):
-        PackRegistry.load(tmp_path, ControlCatalogSnapshot.default())
+        PackRegistry.load(tmp_path)
 
 
 def test_profiles_are_packs():

@@ -25,12 +25,19 @@ def answers(**overrides) -> LandingZoneAnswers:
     return LandingZoneAnswers.model_validate(answers_dict(**overrides))
 
 
+def aws_designer():
+    """The designer with AWS's account naming (names plus emails), as the AWS landing zone uses it."""
+    from app.landing_zone.designer import LandingZoneDesigner
+    from app.providers.aws.provider import AwsProvider
+
+    return LandingZoneDesigner.default(AwsProvider().landing_zone().namer)
+
+
 def edited(edits: list[dict], **overrides):
     """The designer's proposal with the editor's changes applied; returns the design and the edit problems."""
-    from app.landing_zone.designer import LandingZoneDesigner
     from app.landing_zone.edits import TreeEditor
 
-    design = LandingZoneDesigner.default().design(answers(**overrides), CATALOG)
+    design = aws_designer().design(answers(**overrides), CATALOG)
     return design, TreeEditor().apply(design, TreeEditor.parse(edits))
 
 

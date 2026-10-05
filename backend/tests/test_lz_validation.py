@@ -1,12 +1,11 @@
 from app.landing_zone.design import AccountPlan, LandingZoneDesign, OuNode
-from app.landing_zone.designer import LandingZoneDesigner
 from app.landing_zone.validation import DesignValidator
 from app.providers.aws.landing_zone.limits import MaximumDepth
-from tests.lz_factories import CATALOG, answers
+from tests.lz_factories import CATALOG, answers, aws_designer
 
 
 def design(**overrides) -> LandingZoneDesign:
-    return LandingZoneDesigner.default().design(answers(**overrides), CATALOG)
+    return aws_designer().design(answers(**overrides), CATALOG)
 
 
 def problems(structure: LandingZoneDesign) -> list[str]:

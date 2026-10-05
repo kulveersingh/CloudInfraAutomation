@@ -1,6 +1,7 @@
 import yaml
 
 from app.landing_zone.catalog.controls import ControlCatalogSnapshot
+from app.providers.aws.landing_zone.controls import aws_snapshot
 from app.providers.aws.landing_zone.refresh import ControlCatalogRefresher
 
 ROOT_USER = "5kvme4m5d2b4d7if2fs5yg2ui"
@@ -38,7 +39,7 @@ class FakeControlCatalog:
 def refreshed(tmp_path, client=None):
     path = tmp_path / "controls.yaml"
     ControlCatalogRefresher(client or FakeControlCatalog(), today="2026-10-04").refresh(
-        ControlCatalogSnapshot.default(), path)
+        aws_snapshot(), path)
     return ControlCatalogSnapshot.load(path)
 
 
@@ -64,7 +65,7 @@ def test_refresh_asks_only_for_framework_mappings_of_snapshot_controls(tmp_path)
     client = FakeControlCatalog()
     refreshed(tmp_path, client)
     assert (client.mapping_filters[0]["MappingTypes"], len(client.mapping_filters[0]["ControlArns"])) == (
-        ["FRAMEWORK"], len(ControlCatalogSnapshot.default().controls))
+        ["FRAMEWORK"], len(aws_snapshot().controls))
 
 
 def test_controls_missing_from_the_catalog_keep_their_snapshot_entry(tmp_path):

@@ -1,11 +1,17 @@
 from dataclasses import replace
 
 import pytest
+from app.landing_zone.catalog.mappings import (
+    AllInherited,
+    PackMappings,
+    PreventiveInherited,
+    ProviderControls,
+)
 
-from app.landing_zone.catalog.controls import ControlCatalogSnapshot
 from app.landing_zone.catalog.packs import PackRegistry
-from app.landing_zone.catalog.resolver import UNRESOLVED_PREREQUISITE, PackResolver
+from app.landing_zone.catalog.resolver import PackResolver
 from app.landing_zone.catalog.selectors import SelectorRegistry
+from app.providers.aws.landing_zone.controls import UNRESOLVED_PREREQUISITE, aws_controls, aws_snapshot
 from tests.lz_factories import add_ou, edited
 
 ROOT_USER = "5kvme4m5d2b4d7if2fs5yg2ui"
@@ -21,7 +27,7 @@ def design(edits=(), **overrides):
 
 
 def resolved(structure, snapshot=None):
-    return PackResolver(PackRegistry.default(), snapshot or ControlCatalogSnapshot.default()).resolve(structure)
+    return PackResolver(PackRegistry.default(), aws_controls(snapshot)).resolve(structure)
 
 
 def ids_on(structure, ou_key: str, snapshot=None) -> list[str]:
@@ -75,12 +81,16 @@ def test_production_packs_reach_only_production_tier():
 
 
 def test_a_control_from_two_packs_is_enabled_once_and_names_both(tmp_path):
+    (tmp_path / "packs").mkdir()
+    (tmp_path / "aws").mkdir()
     for name in ("first", "second"):
-        (tmp_path / f"{name}.yaml").write_text(f"id: {name}\nversion: 1\nname: {name}\ndescription: x\n"
-                                               f"selectors: [workloads, production_tier]\ncontrols: [{ROOT_MFA}]\n")
-    snapshot = ControlCatalogSnapshot.default()
-    registry = PackRegistry.load(tmp_path, snapshot, profiles={"recommended": ["first", "second"]})
-    enabled = PackResolver(registry, snapshot).resolve(design()).controls["prod"]
+        (tmp_path / "packs" / f"{name}.yaml").write_text(f"id: {name}\nversion: 1\nname: {name}\ndescription: x\n"
+                                                         "selectors: [workloads, production_tier]\n")
+        (tmp_path / "aws" / f"{name}.yaml").write_text(f"pack: {name}\ncontrols: [{ROOT_MFA}]\n")
+    registry = PackRegistry.load(tmp_path / "packs", profiles={"recommended": ["first", "second"]})
+    controls = ProviderControls(aws_snapshot(), PackMappings.load(tmp_path / "aws", aws_snapshot(), registry),
+                                PreventiveInherited())
+    enabled = PackResolver(registry, controls).resolve(design()).controls["prod"]
     assert [(item.control.id, item.packs) for item in enabled] == [(ROOT_MFA, ("first", "second"))]
 
 
@@ -129,7 +139,7 @@ def test_logging_pack_also_covers_infrastructure():
 
 @pytest.fixture
 def snapshot_with_prerequisite():
-    snapshot = ControlCatalogSnapshot.default()
+    snapshot = aws_snapshot()
     hooks = replace(snapshot.get(ROOT_USER), id="hooksprerequisite", name="Disallow CloudFormation registry changes")
     return snapshot.with_proactive_prerequisite(hooks)
 
@@ -153,3 +163,16 @@ def test_no_warning_without_proactive_controls():
 def test_a_pack_that_reaches_no_ou_is_a_warning():
     assert resolved(design(control_packs=["foundation", "pci-cde"])).warnings[-1] == (
         "Control pack 'PCI cardholder data environment' applies to no OU in this design.")
+
+
+# ---- how each cloud's controls are inherited ----
+
+def test_aws_inherits_preventive_controls_only():
+    assert (PreventiveInherited().inherited(aws_snapshot().get(ROOT_USER)),
+            PreventiveInherited().inherited(aws_snapshot().get(ROOT_MFA))) == (True, False)
+
+
+def test_where_every_control_is_inherited_nested_ous_get_none_of_the_parents():
+    controls = ProviderControls(aws_snapshot(), aws_controls().mappings, AllInherited())
+    enabled = PackResolver(PackRegistry.default(), controls).resolve(design([add_ou("Payments")])).controls
+    assert (ROOT_MFA in [item.control.id for item in enabled["prod"]], "custom_payments" in enabled) == (True, False)

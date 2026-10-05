@@ -1,9 +1,8 @@
-from app.landing_zone.designer import LandingZoneDesigner
-from tests.lz_factories import CATALOG, answers
+from tests.lz_factories import CATALOG, answers, aws_designer
 
 
 def design(**overrides):
-    return LandingZoneDesigner.default().design(answers(**overrides), CATALOG)
+    return aws_designer().design(answers(**overrides), CATALOG)
 
 
 def top_level(**overrides) -> list[str]:
@@ -28,7 +27,7 @@ def test_security_tooling_is_optional():
 
 
 def test_security_and_sandbox_ous_are_created_by_control_tower():
-    created = [ou.name for ou in design().walk() if ou.created_by_control_tower]
+    created = [ou.name for ou in design().walk() if ou.created_by_service]
     assert created == ["Security", "Sandbox"]
 
 

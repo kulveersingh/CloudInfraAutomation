@@ -5,10 +5,9 @@ import yaml
 from cfnlint.api import ManualArgs, lint
 
 from app.landing_zone.catalog.templates import TemplateRegistry
-from app.landing_zone.designer import LandingZoneDesigner
 from app.providers.aws.landing_zone.cloudformation.bundle import STACK_FILES, LandingZoneBundle, StackSizeRule
 from app.providers.aws.landing_zone.cloudformation.guardrails import GuardrailPlan, ScpQuotaRule
-from tests.lz_factories import CATALOG, account_op, add_account, add_ou, answers, edited
+from tests.lz_factories import CATALOG, account_op, add_account, add_ou, answers, aws_designer, edited
 
 FLOW = {"source": "dev", "destination": "test", "protocol": "tcp", "port": 5432, "reason": "Data refresh"}
 VARIANTS = {
@@ -333,7 +332,7 @@ def test_ai_services_opt_out_at_the_root():
 
 def test_no_ou_exceeds_the_scp_quota_in_any_variant():
     for overrides in VARIANTS.values():
-        design = LandingZoneDesigner.default().design(answers(**overrides), CATALOG)
+        design = aws_designer().design(answers(**overrides), CATALOG)
         assert ScpQuotaRule().problems(GuardrailPlan.for_design(design)) == []
 
 

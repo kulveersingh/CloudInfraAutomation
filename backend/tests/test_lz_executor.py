@@ -1,12 +1,11 @@
 import re
 
-from app.landing_zone.designer import LandingZoneDesigner
 from app.providers.aws.landing_zone.local_executor import LocalLandingZoneExecutor
-from tests.lz_factories import CATALOG, account_op, add_ou, answers, edited
+from tests.lz_factories import CATALOG, account_op, add_ou, answers, aws_designer, edited
 
 
 def apply(tmp_path, **overrides):
-    design = LandingZoneDesigner.default().design(answers(**overrides), CATALOG)
+    design = aws_designer().design(answers(**overrides), CATALOG)
     return LocalLandingZoneExecutor(tmp_path).apply(design)
 
 
@@ -45,7 +44,7 @@ def test_network_ids_look_like_aws_ids(tmp_path):
 
 def test_runs_are_recorded(tmp_path):
     executor = LocalLandingZoneExecutor(tmp_path)
-    executor.apply(LandingZoneDesigner.default().design(answers(), CATALOG))
+    executor.apply(aws_designer().design(answers(), CATALOG))
     assert executor.history()[0]["stacks"] == ["lz-foundation", "lz-structure", "lz-accounts", "lz-network",
                                                "lz-backup", "lz-bootstrap"]
 

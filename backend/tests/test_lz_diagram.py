@@ -1,14 +1,13 @@
 from xml.etree import ElementTree
 
-from app.landing_zone.designer import LandingZoneDesigner
 from app.landing_zone.diagram import OuDiagramRenderer
-from tests.lz_factories import CATALOG, account_op, add_ou, answers, edited
+from tests.lz_factories import CATALOG, account_op, add_ou, answers, aws_designer, edited
 
 SVG = "{http://www.w3.org/2000/svg}"
 
 
 def design(**overrides):
-    return LandingZoneDesigner.default().design(answers(**overrides), CATALOG)
+    return aws_designer().design(answers(**overrides), CATALOG)
 
 
 def svg_texts(**overrides) -> list[str]:
