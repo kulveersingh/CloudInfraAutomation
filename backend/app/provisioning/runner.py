@@ -65,7 +65,7 @@ class JobRunner:
         ownership = request.ownership
         cost_center = self._registry.resolve_cost_center(ownership.portfolio_id, ownership.product_id,
                                                          request.project_name)
-        accounts = self._registry.target_accounts(ownership.portfolio_id, request.environments)
+        accounts = self._registry.target_accounts(request.provider, ownership.portfolio_id, request.environments)
         topology = self._topologies.for_resilience(request.resilience)
         return ProvisioningContext(
             request_id=request_id, request=request, owner=self._owner,

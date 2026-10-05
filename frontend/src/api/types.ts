@@ -161,8 +161,28 @@ export interface OpenChange {
   pull_request: PullRequestLink | null;
 }
 
+export interface Vocabulary {
+  isolation_unit: string;
+  hierarchy_node: string;
+  iac_document: string;
+  deploy_unit: string;
+  preventive_policy: string;
+  private_network: string;
+  landing_zone_service: string;
+  control_catalog: string;
+}
+
+/** A cloud behind the platform (§22): its words for the neutral concepts and default region pair. */
+export interface CloudProviderInfo {
+  id: string;
+  name: string;
+  vocabulary: Vocabulary;
+  default_regions: { primary: string; secondary: string };
+}
+
 export interface ProjectSummary {
   name: string;
+  provider: string;
   portfolio_id: string;
   product_id: string;
   resilience_mode: ResilienceMode;
@@ -580,6 +600,7 @@ export interface PlatformApiPort {
   previewTeardown(projectName: string, body: TeardownRequestBody): Promise<TeardownPreview>;
   requestTeardown(projectName: string, body: TeardownRequestBody): Promise<Teardown>;
   teardowns(): Promise<Teardown[]>;
+  providers(): Promise<CloudProviderInfo[]>;
   decideTeardownEnvironment(projectName: string, teardownId: string, environment: string, decision: EnvironmentDecision,
     comment: string): Promise<Teardown>;
   restoreTeardown(projectName: string, teardownId: string, action: RestoreAction, comment: string): Promise<Teardown>;

@@ -98,7 +98,7 @@ class TeardownService:
         problems = self._problems(project, body.scope, planned, backup_account)
         if problems:
             raise ConflictError(" ".join(problems))
-        teardown = models.Teardown(project_name=project.name, scope=body.scope, state=TeardownState.IN_PROGRESS,
+        teardown = models.Teardown(project_name=project.name, provider=project.provider, scope=body.scope, state=TeardownState.IN_PROGRESS,
                                    requested_by=actor.name, base_revision=project.revision,
                                    base_request=project.request, base_commit=project.commit_sha,
                                    backup_account_id=backup_account, restore_steps=[])
@@ -231,7 +231,7 @@ class TeardownService:
         environments = self._chosen(project, request, body)
         catalog = {environment["id"]: environment for environment in self._registry.environments()}
         environments.sort(key=lambda environment: catalog[environment]["position"])
-        accounts = self._registry.target_accounts(request.ownership.portfolio_id, environments)
+        accounts = self._registry.target_accounts(request.provider, request.ownership.portfolio_id, environments)
         topology = self._topologies.for_resilience(request.resilience)
         planned = []
         for environment in environments:

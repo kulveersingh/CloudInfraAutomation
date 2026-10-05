@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from collections import Counter
 
+from app.providers.base import ProviderRegistry, unknown_provider
 from app.synth.access import WRITE_LEVELS
 from app.synth.binders.event_notify import EventNotifyBinder
 from app.synth.binders.iam_access import IamAccessBinder
@@ -21,6 +22,14 @@ class RequestRule(ABC):
     @abstractmethod
     def messages(self, request: ProjectRequest) -> list[str]:
         ...
+
+
+class ProviderRule(RequestRule):
+    def __init__(self, providers: ProviderRegistry):
+        self._providers = providers
+
+    def messages(self, request):
+        return [] if self._providers.has(request.provider) else [unknown_provider(request.provider)]
 
 
 class UniqueResourceIdsRule(RequestRule):
@@ -109,7 +118,7 @@ class RequestValidator:
 
     @classmethod
     def default(cls, blocks: BlockRegistry, binders: BinderRegistry) -> "RequestValidator":
-        return cls([UniqueResourceIdsRule(), ResourceTypeRule(blocks), ConnectionEndpointsRule(),
+        return cls([ProviderRule(ProviderRegistry.default()), UniqueResourceIdsRule(), ResourceTypeRule(blocks), ConnectionEndpointsRule(),
                     ConnectionCompatibilityRule(blocks, binders), ResilienceRegionsRule(), BlockNamingRule(blocks),
                     RecursiveInvocationRule()])
 

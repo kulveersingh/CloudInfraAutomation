@@ -1,7 +1,7 @@
 import { vi } from "vitest";
 import type {
   AccountInfo, CatalogControlInfo, CatalogEntry, ControlPackCatalog, CostCenterSettings, IndustryTemplate, TemplateSummary, EnvironmentInfo, JobStatus, LandingZoneDesign, LandingZoneDesignDetail,
-  LandingZoneProposal, LandingZoneReadBack, NetworkInfo, ProjectChange, Teardown, TeardownPreview, ProjectChangePreview, ProjectReadBack, ProjectRequest, NetworkOption, OuInfo, PipelineStage, PlatformApiPort, Portfolio, PreviewResult,
+  CloudProviderInfo, LandingZoneProposal, LandingZoneReadBack, NetworkInfo, ProjectChange, Teardown, TeardownPreview, ProjectChangePreview, ProjectReadBack, ProjectRequest, NetworkOption, OuInfo, PipelineStage, PlatformApiPort, Portfolio, PreviewResult,
   ProjectSummary, RegionInfo, Release,
 } from "../api/types";
 import { LandingZoneDraft } from "../landingZone/LandingZoneDraft";
@@ -76,6 +76,13 @@ export const PROJECTS: ProjectSummary[] = [
   { name: "invoice-ingest", portfolio_id: "pf-payments", product_id: "pr-invoicing", resilience_mode: "dr",
     status: "active", revision: 1, open_change: null, environments: ["dev", "prod"], provider: "aws" },
 ];
+
+export const PROVIDERS: CloudProviderInfo[] = [{
+  id: "aws", name: "Amazon Web Services", default_regions: { primary: "us-east-1", secondary: "us-east-2" },
+  vocabulary: { isolation_unit: "account", hierarchy_node: "OU", iac_document: "CloudFormation template", deploy_unit: "stack",
+    preventive_policy: "SCP", private_network: "VPC", landing_zone_service: "Control Tower",
+    control_catalog: "Control Tower controls" },
+}];
 
 export const TEARDOWN_PREVIEW: TeardownPreview = {
   scope: "environment", backup_account: "999999999999", retention_days: 60, blockers: [],
@@ -301,6 +308,7 @@ export function fakeApi(overrides: Partial<PlatformApiPort> = {}): PlatformApiPo
     previewTeardown: vi.fn().mockResolvedValue(TEARDOWN_PREVIEW),
     requestTeardown: vi.fn().mockResolvedValue(teardown()),
     teardowns: vi.fn().mockResolvedValue([teardown()]),
+    providers: vi.fn().mockResolvedValue(PROVIDERS),
     decideTeardownEnvironment: vi.fn().mockResolvedValue(teardown()),
     restoreTeardown: vi.fn().mockResolvedValue(teardown()),
     previewChange: vi.fn().mockResolvedValue(CHANGE_PREVIEW),

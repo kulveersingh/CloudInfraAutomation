@@ -6,6 +6,7 @@ from pydantic import BaseModel
 
 from app.api.container import ServiceContainer
 from app.errors import BadRequestError, NotFoundError
+from app.providers.base import DEFAULT_PROVIDER, ProviderRegistry
 from app.registry.service import CostCenterChange
 from app.synth.blocks.cloudformation import SEARCH_LIMIT, CloudFormationSchemaCatalog
 from app.synth.catalog import ServiceCatalog
@@ -59,11 +60,12 @@ class RegistryRouter:
     def environments(self, services: Services) -> list[dict]:
         return services.registry.environments()
 
-    def regions(self, services: Services) -> list[dict]:
-        return services.registry.regions()
+    def regions(self, services: Services, provider: str | None = None) -> list[dict]:
+        return services.registry.regions(provider)
 
-    def update_region(self, region_id: str, update: RegionUpdate, services: Services) -> dict:
-        return services.registry.set_region_enabled(region_id, update.enabled)
+    def update_region(self, region_id: str, update: RegionUpdate, services: Services,
+                      provider: str = DEFAULT_PROVIDER) -> dict:
+        return services.registry.set_region_enabled(provider, region_id, update.enabled)
 
     def cost_centers(self, services: Services) -> dict:
         return services.registry.cost_centers()
@@ -71,6 +73,16 @@ class RegistryRouter:
     def update_cost_centers(self, change: CostCenterChange, services: Services,
                             actor: Annotated[str, Header(alias="X-Actor")] = DEFAULT_ACTOR) -> dict:
         return services.registry.update_cost_centers(change, actor=actor)
+
+
+class ProviderRouter:
+    def __init__(self, providers: ProviderRegistry):
+        self._providers = providers
+        self.router = APIRouter(prefix="/v1", tags=["providers"])
+        self.router.add_api_route("/providers", self.providers, methods=["GET"])
+
+    def providers(self) -> list[dict]:
+        return [provider.describe() for provider in self._providers.all()]
 
 
 class ProjectRouter:

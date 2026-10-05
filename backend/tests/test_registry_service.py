@@ -120,13 +120,13 @@ def test_unknown_environment_rejected(service):
 
 
 def test_target_accounts(service):
-    assert service.target_accounts("pf-payments", ["dev", "prod"]) == {"dev": "222222222222", "prod": "555555555555"}
+    assert service.target_accounts("aws", "pf-payments", ["dev", "prod"]) == {"dev": "222222222222", "prod": "555555555555"}
 
 
 def test_target_account_missing(service, seeded):
     seeded.execute(delete(models.AccountBinding).where(models.AccountBinding.environment_id == "prod"))
     with pytest.raises(ValidationFailedError, match="No account configured"):
-        service.target_accounts("pf-payments", ["prod"])
+        service.target_accounts("aws", "pf-payments", ["prod"])
 
 
 def test_regions_listed(service):
@@ -134,26 +134,26 @@ def test_regions_listed(service):
 
 
 def test_enable_region(service):
-    service.set_region_enabled("ap-southeast-2", True)
+    service.set_region_enabled("aws", "ap-southeast-2", True)
     assert next(item for item in service.regions() if item["id"] == "ap-southeast-2")["enabled"] is True
 
 
 def test_enable_unknown_region(service):
     with pytest.raises(NotFoundError):
-        service.set_region_enabled("mars-1", True)
+        service.set_region_enabled("aws", "mars-1", True)
 
 
 def test_enabled_regions_pass(service):
     resilience = Resilience(mode="dr", primary_region="us-east-1", secondary_region="us-east-2")
-    assert service.validate_regions(resilience) is None
+    assert service.validate_regions("aws", resilience) is None
 
 
 def test_disabled_region_rejected(service):
     resilience = Resilience(mode="dr", primary_region="us-east-1", secondary_region="ap-southeast-2")
     with pytest.raises(ValidationFailedError, match="ap-southeast-2 is not enabled"):
-        service.validate_regions(resilience)
+        service.validate_regions("aws", resilience)
 
 
 def test_single_region_ignores_secondary(service):
     resilience = Resilience(mode="single", primary_region="us-east-1", secondary_region=None)
-    assert service.validate_regions(resilience) is None
+    assert service.validate_regions("aws", resilience) is None

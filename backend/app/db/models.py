@@ -67,6 +67,7 @@ class Environment(Base):
 class Region(Base):
     __tablename__ = "regions"
 
+    provider: Mapped[str] = mapped_column(String(16), primary_key=True, default="aws", server_default="aws")
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
     name: Mapped[str] = mapped_column(String(128))
     enabled: Mapped[bool]
@@ -74,18 +75,21 @@ class Region(Base):
 
 class AccountBinding(Base):
     __tablename__ = "account_bindings"
-    __table_args__ = (UniqueConstraint("environment_id", "portfolio_id"),)
+    __table_args__ = (UniqueConstraint("environment_id", "portfolio_id", "provider"),
+                      UniqueConstraint("provider", "account_id"))
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     environment_id: Mapped[str] = mapped_column(ForeignKey("environments.id"))
     portfolio_id: Mapped[str] = mapped_column(ForeignKey("portfolios.id"))
-    account_id: Mapped[str] = mapped_column(String(12), unique=True)
+    provider: Mapped[str] = mapped_column(String(16), default="aws", server_default="aws")
+    account_id: Mapped[str] = mapped_column(String(64))
 
 
 class Project(Base):
     __tablename__ = "projects"
 
     name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    provider: Mapped[str] = mapped_column(String(16), default="aws", server_default="aws")
     portfolio_id: Mapped[str] = mapped_column(String(64))
     product_id: Mapped[str] = mapped_column(String(64))
     resilience_mode: Mapped[str] = mapped_column(String(16))
@@ -191,7 +195,8 @@ class Network(Base):
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     name: Mapped[str] = mapped_column(String(128))
-    account_id: Mapped[str] = mapped_column(String(12), index=True)
+    provider: Mapped[str] = mapped_column(String(16), default="aws", server_default="aws")
+    account_id: Mapped[str] = mapped_column(String(64), index=True)
     region: Mapped[str] = mapped_column(String(32))
     vpc_id: Mapped[str] = mapped_column(String(32))
     cidr: Mapped[str] = mapped_column(String(43))
@@ -207,6 +212,7 @@ class LandingZoneDesignRecord(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     version: Mapped[int] = mapped_column(unique=True)
+    provider: Mapped[str] = mapped_column(String(16), default="aws", server_default="aws")
     answers: Mapped[dict] = mapped_column(JsonDocument)
     edits: Mapped[list] = mapped_column(JsonDocument, default=list)
     status: Mapped[str] = mapped_column(String(32))
@@ -227,13 +233,14 @@ class Teardown(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     project_name: Mapped[str] = mapped_column(ForeignKey("projects.name"), index=True)
+    provider: Mapped[str] = mapped_column(String(16), default="aws", server_default="aws")
     scope: Mapped[str] = mapped_column(String(16))
     state: Mapped[str] = mapped_column(String(32))
     requested_by: Mapped[str] = mapped_column(String(128))
     base_revision: Mapped[int]
     base_request: Mapped[dict] = mapped_column(JsonDocument)
     base_commit: Mapped[str | None] = mapped_column(String(64))
-    backup_account_id: Mapped[str] = mapped_column(String(12))
+    backup_account_id: Mapped[str] = mapped_column(String(64))
     restore_state: Mapped[str | None] = mapped_column(String(16))
     restore_requested_by: Mapped[str | None] = mapped_column(String(128))
     restore_decided_by: Mapped[str | None] = mapped_column(String(128))
@@ -253,7 +260,7 @@ class TeardownEnvironment(Base):
     environment: Mapped[str] = mapped_column(String(16))
     position: Mapped[int]
     approver_role: Mapped[str] = mapped_column(String(32))
-    account_id: Mapped[str] = mapped_column(String(12))
+    account_id: Mapped[str] = mapped_column(String(64))
     regions: Mapped[list] = mapped_column(JsonDocument)
     state: Mapped[str] = mapped_column(String(32))
     decided_by: Mapped[str | None] = mapped_column(String(128))
@@ -277,7 +284,7 @@ class TeardownRecoveryPoint(Base):
     resource_type: Mapped[str] = mapped_column(String(128))
     physical_name: Mapped[str] = mapped_column(String(255))
     region: Mapped[str] = mapped_column(String(32))
-    account_id: Mapped[str] = mapped_column(String(12))
+    account_id: Mapped[str] = mapped_column(String(64))
     recovery_point_arn: Mapped[str] = mapped_column(String(512))
     vault: Mapped[str] = mapped_column(String(128))
     completed_at: Mapped[datetime]

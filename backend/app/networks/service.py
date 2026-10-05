@@ -6,6 +6,7 @@ from app.db import models
 from app.errors import NotFoundError, ValidationFailedError
 from app.networks.models import NetworkInput
 from app.networks.repository import NetworkRepository
+from app.providers.base import DEFAULT_PROVIDER
 from app.provisioning.topology import RegionTopology
 from app.registry.repository import RegistryRepository
 from app.registry.service import require
@@ -64,10 +65,10 @@ class NetworkService:
     # ---- wizard ----
 
     def options(self, portfolio_id: str) -> list[dict]:
-        regions = [region.id for region in self._registry.regions() if region.enabled]
+        regions = [region.id for region in self._registry.regions(DEFAULT_PROVIDER) if region.enabled]
         return [self._option(environment.id, region, account)
                 for environment in self._registry.environments()
-                if (account := self._registry.account_for(portfolio_id, environment.id)) is not None
+                if (account := self._registry.account_for(DEFAULT_PROVIDER, portfolio_id, environment.id)) is not None
                 for region in regions]
 
     # ---- provisioning ----

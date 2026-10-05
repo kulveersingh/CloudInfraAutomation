@@ -7,11 +7,12 @@ from app.api.change_router import ChangeRouter
 from app.api.landing_zone_router import LandingZoneRouter
 from app.api.network_router import NetworkRouter
 from app.api.release_router import ReleaseRouter
-from app.api.routers import CatalogRouter, HealthRouter, ProjectRouter, RegistryRouter
+from app.api.routers import CatalogRouter, HealthRouter, ProjectRouter, ProviderRouter, RegistryRouter
 from app.api.teardown_router import TeardownRouter
 from app.config import Settings
 from app.db.database import Database
 from app.errors import DomainError
+from app.providers.base import ProviderRegistry
 from app.synth.blocks.cloudformation import CloudFormationSchemaCatalog
 from app.synth.blocks.registry import BlockRegistry
 from app.synth.catalog import ServiceCatalog
@@ -47,5 +48,5 @@ class ApplicationFactory:
     def _routers(self) -> list:
         catalog = CatalogRouter(ServiceCatalog(BlockRegistry.default()), CloudFormationSchemaCatalog.bundled())
         local = self._settings.github_mode == LOCAL_MODE
-        return [HealthRouter(), catalog, RegistryRouter(), ProjectRouter(), ChangeRouter(simulation_enabled=local),
+        return [HealthRouter(), ProviderRouter(ProviderRegistry.default()), catalog, RegistryRouter(), ProjectRouter(), ChangeRouter(simulation_enabled=local),
                 ReleaseRouter(simulation_enabled=local), NetworkRouter(), LandingZoneRouter(), TeardownRouter()]

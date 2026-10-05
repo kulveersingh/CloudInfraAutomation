@@ -33,15 +33,18 @@ class RegistryRepository:
     def environment_ids(self) -> set[str]:
         return {environment.id for environment in self.environments()}
 
-    def regions(self) -> list[models.Region]:
-        return list(self._session.scalars(select(models.Region).order_by(models.Region.id)))
+    def regions(self, provider: str | None = None) -> list[models.Region]:
+        query = select(models.Region).order_by(models.Region.provider, models.Region.id)
+        if provider is not None:
+            query = query.where(models.Region.provider == provider)
+        return list(self._session.scalars(query))
 
-    def region(self, region_id: str) -> models.Region | None:
-        return self._session.get(models.Region, region_id)
+    def region(self, provider: str, region_id: str) -> models.Region | None:
+        return self._session.get(models.Region, (provider, region_id))
 
-    def account_for(self, portfolio_id: str, environment_id: str) -> str | None:
+    def account_for(self, provider: str, portfolio_id: str, environment_id: str) -> str | None:
         return self._session.scalar(select(models.AccountBinding.account_id).where(
-            models.AccountBinding.portfolio_id == portfolio_id,
+            models.AccountBinding.provider == provider, models.AccountBinding.portfolio_id == portfolio_id,
             models.AccountBinding.environment_id == environment_id))
 
     def override_for(self, project_name: str) -> models.CostCenterOverride | None:

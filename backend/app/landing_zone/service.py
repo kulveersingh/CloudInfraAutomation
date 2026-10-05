@@ -78,7 +78,7 @@ class LandingZoneService:
 
     def create(self, request: LandingZoneRequest, actor: Actor) -> dict:
         self._policy.require_admin(actor)
-        record = models.LandingZoneDesignRecord(version=self._repository.next_version(),
+        record = models.LandingZoneDesignRecord(version=self._repository.next_version(), provider=request.provider,
                                                 answers=request.answers.model_dump(mode="json"),
                                                 edits=TreeEditor.dump(request.edits),
                                                 status=DesignStatus.DRAFT, created_by=actor.name)
@@ -229,7 +229,7 @@ class LandingZoneService:
                     security_group_ids=[network.security_group_id], is_default=True))
 
     def _describe(self, record: models.LandingZoneDesignRecord) -> dict:
-        return {"id": str(record.id), "version": record.version, "status": record.status,
+        return {"id": str(record.id), "provider": record.provider, "version": record.version, "status": record.status,
                 "organization_name": record.answers["organization_name"], "answers": record.answers,
                 "edits": record.edits,
                 "created_by": record.created_by, "submitted_by": record.submitted_by,

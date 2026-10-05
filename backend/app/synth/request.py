@@ -58,6 +58,7 @@ class NetworkChoice(BaseModel):
 
 
 class ProjectRequest(BaseModel):
+    provider: str = "aws"
     project_name: str = Field(min_length=MIN_PROJECT_NAME_LENGTH, max_length=MAX_PROJECT_NAME_LENGTH,
                               pattern=PROJECT_NAME_PATTERN)
     ownership: Ownership

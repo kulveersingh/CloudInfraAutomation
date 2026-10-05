@@ -10,7 +10,8 @@ class TeardownRecords:
 
     def record(self, teardown: models.Teardown) -> dict:
         """What a restore needs. Only fields that do not change after a commit, so read-back stays verified."""
-        return {"id": str(teardown.id), "project_name": teardown.project_name, "scope": teardown.scope,
+        return {"id": str(teardown.id), "provider": teardown.provider, "project_name": teardown.project_name,
+                "scope": teardown.scope,
                 "state": teardown.state, "requested_by": teardown.requested_by,
                 "base_revision": teardown.base_revision, "base_request": teardown.base_request,
                 "base_commit": teardown.base_commit, "created_at": teardown.created_at.isoformat(),

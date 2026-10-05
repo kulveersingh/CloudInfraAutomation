@@ -1,5 +1,5 @@
 import type {
-  ChangeRequestBody, EnvironmentDecision, ProjectChange, ProjectChangePreview, ProjectReadBack, RestoreAction, Teardown,
+  ChangeRequestBody, CloudProviderInfo, EnvironmentDecision, ProjectChange, ProjectChangePreview, ProjectReadBack, RestoreAction, Teardown,
   TeardownPreview, TeardownRequestBody,
   CatalogEntry, CloudFormationType, CostCenterChange, CostCenterSettings, EnvironmentInfo, Identity, JobStatus,
   ControlPackCatalog, IndustryTemplate, LandingZoneDesign, LandingZoneDesignDetail, LandingZoneProposal, LandingZoneReadBack,
@@ -169,6 +169,8 @@ export class PlatformApi implements PlatformApiPort {
   }
 
   teardowns() { return this.send<Teardown[]>("GET", "/v1/teardowns"); }
+
+  providers() { return this.send<CloudProviderInfo[]>("GET", "/v1/providers"); }
 
   decideTeardownEnvironment(projectName: string, teardownId: string, environment: string, decision: EnvironmentDecision,
     comment: string) {

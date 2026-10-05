@@ -1,12 +1,13 @@
 import hashlib
 from typing import ClassVar
 
-from sqlalchemy import select
+from sqlalchemy import inspect, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.db import models
 from app.db.database import Database
+from app.providers.base import DEFAULT_PROVIDER
 
 
 class ReferenceData:
@@ -65,7 +66,8 @@ class ReferenceData:
 
     def account_bindings(self) -> list[models.AccountBinding]:
         environment_ids = [environment[0] for environment in self.ENVIRONMENTS]
-        return [models.AccountBinding(environment_id=environment_id, portfolio_id=portfolio_id,
+        return [models.AccountBinding(provider=DEFAULT_PROVIDER, environment_id=environment_id,
+                                      portfolio_id=portfolio_id,
                                       account_id=prefix.ljust(12, prefix[-1]))
                 for portfolio_id, prefixes in self.ACCOUNT_PREFIXES.items()
                 for environment_id, prefix in zip(environment_ids, prefixes, strict=True)]
@@ -87,7 +89,8 @@ class ReferenceData:
                 for eid, name, tier, position, approval in self.ENVIRONMENTS]
 
     def _regions(self) -> list:
-        return [models.Region(id=rid, name=name, enabled=enabled) for rid, name, enabled in self.REGIONS]
+        return [models.Region(provider=DEFAULT_PROVIDER, id=rid, name=name, enabled=enabled)
+                for rid, name, enabled in self.REGIONS]
 
 
 class ReferenceDataSeeder:
@@ -108,12 +111,13 @@ class ReferenceDataSeeder:
         self._session.commit()
 
     def _add_if_missing(self, item) -> None:
-        existing = self._session.get(type(item), item.id)
+        existing = self._session.get(type(item), inspect(type(item)).primary_key_from_instance(item))
         if existing is None:
             self._session.merge(item)
 
     def _add_binding_if_missing(self, binding: models.AccountBinding) -> None:
         existing = self._session.scalar(select(models.AccountBinding).where(
+            models.AccountBinding.provider == binding.provider,
             models.AccountBinding.environment_id == binding.environment_id,
             models.AccountBinding.portfolio_id == binding.portfolio_id))
         if existing is None:

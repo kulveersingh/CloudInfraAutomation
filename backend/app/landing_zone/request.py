@@ -7,5 +7,6 @@ from app.landing_zone.edits import AnyTreeEdit
 class LandingZoneRequest(BaseModel):
     """What the admin submits: the questionnaire answers and the OU tree editor's changes, in order."""
 
+    provider: str = "aws"
     answers: LandingZoneAnswers
     edits: list[AnyTreeEdit] = Field(default_factory=list)

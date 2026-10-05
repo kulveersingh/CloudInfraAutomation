@@ -74,7 +74,7 @@ class ProjectService:
         return [{"name": project.name, "portfolio_id": project.portfolio_id, "product_id": project.product_id,
                  "resilience_mode": project.resilience_mode, "status": project.status, "revision": project.revision,
                  "environments": project.request["environments"],
-                 "open_change": self._open_change(project.name)}
+                 "open_change": self._open_change(project.name), "provider": project.provider}
                 for project in self._projects.all()]
 
     def _open_change(self, project_name: str) -> dict | None:
@@ -99,7 +99,7 @@ class ProjectService:
             raise ValidationFailedError(str(error)) from error
         self._registry.validate_ownership(request.ownership.portfolio_id, request.ownership.product_id)
         self._registry.validate_environments(request.environments)
-        self._registry.validate_regions(request.resilience)
+        self._registry.validate_regions(request.provider, request.resilience)
 
     def _reject_lint_findings(self, template: dict) -> None:
         try:
@@ -108,7 +108,8 @@ class ProjectService:
             raise ValidationFailedError(str(error)) from error
 
     def _targets(self, request: ProjectRequest) -> dict:
-        accounts = self._registry.target_accounts(request.ownership.portfolio_id, request.environments)
+        accounts = self._registry.target_accounts(request.provider, request.ownership.portfolio_id,
+                                                  request.environments)
         topology = self._topologies.for_resilience(request.resilience)
         networks = self._networks.resolve(request, topology, accounts)
         return {environment: {"account_id": account, "regions": topology.regions_for(environment),
@@ -124,7 +125,7 @@ class ProjectService:
         if self._projects.get(request.project_name) is not None:
             raise ConflictError(f"Project '{request.project_name}' already exists.")
         self._projects.add(models.Project(
-            name=request.project_name, portfolio_id=request.ownership.portfolio_id,
+            name=request.project_name, provider=request.provider, portfolio_id=request.ownership.portfolio_id,
             product_id=request.ownership.product_id, resilience_mode=request.resilience.mode,
             status=ProjectStatus.PROVISIONING, request=request.model_dump(mode="json")))
 

@@ -99,24 +99,25 @@ class RegistryService:
         if problems:
             raise ValidationFailedError(" ".join(problems))
 
-    def target_accounts(self, portfolio_id: str, environment_ids: list[str]) -> dict[str, str]:
-        accounts = {env: self._repository.account_for(portfolio_id, env) for env in environment_ids}
+    def target_accounts(self, provider: str, portfolio_id: str, environment_ids: list[str]) -> dict[str, str]:
+        accounts = {env: self._repository.account_for(provider, portfolio_id, env) for env in environment_ids}
         missing = [env for env, account in accounts.items() if account is None]
         if missing:
             raise ValidationFailedError(f"No account configured for {', '.join(missing)} in '{portfolio_id}'.")
         return accounts
 
-    def regions(self) -> list[dict]:
-        return [self._region_entry(region) for region in self._repository.regions()]
+    def regions(self, provider: str | None = None) -> list[dict]:
+        return [self._region_entry(region) for region in self._repository.regions(provider)]
 
-    def set_region_enabled(self, region_id: str, enabled: bool) -> dict:
-        region = require(self._repository.region(region_id), NotFoundError(f"Unknown region '{region_id}'."))
+    def set_region_enabled(self, provider: str, region_id: str, enabled: bool) -> dict:
+        region = require(self._repository.region(provider, region_id),
+                         NotFoundError(f"Unknown region '{region_id}' for {provider}."))
         region.enabled = enabled
         self._repository.commit()
         return self._region_entry(region)
 
-    def validate_regions(self, resilience: Resilience) -> None:
-        disabled = [region for region in resilience.selected_regions() if not self._region_enabled(region)]
+    def validate_regions(self, provider: str, resilience: Resilience) -> None:
+        disabled = [region for region in resilience.selected_regions() if not self._region_enabled(provider, region)]
         if disabled:
             raise ValidationFailedError(" ".join(f"Region {region} is not enabled." for region in disabled))
 
@@ -161,8 +162,8 @@ class RegistryService:
                                                          None).as_dict()} for product in portfolio.products]}
 
     def _region_entry(self, region: models.Region) -> dict:
-        return {"id": region.id, "name": region.name, "enabled": region.enabled}
+        return {"provider": region.provider, "id": region.id, "name": region.name, "enabled": region.enabled}
 
-    def _region_enabled(self, region_id: str) -> bool:
-        region = self._repository.region(region_id)
+    def _region_enabled(self, provider: str, region_id: str) -> bool:
+        region = self._repository.region(provider, region_id)
         return region is not None and region.enabled
