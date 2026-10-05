@@ -72,8 +72,8 @@ jobs:
     DEPLOY_STEP = """      - name: Deploy {label} region
         env:
           REGION: ${{{{ vars.{region_variable} }}}}
-          DEPLOYMENT: projects/${{{{ vars.GCP_PROJECT_ID }}}}/locations/${{{{ vars.{region_variable} }}}}/deployments/${{{{ github.event.repository.name }}}}
-          INPUTS: project_id=${{{{ vars.GCP_PROJECT_ID }}}},region=${{{{ vars.{region_variable} }}}},region_role={role},activation_state={activation}{extra}
+          DEPLOYMENT: projects/${{{{ vars.GCP_PROJECT_ID }}}}/locations/${{{{ vars.{region_variable} }}}}/deployments/cloudinfra-{project}-${{{{ vars.{region_variable} }}}}
+          INPUTS: project_id=${{{{ vars.GCP_PROJECT_ID }}}},region=${{{{ vars.{region_variable} }}}},region_role={role},activation_state={activation},org_cost_center=${{{{ vars.ORG_COST_CENTER }}}}{extra}
         run: |
           git checkout -- config
           for pair in $(echo "$INPUTS" | tr ',' ' '); do echo "${{pair%%=*}} = \"${{pair#*=}}\"" >> "config/${{{{ vars.ENVIRONMENT_NAME }}}}.tfvars"; done
@@ -83,27 +83,29 @@ jobs:
           gcloud infra-manager deployments apply "$DEPLOYMENT" --local-source=. \\
             --inputs-file=config/${{{{ vars.ENVIRONMENT_NAME }}}}.tfvars --service-account=${{{{ vars.IM_SERVICE_ACCOUNT }}}}
 """
-    CODE = ",code_bucket=${{{{ vars.CODE_BUCKET{suffix} }}}},code_object=bootstrap/${{{{ github.event.repository.name }}}}.zip"
+    CODE = ",code_bucket=${{{{ vars.CODE_BUCKET{suffix} }}}},code_object=bootstrap/{project}.zip"
     NETWORK = ",network=${{{{ vars.NETWORK{suffix} }}}},subnetwork=${{{{ vars.SUBNETWORK{suffix} }}}}"
     TAGS = """          echo 'network_tags = ${{{{ vars.NETWORK_TAGS{suffix} }}}}' >> "config/${{{{ vars.ENVIRONMENT_NAME }}}}.tfvars"
 """
 
     def render(self, request, template):
         variables = template.get("variable", {})
-        steps = [self._step(variables, "primary", "GCP_PRIMARY_REGION", "primary", "active", "")]
+        steps = [self._step(request, variables, "primary", "GCP_PRIMARY_REGION", "primary", "active", "")]
         activation = SECONDARY_ACTIVATION.get(request.resilience.mode)
         if activation:
-            steps.append(self._step(variables, "secondary", "GCP_SECONDARY_REGION", "secondary", activation,
+            steps.append(self._step(request, variables, "secondary", "GCP_SECONDARY_REGION", "secondary", activation,
                                     "_SECONDARY"))
         return {".github/workflows/deploy.yml": self.HEADER + "".join(steps)}
 
-    def _step(self, variables: dict, label: str, region_variable: str, role: str, activation: str, suffix: str) -> str:
-        extra = self.CODE.format(suffix=suffix) if "code_bucket" in variables else ""
+    def _step(self, request: ProjectRequest, variables: dict, label: str, region_variable: str, role: str,
+              activation: str, suffix: str) -> str:
+        project = request.project_name
+        extra = self.CODE.format(suffix=suffix, project=project) if "code_bucket" in variables else ""
         networked = "network" in variables
         extra += self.NETWORK.format(suffix=suffix) if networked else ""
         tags = self.TAGS.format(suffix=suffix) if networked else ""
         return self.DEPLOY_STEP.format(label=label, region_variable=region_variable, role=role, activation=activation,
-                                       extra=extra, tags=tags)
+                                       extra=extra, tags=tags, project=project)
 
 
 def gcp_bundle() -> RepositoryBundle:

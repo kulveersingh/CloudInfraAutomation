@@ -1,5 +1,7 @@
 import json
 
+from app.projects.tags import MANAGED_BY
+from app.providers.gcp.labels import LabelPolicy
 from app.providers.gcp.project.capabilities import GcpBlock
 from app.providers.gcp.project.document import PRIMARY_ONLY, TerraformDocument, generator, label
 from app.synth.blocks.base import Block
@@ -31,13 +33,21 @@ class TerraformJsonDialect(IacDialect):
         document = TerraformDocument()
         for name, body in FOUNDATION_VARIABLES.items():
             document.add_variable(name, body)
-        document.add_variable("org_cost_center", {**STRING, "default": request.ownership.portfolio_id})
-        document.set_local("labels", {"org_project": "${var.project_name}", "org_environment": "${var.environment_name}",
-                                      "org_cost_center": label("org_cost_center"), "managed_by": "cloudinfra"})
+        # The cost center comes from the registry at deploy time (a repository variable), so it can change alone.
+        document.add_variable("org_cost_center", STRING)
+        document.set_local("labels", self._labels(request))
         document.set_local("is_primary", '${var.region_role == "primary"}')
         document.set_local("is_active", '${var.activation_state == "active"}')
         document.set_local("generator", generator())
         return document
+
+    def _labels(self, request) -> dict[str, str]:
+        ownership, policy = request.ownership, LabelPolicy()
+        fixed = {"org_portfolio": ownership.portfolio_id, "org_product": ownership.product_id,
+                 "org_data_classification": ownership.data_classification, "org_resilience": request.resilience.mode}
+        return {"org_project": "${var.project_name}", "org_environment": "${var.environment_name}",
+                "org_cost_center": label("org_cost_center"),
+                **{key: policy.value(value) for key, value in fixed.items()}, "managed_by": MANAGED_BY}
 
     def add_block(self, document, block: GcpBlock):
         for name, body in block.required_variables().items():

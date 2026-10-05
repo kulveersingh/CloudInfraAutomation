@@ -66,7 +66,7 @@ function ChangeSummaryView({ summary }: { summary: ChangeSummary }) {
       {summary.removed_services.length > 0 && (
         <ul>
           {summary.removed_services.map((service) => (
-            <li key={service.id}>{`${service.id} (${service.type}): ${service.retained ? "retained" : "deleted"}`}</li>
+            <li key={service.id}>{`${service.id} (${service.type}): ${service.removal}`}</li>
           ))}
         </ul>
       )}

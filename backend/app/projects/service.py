@@ -46,7 +46,7 @@ class ProjectService:
         ownership = request.ownership
         cost_center = self._registry.resolve_cost_center(ownership.portfolio_id, ownership.product_id,
                                                          request.project_name)
-        return {"files": toolkit.bundle.render(request, template), "tags": TagSet(request, cost_center).as_dict(),
+        return {"files": toolkit.bundle.render(request, template), "tags": self._providers.get(request.provider).tag_policy().format(TagSet(request, cost_center).as_dict()),
                 "targets": self._targets(request), "lint": toolkit.linter.lint(template),
                 "notes": toolkit.notes(request)}
 

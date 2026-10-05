@@ -50,8 +50,7 @@ def title(change: models.ProjectChange) -> str:
 
 def body(change: models.ProjectChange) -> str:
     summary = change.summary
-    removed = [f"{service['id']} ({'retained' if service['retained'] else 'deleted'})"
-               for service in summary["removed_services"]]
+    removed = [f"{service['id']} ({service['removal']})" for service in summary["removed_services"]]
     lines = [("Added services", summary["added_services"]), ("Removed services", removed),
              ("Changed services", summary["changed_services"]), ("Added environments", summary["added_environments"]),
              ("Files", summary["changed_files"])]

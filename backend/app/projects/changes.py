@@ -150,7 +150,8 @@ class ProjectChangeService:
         before = {resource.id: resource for resource in current.resources}
         after = {resource.id: resource for resource in proposed.resources}
         removed = [{"id": resource.id, "type": resource.type,
-                    "retained": blocks.block_class(resource.type).retained_on_removal}
+                    "retained": blocks.block_class(resource.type).retained_on_removal,
+                    "removal": blocks.block_class(resource.type).removal_effect()}
                    for resource in current.resources if resource.id not in after]
         repository = self._github.read_files(self._owner, repository_name(project.name)).files
         generated = self._service.render(proposed)

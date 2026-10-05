@@ -17,10 +17,16 @@ class Block(ABC):
     settings: ClassVar[tuple[Setting, ...]] = ()
     # Whether removing the service keeps its data (a retain policy) or deletes it on the next deploy.
     retained_on_removal: ClassVar[bool] = False
+    # What removal does, when "retained" or "deleted" says too little (e.g. a bucket deleted only if empty).
+    removal: ClassVar[str] = ""
 
     def __init__(self, spec: ResourceSpec, request: ProjectRequest):
         self.spec = spec
         self.request = request
+
+    @classmethod
+    def removal_effect(cls) -> str:
+        return cls.removal or ("retained" if cls.retained_on_removal else "deleted")
 
     @classmethod
     def naming_problems(cls, project_name: str, resource_id: str) -> list[str]:

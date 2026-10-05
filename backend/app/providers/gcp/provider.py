@@ -21,6 +21,11 @@ class GcpProvider(CloudProvider):
 
         return gcp_network_problems(network)
 
+    def tag_policy(self):
+        from app.providers.gcp.labels import LabelPolicy
+
+        return LabelPolicy()
+
     def project(self):
         from app.providers.gcp.project.toolkit import gcp_project
 

@@ -1,10 +1,11 @@
 # CloudInfraAutomation — Architecture
 
-**Status:** v2.24, approved; implementation in progress. No code is written until this design is approved.
+**Status:** v2.25, approved; implementation in progress. No code is written until this design is approved.
 **Date:** 2026-10-05
 **Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9). Every solution is **DR-capable**: it can run in one region, as DR (primary active, secondary standby) or as an HA pair (both active), with **any region pair chosen in the UI** (default us-east-1 / us-east-2) (§10).
 
 **Changes in v2:** added the org registry and tagging strategy (§4); permissions based on tags (§4.5–4.8); multi-account, five-environment model (§5); promotion pipeline (§8). Payload, provisioning, security and scaling sections are updated to match.
+**Changes in v2.25:** MC-2c: Google Cloud provisioning, read-back and Change infrastructure end to end; ownership labels through a per-provider tag policy; deployments named `cloudinfra-{project}-{region}`; removal wording in change previews (§22.9.7 notes).
 **Changes in v2.24:** MC-2b implemented: Google Cloud Terraform JSON generation with curated services, exact-resource bindings, Eventarc triggers, lint against the provider schema, preview notes and the Infrastructure Manager workflow (§22.9.7 notes).
 **Changes in v2.23:** MC-2 design (§22.9): Google Cloud projects on Terraform JSON and Infrastructure Manager, Workload Identity Federation, exact-resource IAM, locked-bucket teardown backups, and a cloud picker.
 **Changes in v2.22:** multi-cloud (§22): a cloud-neutral core with AWS, Google Cloud and Azure provider plug-ins; native IaC per cloud; neutral service kinds, control packs and backup strategies; phased delivery.
@@ -3792,10 +3793,10 @@ Everything runs locally against stand-ins, like AWS today. The Google Cloud land
 
 #### 22.9.3 Repository and workflow
 
-The repository contains `main.tf.json`, `variables.tf.json`, `config/{env}.json` (input values), `infra.json`, a README, the deploy workflow and the signed manifest (§21.2). The deploy workflow:
+The repository contains `main.tf.json`, `variables.tf.json`, `config/{env}.tfvars` (input values), `infra.json`, a README, the deploy workflow and the signed manifest (§21.2). The deploy workflow:
 1. `google-github-actions/auth` with the environment's Workload Identity provider and deploy service account.
 2. `gcloud infra-manager previews create … --local-source=.`
-3. `gcloud infra-manager deployments apply projects/$GCP_PROJECT_ID/locations/$REGION/deployments/cloudinfra-$PROJECT_NAME-$REGION --local-source=. --service-account=$IM_SERVICE_ACCOUNT --input-values=…`
+3. `gcloud infra-manager deployments apply projects/$GCP_PROJECT_ID/locations/$REGION/deployments/cloudinfra-$PROJECT_NAME-$REGION --local-source=. --service-account=$IM_SERVICE_ACCOUNT --inputs-file=config/$ENVIRONMENT.tfvars` (each region's inputs, and the cost center from the repository variable `ORG_COST_CENTER`, are appended to that file first)
 
 These run per region, with the secondary region in standby. STAGE and PROD keep the release executor (§8): it applies the reviewed preview.
 
@@ -3874,6 +3875,13 @@ Delete steps: delete the Infrastructure Manager deployment (secondary region fir
   - a workflow that runs `terraform validate` on 1.5.7, signs in through Workload Identity Federation, then previews and applies one Infrastructure Manager deployment per region. Each region's inputs are appended to the environment's tfvars file, because gcloud takes either an inputs file or input values, not both.
 - **Bootstrap outputs.** `BootstrapOutputs` gains `federation`, the workload identity provider.
 - **Schema snapshot.** `python -m app.providers.gcp.project.refresh [version]` regenerates the snapshot.
+
+**MC-2c implementation notes.**
+- **What already worked.** After MC-1, provisioning, the sealed manifest, read-back and Change infrastructure needed no Google Cloud specific code. The worker picks the job's cloud adapter; the runner takes that provider's toolkit and workflow variables.
+- **Labels.** Each provider now has a `TagPolicy`. AWS keeps the tags as they are; Google Cloud's `LabelPolicy` turns them into labels (`org:cost-center` → `org_cost_center`, values lowercased, with characters labels can't hold replaced, at most 63 characters). The preview shows the labels.
+- **Labels in the document.** Ownership values known when the code is generated (portfolio, product, data classification, resilience) are written into `local.labels` directly. The cost center can change in the registry, so it is a variable without a default, passed from `ORG_COST_CENTER` at deploy.
+- **Deployment names.** Deployments are `cloudinfra-{project}-{region}`, as designed, and function code is `bootstrap/{project}.zip`.
+- **Removal wording.** Blocks can say what removal does (`removal_effect()`). The change summary carries it as `removal` next to `retained`, and the pull request and the UI's change preview use it. A Google Cloud bucket says "deleted only if empty"; it still needs confirming, like any removal that can delete data.
 
 #### 22.9.8 Decisions
 

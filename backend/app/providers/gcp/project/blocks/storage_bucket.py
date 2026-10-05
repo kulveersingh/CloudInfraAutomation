@@ -19,6 +19,7 @@ class CloudStorageBucketBlock(GcpBlock, GrantTarget, EventSource):
     category = "Storage"
     multi_region = "replicated"
     provider_types = ("google_storage_bucket",)
+    removal = "deleted only if empty"  # force_destroy = false: the deploy fails rather than delete objects
 
     def emit(self, document):
         body = {"name": self.naming.bucket_name(), "location": self._location(),

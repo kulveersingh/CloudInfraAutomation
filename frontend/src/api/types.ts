@@ -274,7 +274,7 @@ export type ChangeState = "queued" | "open" | "merged" | "closed" | "failed";
 
 export interface ChangeSummary {
   added_services: string[];
-  removed_services: Array<{ id: string; type: string; retained: boolean }>;
+  removed_services: Array<{ id: string; type: string; retained: boolean; removal: string }>;
   changed_services: string[];
   added_environments: string[];
   changed_files: string[];

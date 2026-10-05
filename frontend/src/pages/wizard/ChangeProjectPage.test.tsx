@@ -8,8 +8,9 @@ import { ChangeProjectPage } from "./ChangeProjectPage";
 
 const user = () => userEvent.setup();
 const REMOVAL_PREVIEW = { ...CHANGE_PREVIEW, summary: { ...CHANGE_PREVIEW.summary,
-  removed_services: [{ id: "processor", type: "lambda.function", retained: false },
-    { id: "uploads", type: "s3.bucket", retained: true }] } };
+  removed_services: [{ id: "processor", type: "lambda.function", retained: false, removal: "deleted" },
+    { id: "uploads", type: "s3.bucket", retained: true, removal: "retained" },
+    { id: "files", type: "storage.bucket", retained: false, removal: "deleted only if empty" }] } };
 
 function renderChange(api: PlatformApiPort = fakeApi()) {
   return renderWithApi(<ChangeProjectPage projectName="invoice-ingest" pollMs={1} />, api);
@@ -105,8 +106,9 @@ describe("ChangeProjectPage", () => {
     renderChange(fakeApi({ previewChange: vi.fn().mockResolvedValue(REMOVAL_PREVIEW) }));
     await previewChange();
     expect([await screen.findByText("processor (lambda.function): deleted"), screen.getByText("uploads (s3.bucket): retained"),
+      screen.getByText("files (storage.bucket): deleted only if empty"),
       (screen.getByRole("button", { name: "Open change request" }) as HTMLButtonElement).disabled]).toEqual(
-      [expect.anything(), expect.anything(), true]);
+      [expect.anything(), expect.anything(), expect.anything(), true]);
   });
 
   it("opens the change once removals are confirmed", async () => {

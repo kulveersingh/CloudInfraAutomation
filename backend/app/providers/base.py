@@ -30,6 +30,13 @@ class Vocabulary:
     control_catalog: str
 
 
+class TagPolicy:
+    """How a cloud writes the ownership tags (§4.2). AWS keeps them as they are."""
+
+    def format(self, tags: dict[str, str]) -> dict[str, str]:
+        return dict(tags)
+
+
 class CloudProvider(ABC):
     """One cloud behind the platform's neutral core (§22.3). A new cloud is a new provider package, registered by id."""
 
@@ -63,6 +70,9 @@ class CloudProvider(ABC):
     @abstractmethod
     def resources(self) -> "ResourceClassifier":
         """Which plan rows hold data and which change permissions, for release risk (§8.4.2)."""
+
+    def tag_policy(self) -> TagPolicy:
+        return TagPolicy()
 
     def describe(self) -> dict:
         primary, secondary = self.default_regions()
