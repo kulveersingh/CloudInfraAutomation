@@ -1,7 +1,8 @@
 import { useState, type ReactNode } from "react";
-import type { Identity, IndustryTemplate, LandingZoneDesign, LandingZoneReadBack } from "../../api/types";
+import type { Identity, IndustryTemplate, LandingZoneDesign, LandingZoneReadBack, Vocabulary } from "../../api/types";
 import { StatusMessage, type SaveStatus } from "../../components/Notices";
 import { LandingZoneDraft } from "../../landingZone/LandingZoneDraft";
+import { useVocabulary } from "../../providers/VocabularyContext";
 import { ApprovalsPanel } from "./ApprovalsPanel";
 import { AccountsStep } from "./steps/AccountsStep";
 import { ControlsStep } from "./steps/ControlsStep";
@@ -17,17 +18,17 @@ import type { StepProps } from "./steps/StepProps";
 
 const PLATFORM_ADMIN = "platform-admin";
 
-const STEPS: Array<{ label: string; title: string; render: (props: StepProps) => ReactNode }> = [
-  { label: "Start", title: "Start from a template", render: (props) => <StartStep {...props} /> },
-  { label: "Organization", title: "Organization", render: (props) => <OrganizationStep {...props} /> },
-  { label: "Environments", title: "Environments", render: (props) => <EnvironmentsStep {...props} /> },
-  { label: "Accounts", title: "Accounts per environment", render: (props) => <AccountsStep {...props} /> },
-  { label: "Security & compliance", title: "Security (Cyber) and compliance", render: (props) => <SecurityStep {...props} /> },
-  { label: "Shared infrastructure", title: "Shared infrastructure", render: (props) => <InfrastructureStep {...props} /> },
-  { label: "Network", title: "Network", render: (props) => <NetworkStep {...props} /> },
-  { label: "Sandbox & other OUs", title: "Sandbox and other OUs", render: (props) => <SandboxStep {...props} /> },
-  { label: "Controls", title: "Control Tower controls", render: (props) => <ControlsStep {...props} /> },
-  { label: "Review", title: "Review the proposed structure", render: (props) => <ReviewStep {...props} /> },
+const STEPS: Array<{ label: string; title: (words: Vocabulary) => string; render: (props: StepProps) => ReactNode }> = [
+  { label: "Start", title: () => "Start from a template", render: (props) => <StartStep {...props} /> },
+  { label: "Organization", title: () => "Organization", render: (props) => <OrganizationStep {...props} /> },
+  { label: "Environments", title: () => "Environments", render: (props) => <EnvironmentsStep {...props} /> },
+  { label: "Accounts", title: () => "Accounts per environment", render: (props) => <AccountsStep {...props} /> },
+  { label: "Security & compliance", title: () => "Security (Cyber) and compliance", render: (props) => <SecurityStep {...props} /> },
+  { label: "Shared infrastructure", title: () => "Shared infrastructure", render: (props) => <InfrastructureStep {...props} /> },
+  { label: "Network", title: () => "Network", render: (props) => <NetworkStep {...props} /> },
+  { label: "Sandbox & other OUs", title: () => "Sandbox and other OUs", render: (props) => <SandboxStep {...props} /> },
+  { label: "Controls", title: (words) => words.control_catalog, render: (props) => <ControlsStep {...props} /> },
+  { label: "Review", title: () => "Review the proposed structure", render: (props) => <ReviewStep {...props} /> },
 ];
 
 type Tab = "design" | "approvals";
@@ -35,13 +36,15 @@ type Tab = "design" | "approvals";
 const TABS: Array<{ id: Tab; label: string }> = [{ id: "design", label: "Design" }, { id: "approvals", label: "Approvals" }];
 
 export function LandingZonePage({ identity }: { identity: Identity }) {
+  const words = useVocabulary();
   return (
     <section className="page">
       <header className="head">
         <div>
           <h1>Landing zone</h1>
-          <p className="sub">Design a new AWS organization: answer the questions, review the proposed OU structure, then
-            request approval. A second platform admin's approval commits and applies the CloudFormation.</p>
+          <p className="sub">Design a new {words.cloud} organization: answer the questions, review the proposed{" "}
+            {words.hierarchy_node} structure, then request approval. A second platform admin's approval commits and applies
+            the {words.iac_document}s.</p>
         </div>
       </header>
       {identity.roles.includes(PLATFORM_ADMIN)
@@ -74,6 +77,7 @@ function LandingZoneWorkspace() {
 }
 
 function Questionnaire({ onSubmitted }: { onSubmitted: (design: LandingZoneDesign) => void }) {
+  const words = useVocabulary();
   const [draft, setDraft] = useState(LandingZoneDraft.initial);
   const [template, setTemplate] = useState<IndustryTemplate>();
   const [step, setStep] = useState(0);
@@ -101,7 +105,7 @@ function Questionnaire({ onSubmitted }: { onSubmitted: (design: LandingZoneDesig
           </button>
         ))}
       </nav>
-      <h2>{step === 0 ? STEPS[0].title : `${step}. ${STEPS[step].title}`}</h2>
+      <h2>{step === 0 ? STEPS[0].title(words) : `${step}. ${STEPS[step].title(words)}`}</h2>
       {STEPS[step].render({ draft, onChange: setDraft, onSubmitted, template, onTemplate: startFrom,
         onRepository: continueFrom })}
       <div className="row">

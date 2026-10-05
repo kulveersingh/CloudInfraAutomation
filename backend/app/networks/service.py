@@ -81,9 +81,10 @@ class NetworkService:
                 for environment in request.environments for region in topology.regions_for(environment)}
 
     def describe(self, network: models.Network) -> dict:
-        return {"id": network.id, "name": network.name, "account_id": network.account_id, "region": network.region,
-                "vpc_id": network.vpc_id, "cidr": network.cidr, "private_subnet_ids": network.private_subnet_ids,
-                "security_group_ids": network.security_group_ids, "is_default": network.is_default}
+        return {"id": network.id, "provider": network.provider, "name": network.name, "account_id": network.account_id,
+                "region": network.region, "network_ref": network.network_ref, "cidr": network.cidr,
+                "subnet_refs": network.subnet_refs, "firewall_refs": network.firewall_refs,
+                "is_default": network.is_default}
 
     # ---- helpers ----
 

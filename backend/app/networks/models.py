@@ -1,28 +1,26 @@
 import ipaddress
-from typing import Annotated
 
-from pydantic import BaseModel, Field, StringConstraints, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+from app.providers.base import DEFAULT_PROVIDER, ProviderRegistry, unknown_provider
 
 MIN_PRIVATE_SUBNETS = 2
-AccountId = Annotated[str, StringConstraints(pattern=r"^[0-9]{12}$")]
-VpcId = Annotated[str, StringConstraints(pattern=r"^vpc-[0-9a-f]{8,17}$")]
-SubnetId = Annotated[str, StringConstraints(pattern=r"^subnet-[0-9a-f]{8,17}$")]
-SecurityGroupId = Annotated[str, StringConstraints(pattern=r"^sg-[0-9a-f]{8,17}$")]
 
 
 class NetworkInput(BaseModel):
-    """What a platform engineer enters for an organization network."""
+    """What a platform engineer enters for an organization network. The cloud checks its own id formats."""
 
+    provider: str = DEFAULT_PROVIDER
     name: str = Field(min_length=1, max_length=128)
-    account_id: AccountId
+    account_id: str = Field(min_length=1, max_length=64)
     region: str = Field(min_length=1)
-    vpc_id: VpcId
+    network_ref: str = Field(min_length=1, max_length=255)
     cidr: str
-    private_subnet_ids: list[SubnetId]
-    security_group_ids: list[SecurityGroupId] = Field(min_length=1)
+    subnet_refs: list[str]
+    firewall_refs: list[str] = Field(min_length=1)
     is_default: bool = False
 
-    @field_validator("private_subnet_ids")
+    @field_validator("subnet_refs")
     @classmethod
     def enough_subnets(cls, subnets: list[str]) -> list[str]:
         if len(subnets) < MIN_PRIVATE_SUBNETS:
@@ -35,3 +33,13 @@ class NetworkInput(BaseModel):
         if not ipaddress.ip_network(cidr, strict=False).is_private:
             raise ValueError(f"{cidr} must be a private range.")
         return cidr
+
+    @model_validator(mode="after")
+    def fits_the_cloud(self) -> "NetworkInput":
+        providers = ProviderRegistry.default()
+        if not providers.has(self.provider):
+            raise ValueError(unknown_provider(self.provider))
+        problems = providers.get(self.provider).network_problems(self)
+        if problems:
+            raise ValueError(" ".join(problems))
+        return self

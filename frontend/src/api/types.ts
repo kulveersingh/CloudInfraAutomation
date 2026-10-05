@@ -116,13 +116,14 @@ export interface ProjectRequest {
 
 export interface NetworkInfo {
   id: string;
+  provider?: string;
   name: string;
   account_id: string;
   region: string;
-  vpc_id: string;
+  network_ref: string;
   cidr: string;
-  private_subnet_ids: string[];
-  security_group_ids: string[];
+  subnet_refs: string[];
+  firewall_refs: string[];
   is_default: boolean;
 }
 
@@ -144,7 +145,7 @@ export interface PreviewResult {
   files: Record<string, string>;
   tags: Record<string, string>;
   targets: Record<string, { account_id: string; regions: string[];
-    networks: Record<string, { network_id: string; vpc_id: string; subnet_ids: string[] }> }>;
+    networks: Record<string, { network_id: string; network_ref: string; subnet_refs: string[] }> }>;
   lint: string[];
 }
 
@@ -162,12 +163,14 @@ export interface OpenChange {
 }
 
 export interface Vocabulary {
+  cloud: string;
   isolation_unit: string;
   hierarchy_node: string;
   iac_document: string;
   deploy_unit: string;
   preventive_policy: string;
   private_network: string;
+  firewall_group: string;
   landing_zone_service: string;
   control_catalog: string;
 }

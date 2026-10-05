@@ -24,9 +24,9 @@ class AwsEnvironmentVariables(WorkflowVariables):
         network = context.networks.get((environment, region))
         if network is None:
             return {}
-        return {f"VPC_ID{suffix}": network["vpc_id"],
-                f"PRIVATE_SUBNET_IDS{suffix}": ",".join(network["private_subnet_ids"]),
-                f"ORG_SECURITY_GROUP_IDS{suffix}": ",".join(network["security_group_ids"]),
+        return {f"VPC_ID{suffix}": network["network_ref"],
+                f"PRIVATE_SUBNET_IDS{suffix}": ",".join(network["subnet_refs"]),
+                f"ORG_SECURITY_GROUP_IDS{suffix}": ",".join(network["firewall_refs"]),
                 f"ORG_PRIVATE_CIDR{suffix}": network["cidr"]}
 
     def _secondary(self, context, region: str) -> dict[str, str]:

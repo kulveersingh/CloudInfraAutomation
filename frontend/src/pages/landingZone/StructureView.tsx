@@ -4,6 +4,7 @@ import { plural } from "../../landingZone/plural";
 import { AccountActions } from "./tree/AccountActions";
 import { OuActions, RootActions } from "./tree/OuActions";
 import type { TreeEditor } from "./tree/TreeEditor";
+import { useVocabulary } from "../../providers/VocabularyContext";
 
 interface StructureViewProps {
   explanation: LandingZoneExplanation;
@@ -13,13 +14,14 @@ interface StructureViewProps {
 
 /** The OU tree and diagram the platform derived from the answers and edits; editable when given an editor. */
 export function StructureView({ explanation, stage, editor }: StructureViewProps) {
+  const words = useVocabulary();
   return (
     <div className="split">
       <div className="panel">
-        <div className="panel-h"><h3>OU structure</h3><span className="hint">Environment OUs are fixed and isolated</span></div>
+        <div className="panel-h"><h3>{words.hierarchy_node} structure</h3><span className="hint">Environment {words.hierarchy_node}s are fixed and isolated</span></div>
         <div className="panel-b">
           {editor && <RootActions editor={editor} />}
-          <ul className="tree" role="tree" aria-label={`${stage} OU structure`}>
+          <ul className="tree" role="tree" aria-label={`${stage} ${words.hierarchy_node} structure`}>
             {explanation.ous.map((ou) => <OuNode key={ou.key} ou={ou} editor={editor} />)}
           </ul>
         </div>
@@ -27,7 +29,7 @@ export function StructureView({ explanation, stage, editor }: StructureViewProps
       <div className="panel">
         <div className="panel-h"><h3>Diagram</h3></div>
         <div className="panel-b diagram">
-          <img alt={`${stage} OU structure diagram`} src={svgDataUrl(explanation.diagram.svg)} />
+          <img alt={`${stage} ${words.hierarchy_node} structure diagram`} src={svgDataUrl(explanation.diagram.svg)} />
         </div>
       </div>
     </div>
@@ -35,11 +37,12 @@ export function StructureView({ explanation, stage, editor }: StructureViewProps
 }
 
 function OuNode({ ou, editor }: { ou: OuInfo; editor?: TreeEditor }) {
+  const words = useVocabulary();
   return (
     <li role="treeitem" aria-selected={false}>
       <span className="ou">
-        <b>{ou.name} OU</b>
-        {ou.created_by_control_tower && <span className="chip">Control Tower</span>}
+        <b>{ou.name} {words.hierarchy_node}</b>
+        {ou.created_by_control_tower && <span className="chip">{words.landing_zone_service}</span>}
         {ou.controls.length > 0 && <span className="chip" title={controlNames(ou)}>{plural(ou.controls.length, "control")}</span>}
         {editor && <OuActions ou={ou} editor={editor} />}
       </span>

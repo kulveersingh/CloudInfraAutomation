@@ -116,8 +116,8 @@ class ProjectService:
                 for environment, account in accounts.items()}
 
     def _networks_for(self, environment: str, networks: dict[tuple[str, str], dict]) -> dict:
-        return {region: {"network_id": network["id"], "vpc_id": network["vpc_id"],
-                         "subnet_ids": network["private_subnet_ids"]}
+        return {region: {"network_id": network["id"], "network_ref": network["network_ref"],
+                         "subnet_refs": network["subnet_refs"]}
                 for (network_environment, region), network in networks.items() if network_environment == environment}
 
     def _register(self, request: ProjectRequest) -> None:

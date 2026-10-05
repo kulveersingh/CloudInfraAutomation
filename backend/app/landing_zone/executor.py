@@ -8,10 +8,10 @@ from app.landing_zone.design import LandingZoneDesign
 class NetworkOutput:
     environment: str
     region: str
-    vpc_id: str
+    network_ref: str
     cidr: str
-    subnet_ids: list[str]
-    security_group_id: str
+    subnet_refs: list[str]
+    firewall_ref: str
     account_names: list[str]
     label: str
 

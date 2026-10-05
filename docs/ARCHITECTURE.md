@@ -3707,6 +3707,27 @@ Goal: the same behaviour as today, with every AWS-specific piece reached through
 - Splitting them into neutral definitions plus provider mappings happens in **MC-3**, when Google Cloud gives a second implementation to abstract from.
 - This keeps stored designs and `design.json` readable.
 
+#### MC-1 implementation notes
+
+- **`CloudProvider`** (`app/providers/base.py`) gives the core:
+  - its vocabulary and default regions;
+  - a **project toolkit**: blocks, binders, IaC dialect, validator, linter, repository bundle, raw-type catalog and GitHub workflow variables;
+  - a **teardown toolkit**: data-store inventory, what its backup service cannot keep, and the vault name;
+  - a **landing-zone toolkit**: repository, renderer, limits as checks, and advice;
+  - a **resource classifier** for release risk: stateful and permission rows;
+  - **network id checks**.
+
+  `ProviderRegistry.default()` registers AWS.
+- **Adapters are per cloud.** `AwsPort` became `ProviderPort`. `AdapterFactory.clouds(settings)` returns one port per registered cloud, picked by the `<provider>_mode` setting. The worker uses the job's provider. Bootstrap outputs are `deployer_identity` and `execution_identity`; backups use `source_ref` and `ref`.
+- **Release risk reads plan rows through the provider's classifier**, not through block metadata. A plan row is any resource type (IAM roles, permissions), not only a curated block.
+- **The core is guarded by tests.** `app/synth`, `app/provisioning`, `app/teardown`, `app/releases` and `app/landing_zone` must contain no AWS ids, ARNs, condition keys, `AWS_*` variables or imports of `app.providers.aws`.
+- **Still in AWS shape, on purpose (MC1-4, done in MC-3):**
+  - the questionnaire's answers and its designer handlers (security and log accounts created by Control Tower, email plus-addressing);
+  - the control catalog snapshot and the pack files (they list Control Tower control ids);
+  - the diagram's labels;
+  - the default regions on the request model.
+- **UI wording comes from the vocabulary.** The vocabulary gained `cloud` and `firewall_group`. The UI reads it from `GET /v1/providers` through `VocabularyProvider`, falling back to AWS's words while loading. These places use it so far: the networks screen, the wizard's network step, the landing-zone page title, subtitle and controls step, and the OU tree. The remaining AWS wording (the Tier-2 search, the landing-zone question steps) moves with MC-2 and MC-3, when a second vocabulary shows each place to change.
+
 #### MC-1 decisions
 
 | # | Decision | Recommendation |

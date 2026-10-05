@@ -41,10 +41,10 @@ class LocalLandingZoneExecutor(LandingZoneExecutor):
         def resource_id(prefix: str, suffix: str) -> str:
             return f"{prefix}-{self._digest(organization, ou.key, region, suffix)[:17]}"
 
-        return NetworkOutput(environment=ou.key, region=region, vpc_id=resource_id("vpc", "vpc"),
+        return NetworkOutput(environment=ou.key, region=region, network_ref=resource_id("vpc", "vpc"),
                              cidr=layout.vpc_cidr(region, ou.key),
-                             subnet_ids=[resource_id("subnet", "a"), resource_id("subnet", "b")],
-                             security_group_id=resource_id("sg", "org"),
+                             subnet_refs=[resource_id("subnet", "a"), resource_id("subnet", "b")],
+                             firewall_ref=resource_id("sg", "org"),
                              account_names=[account.name for account in ou.subtree_accounts() if account.enabled],
                              label=ou.name)
 

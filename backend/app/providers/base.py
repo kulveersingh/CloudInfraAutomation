@@ -6,6 +6,7 @@ from app.errors import NotFoundError
 
 if TYPE_CHECKING:
     from app.landing_zone.toolkit import LandingZoneToolkit
+    from app.networks.models import NetworkInput
     from app.releases.risk import ResourceClassifier
     from app.synth.toolkit import ProjectToolkit
     from app.teardown.inventory import TeardownToolkit
@@ -17,12 +18,14 @@ DEFAULT_PROVIDER = "aws"
 class Vocabulary:
     """The words a cloud uses for the platform's neutral concepts (§22.2), so the UI speaks each cloud's language."""
 
+    cloud: str
     isolation_unit: str
     hierarchy_node: str
     iac_document: str
     deploy_unit: str
     preventive_policy: str
     private_network: str
+    firewall_group: str
     landing_zone_service: str
     control_catalog: str
 
@@ -52,6 +55,10 @@ class CloudProvider(ABC):
     @abstractmethod
     def landing_zone(self) -> "LandingZoneToolkit":
         """Repository, renderer, limits and advice for this cloud's landing zone (§20)."""
+
+    @abstractmethod
+    def network_problems(self, network: "NetworkInput") -> list[str]:
+        """Why a registered organization network's ids don't fit this cloud (§22.4)."""
 
     @abstractmethod
     def resources(self) -> "ResourceClassifier":

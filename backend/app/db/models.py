@@ -198,10 +198,10 @@ class Network(Base):
     provider: Mapped[str] = mapped_column(String(16), default="aws", server_default="aws")
     account_id: Mapped[str] = mapped_column(String(64), index=True)
     region: Mapped[str] = mapped_column(String(32))
-    vpc_id: Mapped[str] = mapped_column(String(32))
+    network_ref: Mapped[str] = mapped_column(String(255))
     cidr: Mapped[str] = mapped_column(String(43))
-    private_subnet_ids: Mapped[list] = mapped_column(JsonDocument)
-    security_group_ids: Mapped[list] = mapped_column(JsonDocument)
+    subnet_refs: Mapped[list] = mapped_column(JsonDocument)
+    firewall_refs: Mapped[list] = mapped_column(JsonDocument)
     is_default: Mapped[bool] = mapped_column(default=False)
 
 

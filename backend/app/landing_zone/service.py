@@ -239,8 +239,8 @@ class LandingZoneService:
                 account_id = outputs.accounts[account_name]
                 self._networks.register(f"lz-{account_id}-{network.region}", NetworkInput(
                     name=f"{organization} {network.label} shared VPC", account_id=account_id, region=network.region,
-                    vpc_id=network.vpc_id, cidr=network.cidr, private_subnet_ids=network.subnet_ids,
-                    security_group_ids=[network.security_group_id], is_default=True))
+                    network_ref=network.network_ref, cidr=network.cidr, subnet_refs=network.subnet_refs,
+                    firewall_refs=[network.firewall_ref], is_default=True))
 
     def _describe(self, record: models.LandingZoneDesignRecord) -> dict:
         return {"id": str(record.id), "provider": record.provider, "version": record.version, "status": record.status,

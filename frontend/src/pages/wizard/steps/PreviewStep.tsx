@@ -57,7 +57,7 @@ export function PreviewDetails({ result }: { result: PreviewResult }) {
             {Object.entries(result.targets).map(([environment, target]) => (
               <tr key={environment}><td>{environment}</td><td className="num">{target.account_id}</td><td className="mono">{target.regions.join(" · ")}</td>
                 <td className="mono">{Object.entries(target.networks).map(([region, network]) => (
-                  <div key={region}>{`${region}: ${network.vpc_id}`}</div>))}</td></tr>
+                  <div key={region}>{`${region}: ${network.network_ref}`}</div>))}</td></tr>
             ))}
           </tbody>
         </table>

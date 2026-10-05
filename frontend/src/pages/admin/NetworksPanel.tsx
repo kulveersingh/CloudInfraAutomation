@@ -1,22 +1,30 @@
 import { useState } from "react";
 import { useApi } from "../../api/ApiContext";
-import type { NetworkInfo, NetworkInput } from "../../api/types";
+import type { NetworkInfo, NetworkInput, Vocabulary } from "../../api/types";
 import { ErrorAlert } from "../../components/Notices";
 import { useLoad } from "../../hooks/useLoad";
+import { capitalized, useVocabulary } from "../../providers/VocabularyContext";
 
 const EMPTY: NetworkInput = {
-  name: "", account_id: "", region: "us-east-1", vpc_id: "", cidr: "", private_subnet_ids: [],
-  security_group_ids: [], is_default: false,
+  name: "", account_id: "", region: "us-east-1", network_ref: "", cidr: "", subnet_refs: [], firewall_refs: [],
+  is_default: false,
 };
 
-const TEXT_FIELDS: Array<{ key: "name" | "account_id" | "region" | "vpc_id" | "cidr"; label: string }> = [
-  { key: "name", label: "Name" }, { key: "account_id", label: "Account ID" }, { key: "region", label: "Region" },
-  { key: "vpc_id", label: "VPC ID" }, { key: "cidr", label: "Private CIDR" },
-];
+type TextKey = "name" | "account_id" | "region" | "network_ref" | "cidr";
+type ListKey = "subnet_refs" | "firewall_refs";
 
-const LIST_FIELDS: Array<{ key: "private_subnet_ids" | "security_group_ids"; label: string }> = [
-  { key: "private_subnet_ids", label: "Private subnet IDs" }, { key: "security_group_ids", label: "Security group IDs" },
-];
+/** The form's fields, labelled in the cloud's own words. */
+function fields(words: Vocabulary) {
+  const text: Array<{ key: TextKey; label: string }> = [
+    { key: "name", label: "Name" }, { key: "account_id", label: `${capitalized(words.isolation_unit)} ID` },
+    { key: "region", label: "Region" }, { key: "network_ref", label: `${words.private_network} ID` },
+    { key: "cidr", label: "Private CIDR" },
+  ];
+  const lists: Array<{ key: ListKey; label: string }> = [
+    { key: "subnet_refs", label: "Private subnet IDs" }, { key: "firewall_refs", label: `${capitalized(words.firewall_group)} IDs` },
+  ];
+  return { text, lists };
+}
 
 type Editing = { id?: string; input: NetworkInput };
 
@@ -29,6 +37,7 @@ const splitIds = (text: string) => text.split(",").map((part) => part.trim()).fi
 /** Organization networks per account and region; the default one is pre-selected in the project wizard. */
 export function NetworksPanel() {
   const api = useApi();
+  const words = useVocabulary();
   const loaded = useLoad(() => Promise.all([api.networks(), api.networkSettings()]));
   const [saved, setSaved] = useState<NetworkInfo[]>();
   const [attach, setAttach] = useState<boolean>();
@@ -64,11 +73,11 @@ export function NetworksPanel() {
         <>
           <label className="row">
             <input type="checkbox" checked={attachByDefault} onChange={(event) => saveSetting(event.target.checked)} />
-            Attach compute to the organization VPC by default
+            Attach compute to the organization {words.private_network} by default
           </label>
           <div className="tbl-wrap">
             <table>
-              <thead><tr><th>ID</th><th>Name</th><th>Account</th><th>Region</th><th>VPC</th><th>CIDR</th><th>Subnets</th><th></th></tr></thead>
+              <thead><tr><th>ID</th><th>Name</th><th>{capitalized(words.isolation_unit)}</th><th>Region</th><th>{words.private_network}</th><th>CIDR</th><th>Subnets</th><th></th></tr></thead>
               <tbody>
                 {networks.map((item) => (
                   <tr key={item.id}>
@@ -76,9 +85,9 @@ export function NetworksPanel() {
                     <td>{item.name} {item.is_default && <span className="chip ok">Default</span>}</td>
                     <td className="num">{item.account_id}</td>
                     <td className="mono">{item.region}</td>
-                    <td className="mono">{item.vpc_id}</td>
+                    <td className="mono">{item.network_ref}</td>
                     <td className="mono">{item.cidr}</td>
-                    <td className="mono">{item.private_subnet_ids.join(", ")}</td>
+                    <td className="mono">{item.subnet_refs.join(", ")}</td>
                     <td>
                       <button className="btn ghost" aria-label={`Edit ${item.id}`}
                               onClick={() => setEditing({ id: item.id, input: toInput(item) })}>Edit</button>
@@ -89,13 +98,13 @@ export function NetworksPanel() {
             </table>
           </div>
           {editing
-            ? <NetworkForm editing={editing} onChange={setEditing} onSave={() => saveNetwork(networks, editing)}
+            ? <NetworkForm words={words} editing={editing} onChange={setEditing} onSave={() => saveNetwork(networks, editing)}
                            onCancel={() => setEditing(undefined)} />
             : <div><button className="btn" onClick={() => setEditing({ input: EMPTY })}>Add network</button></div>}
         </>
       )}
       <p className="hint">The default network for each account and region is pre-selected in the project wizard.
-        Projects can choose another network or keep compute out of the VPC.</p>
+        Projects can choose another network or keep compute out of the {words.private_network}.</p>
     </div>
   );
 }
@@ -109,27 +118,29 @@ function merge(networks: NetworkInfo[], result: NetworkInfo): NetworkInfo[] {
 }
 
 interface NetworkFormProps {
+  words: Vocabulary;
   editing: Editing;
   onChange: (editing: Editing) => void;
   onSave: () => void;
   onCancel: () => void;
 }
 
-function NetworkForm({ editing, onChange, onSave, onCancel }: NetworkFormProps) {
+function NetworkForm({ words, editing, onChange, onSave, onCancel }: NetworkFormProps) {
   const { input } = editing;
+  const { text, lists } = fields(words);
   const update = (change: Partial<NetworkInput>) => onChange({ ...editing, input: { ...input, ...change } });
   return (
     <div className="panel">
       <div className="panel-b">
         <h3>{editing.id ? `Edit ${editing.id}` : "Add network"}</h3>
         <div className="grid3">
-          {TEXT_FIELDS.map(({ key, label }) => (
+          {text.map(({ key, label }) => (
             <div className="field" key={key}>
               <label htmlFor={`net-${key}`}>{label}</label>
               <input id={`net-${key}`} type="text" value={input[key]} onChange={(event) => update({ [key]: event.target.value })} />
             </div>
           ))}
-          {LIST_FIELDS.map(({ key, label }) => (
+          {lists.map(({ key, label }) => (
             <div className="field" key={key}>
               <label htmlFor={`net-${key}`}>{label}</label>
               <input id={`net-${key}`} type="text" defaultValue={input[key].join(", ")}
@@ -140,7 +151,7 @@ function NetworkForm({ editing, onChange, onSave, onCancel }: NetworkFormProps) 
         </div>
         <label className="row">
           <input type="checkbox" checked={input.is_default} onChange={(event) => update({ is_default: event.target.checked })} />
-          Default for this account and region
+          Default for this {words.isolation_unit} and region
         </label>
         <div className="row">
           <button className="btn pri" onClick={onSave}>Save network</button>

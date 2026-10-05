@@ -60,9 +60,9 @@ class ReferenceData:
         digest = hashlib.sha1(f"{account_id}{region}".encode()).hexdigest()
         return models.Network(
             id=f"net-{account_id}-{region}", name="Org shared VPC", account_id=account_id, region=region,
-            vpc_id=f"vpc-{digest[:17]}", cidr=f"10.{index}.0.0/16",
-            private_subnet_ids=[f"subnet-{digest[offset:offset + 17]}" for offset in (1, 2, 3)],
-            security_group_ids=[f"sg-{digest[4:21]}"], is_default=True)
+            network_ref=f"vpc-{digest[:17]}", cidr=f"10.{index}.0.0/16",
+            subnet_refs=[f"subnet-{digest[offset:offset + 17]}" for offset in (1, 2, 3)],
+            firewall_refs=[f"sg-{digest[4:21]}"], is_default=True)
 
     def account_bindings(self) -> list[models.AccountBinding]:
         environment_ids = [environment[0] for environment in self.ENVIRONMENTS]

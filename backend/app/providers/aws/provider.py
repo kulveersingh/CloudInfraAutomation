@@ -10,9 +10,10 @@ class AwsProvider(CloudProvider):
     name = "Amazon Web Services"
 
     def vocabulary(self):
-        return Vocabulary(isolation_unit="account", hierarchy_node="OU", iac_document="CloudFormation template",
-                          deploy_unit="stack", preventive_policy="SCP", private_network="VPC",
-                          landing_zone_service="Control Tower", control_catalog="Control Tower controls")
+        return Vocabulary(cloud="AWS", isolation_unit="account", hierarchy_node="OU",
+                          iac_document="CloudFormation template", deploy_unit="stack", preventive_policy="SCP",
+                          private_network="VPC", firewall_group="security group", landing_zone_service="Control Tower",
+                          control_catalog="Control Tower controls")
 
     def default_regions(self):
         return ("us-east-1", "us-east-2")
@@ -36,3 +37,8 @@ class AwsProvider(CloudProvider):
         from app.providers.aws.landing_zone.toolkit import aws_landing_zone
 
         return aws_landing_zone()
+
+    def network_problems(self, network) -> list[str]:
+        from app.providers.aws.networks import aws_network_problems
+
+        return aws_network_problems(network)
