@@ -31,6 +31,7 @@ describe("PlatformApi", () => {
     ["requestTeardown", ["invoice-ingest", { scope: "project", environments: [], confirmation: "invoice-ingest" }], "POST",
       "/v1/projects/invoice-ingest/teardowns"],
     ["teardowns", [], "GET", "/v1/teardowns"],
+    ["providers", [], "GET", "/v1/providers"],
     ["decideTeardownEnvironment", ["invoice-ingest", "td-1", "dev", "approve", "ok"], "POST",
       "/v1/projects/invoice-ingest/teardowns/td-1/environments/dev:approve"],
     ["restoreTeardown", ["invoice-ingest", "td-1", "approve-restore", "ok"], "POST",

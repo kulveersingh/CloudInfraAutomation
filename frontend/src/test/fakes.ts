@@ -74,7 +74,7 @@ export const PREVIEW: PreviewResult = {
 
 export const PROJECTS: ProjectSummary[] = [
   { name: "invoice-ingest", portfolio_id: "pf-payments", product_id: "pr-invoicing", resilience_mode: "dr",
-    status: "active", revision: 1, open_change: null, environments: ["dev", "prod"] },
+    status: "active", revision: 1, open_change: null, environments: ["dev", "prod"], provider: "aws" },
 ];
 
 export const TEARDOWN_PREVIEW: TeardownPreview = {

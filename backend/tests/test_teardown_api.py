@@ -567,3 +567,7 @@ def test_restore_fails_when_a_backup_disappears_before_it_runs(client, settings,
     restore(client, teardown["id"], "approve-restore", headers=SAM)
     drain(settings, session_factory)
     assert get(client, teardown["id"])["restore"]["state"] == "failed"
+
+
+def test_teardowns_record_the_provider(client, provisioned):
+    assert request(client).json()["provider"] == "aws"
