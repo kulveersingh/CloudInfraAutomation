@@ -1,10 +1,11 @@
 # CloudInfraAutomation — Architecture
 
-**Status:** v2.22, approved; implementation in progress. No code is written until this design is approved.
+**Status:** v2.23, approved; implementation in progress. No code is written until this design is approved.
 **Date:** 2026-10-05
 **Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9). Every solution is **DR-capable**: it can run in one region, as DR (primary active, secondary standby) or as an HA pair (both active), with **any region pair chosen in the UI** (default us-east-1 / us-east-2) (§10).
 
 **Changes in v2:** added the org registry and tagging strategy (§4); permissions based on tags (§4.5–4.8); multi-account, five-environment model (§5); promotion pipeline (§8). Payload, provisioning, security and scaling sections are updated to match.
+**Changes in v2.23:** MC-2 design (§22.9): Google Cloud projects on Terraform JSON and Infrastructure Manager, Workload Identity Federation, exact-resource IAM, locked-bucket teardown backups, and a cloud picker.
 **Changes in v2.22:** multi-cloud (§22): a cloud-neutral core with AWS, Google Cloud and Azure provider plug-ins; native IaC per cloud; neutral service kinds, control packs and backup strategies; phased delivery.
 **Changes in v2.21:** teardown (§21.9): remove an environment or decommission a project, backup-first into a vault locked for 60 days (deleted only manually by super users), with a teardown record and restore.
 **Changes in v2.20:** Change infrastructure for projects (§21.8): edit a read-back project in the wizard; the platform opens a pull request with the regenerated, signed files and records the new revision when it is merged.
@@ -3737,3 +3738,128 @@ Goal: the same behaviour as today, with every AWS-specific piece reached through
 | MC1-3 | API and DB renames: networks refs, `recovery_point_ref`, widened ids, `provider` everywhere (default `aws`) | **Yes**, in one migration |
 | MC1-4 | Split packs and landing-zone answers in MC-3, not MC-1 | **Yes** |
 | MC1-5 | Hide the provider picker until a second provider exists | **Yes** |
+
+### 22.9 MC-2 in detail: Google Cloud projects
+
+Goal: a project on Google Cloud goes through the same flows as on AWS:
+- wizard, preview, provisioning;
+- read-back, Change infrastructure;
+- releases with risk;
+- teardown with locked backups, and restore.
+
+Everything runs locally against stand-ins, like AWS today. The Google Cloud landing zone (folders, organization policies, the vault project) is MC-3. Until then, the vault project and environment projects are configured in the registry.
+
+#### 22.9.1 How each concept maps
+
+| Concept | Google Cloud | Notes |
+|---|---|---|
+| IaC document | **Terraform JSON** (`main.tf.json` + `variables.tf.json`), deployed by **Infrastructure Manager** | JSON is Terraform's native alternative syntax: deterministic to generate, no HCL serializer, read-back friendly. It stays within **Terraform 1.5.7**, the newest version Infrastructure Manager runs, so `import` blocks are available but `removed` blocks are not. Google provider **≥ 7.21** (needed for Direct VPC egress). |
+| Deploy unit | One Infrastructure Manager deployment per environment project and region: `cloudinfra-{project}-{region}` | DR/HA: a primary and a secondary deployment, with variables `region_role` and `activation_state` (the CloudFormation conditions become `count` expressions). |
+| Isolation unit | One Google Cloud **project per environment and portfolio** (account bindings with provider `gcp`) | The ids are project ids (6–30 characters). |
+| Deployer identity | **Workload Identity Federation**: a pool and GitHub provider per environment project, with an attribute condition on repository id and environment. The deploy service account is impersonated by `principalSet://…/attribute.repository/{org}/{repo}` for that environment only. | `BootstrapOutputs.deployer_identity` = deploy service account; `execution_identity` = the Infrastructure Manager service account that applies the configuration. |
+| Platform credentials | Workload Identity Federation **trusting the platform's AWS role** (keyless) | MC7 |
+| Ownership tags | **Labels**: `org:project` → `org_project`, values lowercased, max 63 characters (a `LabelPolicy`) | Labels drive cost; IAM never relies on them. |
+| Plan | `gcloud infra-manager previews create`, then export the plan JSON; rows from `resource_changes[].change.actions` (`create` → Add, `update` → Modify, `delete` → Remove, `delete`+`create` → replacement) | Feeds release risk (§8.4.2) |
+| Raw resource types (Tier 2) | Any `google_*` resource of the provider schema; a committed snapshot of type names and required arguments, refreshed by a script (`terraform providers schema -json`) | Like the CloudFormation schema catalog |
+| Contract | A Secret Manager secret `cloudinfra-{project}-contract` holding the same contract JSON | Application repositories read it like the SSM parameter on AWS |
+
+#### 22.9.2 Curated services
+
+| Neutral kind | Google Cloud resource | Defaults (like §6.4) |
+|---|---|---|
+| `storage.bucket` | `google_storage_bucket` | Uniform bucket-level access; public access prevention enforced; versioning; noncurrent versions expire after 30 days; Google-managed encryption (CMEK for `confidential`+ comes with MC-3's keys). **Single:** regional bucket. **DR/HA:** dual-region bucket in the chosen pair (custom placement); HA adds turbo replication. `force_destroy = false`, so a non-empty bucket is never deleted by a deploy. |
+| `compute.function` | `google_cloudfunctions2_function` (Cloud Run functions) with its **own service account** | Settings: runtime (`python313`, `python312`, `nodejs22`, `nodejs20`, `java21`, `go125`), entry point, memory (128–32768 MiB), timeout (1–3600 s). Internal ingress. **Direct VPC egress** into the registered Shared VPC subnet when compute attaches to the network. The secondary region is standby: deployed, but without event triggers. |
+| `database.table` | `google_firestore_database` (Native mode) | Point-in-time recovery on; delete protection in STAGE/PROD; `deletion_policy = ABANDON`, so removing it from the configuration keeps the data (retained). **Single:** regional location. **DR/HA:** the multi-region location of the pair's continent (`nam5`, `eur3`). Firestore has no partition or sort keys, so the AWS `partition_key`/`sort_key` settings are not offered. |
+| `messaging.queue` | `google_pubsub_topic` + pull `google_pubsub_subscription` with a dead-letter topic | Message retention 7 days; exactly-once delivery |
+
+**Connections:**
+- **`access.grant`** binds the function's service account **on the exact resource**: the bucket, topic or subscription IAM member, or a Firestore role conditioned on the database name. Roles per level are read, write and readwrite (for example `roles/storage.objectViewer` and `roles/storage.objectUser`). No project-wide roles.
+- **`event.notify`** (bucket → function) is an Eventarc trigger on `google.cloud.storage.object.v1.finalized` for that bucket, with a trigger service account.
+  - **Eventarc cannot filter by object prefix.** The platform passes the prefix and suffix to the function as `CLOUDINFRA_EVENT_PREFIX`/`_SUFFIX`, and the preview says the function must filter.
+
+**Retention when a service is removed (§21.8 C3):**
+- Firestore is retained (ABANDON).
+- A bucket is deleted only if it is empty: `force_destroy = false` makes the deploy fail rather than lose data. The change preview shows "deleted unless empty".
+- Functions and Pub/Sub are deleted.
+
+**Lint rules (the AWS ones, translated):**
+- no primitive roles (`roles/owner`, `roles/editor`, `roles/viewer`);
+- no project-level grants to function service accounts;
+- no `allUsers`/`allAuthenticatedUsers`;
+- public access prevention on every bucket;
+- every function has its own service account.
+
+#### 22.9.3 Repository and workflow
+
+The repository contains `main.tf.json`, `variables.tf.json`, `config/{env}.json` (input values), `infra.json`, a README, the deploy workflow and the signed manifest (§21.2). The deploy workflow:
+1. `google-github-actions/auth` with the environment's Workload Identity provider and deploy service account.
+2. `gcloud infra-manager previews create … --local-source=.`
+3. `gcloud infra-manager deployments apply projects/$GCP_PROJECT_ID/locations/$REGION/deployments/cloudinfra-$PROJECT_NAME-$REGION --local-source=. --service-account=$IM_SERVICE_ACCOUNT --input-values=…`
+
+These run per region, with the secondary region in standby. STAGE and PROD keep the release executor (§8): it applies the reviewed preview.
+
+GitHub environment variables: `GCP_PROJECT_ID`, `GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_DEPLOY_SERVICE_ACCOUNT`, `IM_SERVICE_ACCOUNT`, `GCP_PRIMARY_REGION`/`GCP_SECONDARY_REGION`, and, when attached, `NETWORK`/`SUBNETWORK` per region.
+
+#### 22.9.4 Networks
+
+A registered Google Cloud network is checked like this:
+- **`network_ref`:** a Shared VPC self-link, `projects/{host}/global/networks/{name}`.
+- **`subnet_refs`:** `projects/{host}/regions/{region}/subnetworks/{name}`, at least one in the network's region.
+- **`firewall_refs`:** network tags, lowercase, used by firewall rules.
+
+Functions attach through Direct VPC egress with those tags.
+
+#### 22.9.5 Teardown and restore
+
+| Data store | Backup into the locked vault (§21.9.1) | Restore |
+|---|---|---|
+| Bucket | **Storage Transfer Service** copies the objects into `cloudinfra-teardown-{region}-{vault project}`, a bucket in the vault project with a **locked 60-day retention policy (Bucket Lock)**, under `{project}/{environment}/{id}/` | Transfer back into a new bucket with the original name, then an `import` block adopts it |
+| Firestore database | **Managed export** into the same locked bucket | Managed import into a new database with the original id, then an `import` block adopts it |
+| Cloud SQL / AlloyDB (Tier 2) | **Backup and DR vault** with enforced minimum retention of 60 days | Restore from the vault, then import |
+| Anything else that holds data | Blocks the teardown (as on AWS) | — |
+
+The Bucket Lock retention policy is irreversible. Objects cannot be deleted for 60 days, and the bucket (and, through the lien Bucket Lock places, the vault project) cannot be deleted while any object is retained. After 60 days, only the super-user group may delete, through a vault-project IAM deny policy that exempts it (MC-3 creates the vault project; MC-2 uses a configured `gcp_backup_project`).
+
+**Not backed up:**
+- Pub/Sub messages (transient);
+- Cloud Logging (keep with log sinks);
+- function code (rebuilt from the application repository).
+
+Delete steps: delete the Infrastructure Manager deployment (secondary region first), then the retained Firestore database and empty buckets, then the bootstrap (Workload Identity provider and service accounts), then the GitHub environment.
+
+#### 22.9.6 Platform changes
+
+| Area | Change |
+|---|---|
+| `app/providers/gcp/` | `GcpProvider` with vocabulary (cloud "Google Cloud", project, folder, Terraform configuration, Infrastructure Manager deployment, organization policy, Shared VPC, network tag), default regions `us-east1`/`us-east4`, network checks, and the project, teardown and release toolkits. |
+| Project toolkit | Blocks and binders above; `TerraformJsonDialect`; GCP lint rules; bundle (Terraform files, config, workflow, README); GCP workflow variables; provider-schema snapshot catalog with its refresh script. |
+| Teardown toolkit | Inventory from the Terraform document (data stores by type, names resolved from variables); notes; vault bucket name. |
+| Release classifier | Stateful types: buckets, Firestore, Cloud SQL, AlloyDB, Spanner, Bigtable, Pub/Sub subscriptions, KMS keys, secrets. Permission types: `google_*_iam_*`, service accounts, IAM deny and org policies. |
+| Adapters | `LocalGcp` (`ProviderPort`: Workload Identity bootstrap records, deployment delete, data-store delete, import, backup) and a local backup stand-in that enforces Bucket Lock (refuses deletion before 60 days, and to anyone but the super-user group after). `gcp_mode = "local"`. |
+| Registry and seed | GCP regions; example account bindings (project ids) per portfolio and environment; example Shared VPC networks; `gcp_backup_project` setting (per provider, like `backup_account_id`). |
+| UI | **A cloud picker appears** in the wizard (first step) and on the networks screen now that two providers exist. Regions, catalog, settings fields and vocabulary follow the chosen cloud. The landing zone stays AWS until MC-3. |
+
+#### 22.9.7 Delivery (TDD, 100% coverage, like MC-1)
+
+| Step | Scope |
+|---|---|
+| **MC-2a** | `GcpProvider` registered: vocabulary, regions, network checks, label policy, seed data, `LocalGcp` adapter. |
+| **MC-2b** | Terraform JSON dialect, curated blocks, binders, lint rules, raw-type snapshot. Golden tests per service and connection, DR/HA shapes, and a structural check of every generated document against the bundled provider schema (required arguments, known types). The real `terraform validate` runs in the generated repository's workflow. |
+| **MC-2c** | Bundle, workflow and variables, Workload Identity bootstrap, provisioning, read-back and change requests end to end on GCP. |
+| **MC-2d** | Release plan rows and classifier; teardown inventory, locked-bucket backups, Backup and DR vault stand-in, restore with import. |
+| **MC-2e** | UI: cloud picker, GCP regions, catalog, settings and words; teardown and networks screens for GCP. |
+
+#### 22.9.8 Decisions
+
+| # | Decision | Recommendation |
+|---|---|---|
+| MC2-1 | Document format | **Terraform JSON** within Terraform 1.5.7 (Infrastructure Manager), google provider ≥ 7.21 |
+| MC2-2 | Deploy units | **One Infrastructure Manager deployment per environment project and region**; DR/HA with dual-region buckets and multi-region Firestore |
+| MC2-3 | Isolation | **Exact-resource IAM bindings to each function's own service account**; no project-wide roles. Tag-conditioned deny policies come with the landing zone (MC-3). |
+| MC2-4 | Bucket events by prefix | Eventarc can't filter by prefix: **pass prefix and suffix to the function and say so in the preview** |
+| MC2-5 | Data kept on removal | **Firestore retained (ABANDON); buckets deleted only when empty** (`force_destroy = false`) |
+| MC2-6 | Teardown backups | **Storage Transfer and Firestore export into a Bucket-Locked bucket (60 days) in the vault project**; Backup and DR vault for Cloud SQL/AlloyDB; anything else blocks |
+| MC2-7 | Tier-2 types | **Committed provider-schema snapshot**, refreshed by a script |
+| MC2-8 | Network attachment | **Direct VPC egress** with the registered subnet and network tags |
+| MC2-9 | Contract | **Secret Manager** secret with the same JSON |
+| MC2-10 | Cloud picker | **Shown in the project wizard and networks screen now**; the landing zone stays AWS-only until MC-3 |
