@@ -53,7 +53,7 @@ def test_aws_teardown_says_what_aws_backup_cannot_keep():
 
 
 def test_aws_teardown_vault_name():
-    assert AwsProvider().teardown().vault_name("eu-west-1") == "cloudinfra-teardown-eu-west-1"
+    assert AwsProvider().teardown().vault_name("eu-west-1", "999999999999") == "cloudinfra-teardown-eu-west-1"
 
 
 # ---- release risk ----

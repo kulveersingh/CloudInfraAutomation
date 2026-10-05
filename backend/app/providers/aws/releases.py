@@ -17,3 +17,6 @@ class CloudFormationResourceClassifier(ResourceClassifier):
     def is_permission(self, resource_type: str) -> bool:
         return (resource_type.startswith("AWS::IAM::") or resource_type.endswith("Policy")
                 or resource_type == "AWS::Lambda::Permission")
+
+    def rows(self, document):
+        return [(logical_id, body["Type"]) for logical_id, body in document["Resources"].items()]

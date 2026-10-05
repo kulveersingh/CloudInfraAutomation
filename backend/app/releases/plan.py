@@ -6,7 +6,7 @@ ChangeAction = Literal["Add", "Modify", "Remove"]
 
 
 class ChangeSpec(BaseModel):
-    """One row of a CloudFormation change set."""
+    """One row of a plan: a CloudFormation change set row, or a Terraform resource change (by address)."""
 
     action: ChangeAction
     logical_id: str

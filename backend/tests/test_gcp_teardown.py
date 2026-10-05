@@ -133,7 +133,7 @@ def test_data_the_platform_cannot_back_up_blocks_the_teardown(client, settings, 
 
 def test_a_data_store_named_by_an_expression_blocks_the_teardown(client, settings, session_factory):
     database = {"id": "ledger", "type": "google_sql_database_instance",
-                "config": {"properties": {"name": "${var.project_name}-db", "database_version": "POSTGRES_16"}}}
+                "config": {"properties": {"name": "${random_id.ledger.hex}", "database_version": "POSTGRES_16"}}}
     provision(client, settings, session_factory, resources=[database])
     assert preview(client)["blockers"] == [
         "Cannot back up ledger (google_sql_database_instance): its name is not in the configuration."]
@@ -160,7 +160,7 @@ def test_teardown_backs_up_into_the_locked_bucket_of_the_vault_project(client, s
     assert (teardown["state"], sorted(point.source_ref for point in points),
             {point.vault for point in points}, {point.locked_until - point.completed_at for point in points},
             all(point.ref.startswith(f"gs://cloudinfra-teardown-us-east1-{VAULT}/") for point in points)) == (
-        "completed", [f"projects/{DEV}/databases/invoice-ingest-orders", f"projects/_/buckets/{bucket(DEV)}"],
+        "completed", [f"projects/_/buckets/{bucket(DEV)}", f"projects/{DEV}/databases/invoice-ingest-orders"],
         {f"cloudinfra-teardown-us-east1-{VAULT}"}, {timedelta(days=60)}, True)
 
 
@@ -175,8 +175,9 @@ def test_teardown_removes_workload_identity_and_the_github_environment(client, s
                                                                        provisioned):
     torn_down(client, settings, session_factory)
     environments = {stack["environment"] for stack in gcp(settings).stacks()}
-    assert ("dev" in environments, "GCP_PROJECT_ID" in LocalGitHub(settings.local_state_dir).environment(
-        OWNER, REPOSITORY, "dev")) == (False, False)
+    with pytest.raises(KeyError):
+        LocalGitHub(settings.local_state_dir).environment(OWNER, REPOSITORY, "dev")
+    assert environments == {"test", "stage", "prod"}
 
 
 def test_an_unlocked_vault_bucket_stops_the_teardown_before_anything_is_deleted(client, settings, session_factory,
@@ -185,7 +186,7 @@ def test_an_unlocked_vault_bucket_stops_the_teardown_before_anything_is_deleted(
     teardown = torn_down(client, settings, session_factory)
     [dev] = teardown["environments"]
     assert (dev["state"], dev["error"], gcp(settings).operations()) == (
-        "failed", f"The central vault cloudinfra-teardown-us-east1-{VAULT} is not locked for at least 60 days.", [])
+        "failed_needs_attention", f"The central vault cloudinfra-teardown-us-east1-{VAULT} is not locked for at least 60 days.", [])
 
 
 # ---- restore ----
@@ -198,7 +199,7 @@ def test_restore_brings_the_data_back_and_imports_it(client, settings, session_f
     imports = [item["target"] for item in gcp(settings).operations() if item["operation"] == "import_stack"]
     assert (sorted(item["physical_name"] for item in vault(settings).restores()), imports,
             client.get(f"{PROJECT}/teardowns/{teardown['id']}").json()["restore"]["state"]) == (
-        [bucket(DEV), "invoice-ingest-orders"],
+        ["invoice-ingest-orders", bucket(DEV)],
         ["invoice-ingest google_storage_bucket.uploads,google_firestore_database.orders"], "restored")
 
 
@@ -239,3 +240,16 @@ def test_databases_go_to_the_backup_and_dr_vault(tmp_path):
     assert (point.vault, point.ref.startswith(
         f"projects/{VAULT}/locations/us-east1/backupVaults/cloudinfra-teardown/dataSources/")) == (
         f"projects/{VAULT}/locations/us-east1/backupVaults/cloudinfra-teardown", True)
+
+
+# ---- names in the configuration ----
+
+@pytest.mark.parametrize("text, resolved", [
+    (None, None),
+    ("${substr(sha1(var.unknown), 0, 8)}-x", None),
+    ("${var.project_name}-${substr(sha1(var.project_id), 0, 4)}", "demo-" + hashlib.sha1(b"p-1").hexdigest()[:4]),
+])
+def test_names_resolve_only_from_known_variables(text, resolved):
+    from app.providers.gcp.teardown import TerraformNames
+
+    assert TerraformNames({"project_name": "demo", "project_id": "p-1"}).resolve(text) == resolved

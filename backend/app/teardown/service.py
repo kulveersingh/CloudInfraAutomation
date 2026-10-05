@@ -5,7 +5,7 @@ from typing import Literal
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.adapters.ports import BOOTSTRAP_STACK, BackupPort, CloudPorts
+from app.adapters.ports import BackupPort, CloudPorts
 from app.db import models
 from app.errors import ConflictError, NotFoundError, ValidationFailedError
 from app.landing_zone.repository import LandingZoneRepository
@@ -27,7 +27,6 @@ from app.teardown.scheduler import TeardownScheduler
 from app.teardown.states import EnvironmentState, RestoreState, TeardownScope, TeardownState, overall_state
 
 RETENTION_DAYS = 60
-NO_BACKUP_ACCOUNT = "No central Backup account is configured: add a Backup account to the landing zone first."
 RESTORE_JOB = "restore"
 
 
@@ -69,8 +68,8 @@ class TeardownService:
 
     @classmethod
     def for_session(cls, session: Session, clouds: CloudPorts, owner: str,
-                    configured_backup_account: str | None) -> "TeardownService":
-        return cls(session, clouds, owner, BackupAccountResolver(configured_backup_account,
+                    configured_backup_accounts: dict[str, str | None]) -> "TeardownService":
+        return cls(session, clouds, owner, BackupAccountResolver(configured_backup_accounts,
                                                               LandingZoneRepository(session)))
 
     # ---- preview and request ----
@@ -81,12 +80,12 @@ class TeardownService:
         request = ProjectRequest.model_validate(project.request)
         teardown = self._providers.get(project.provider).teardown()
         not_backed_up = [*teardown.inventory.not_backed_up(request), *teardown.notes]
-        backup_account = self._backup_account.resolve()
+        backup_account = self._backup_account.resolve(project.provider)
         return {"scope": body.scope, "backup_account": backup_account, "retention_days": RETENTION_DAYS,
                 "blockers": self._problems(project, body.scope, planned, backup_account),
                 "environments": [{"environment": item.environment, "account_id": item.account_id,
                                   "regions": item.regions, "approver_role": item.approver_role,
-                                  "stacks": [project.name, BOOTSTRAP_STACK.format(project=project.name)],
+                                  "stacks": teardown.deploy_units(project.name, item.regions),
                                   "data_stores": [store.preview() for store in item.stores],
                                   "not_backed_up": not_backed_up} for item in planned]}
 
@@ -95,7 +94,7 @@ class TeardownService:
         planned = self._plan(project, body)
         if body.confirmation != project.name:
             raise ValidationFailedError("Type the project name to confirm.")
-        backup_account = self._backup_account.resolve()
+        backup_account = self._backup_account.resolve(project.provider)
         problems = self._problems(project, body.scope, planned, backup_account)
         if problems:
             raise ConflictError(" ".join(problems))
@@ -259,4 +258,5 @@ class TeardownService:
         context = BlockerContext(project, [item.environment for item in planned], scope)
         problems = [*self._blockers.messages(context), *[problem for item in planned for problem in item.problems]]
         problems = list(dict.fromkeys(problems))
-        return problems if backup_account else [*problems, NO_BACKUP_ACCOUNT]
+        missing = self._providers.get(project.provider).teardown().missing_vault
+        return problems if backup_account else [*problems, missing]

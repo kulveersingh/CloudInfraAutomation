@@ -9,20 +9,27 @@ def record(status: str, version: int, accounts: dict | None) -> models.LandingZo
 
 
 def test_configured_account_wins(session):
-    assert BackupAccountResolver("999999999999", LandingZoneRepository(session)).resolve() == "999999999999"
+    assert BackupAccountResolver({"aws": "999999999999"}, LandingZoneRepository(session)).resolve() == "999999999999"
 
 
 def test_without_a_landing_zone_there_is_none(session):
-    assert BackupAccountResolver(None, LandingZoneRepository(session)).resolve() is None
+    assert BackupAccountResolver({"aws": None}, LandingZoneRepository(session)).resolve() is None
 
 
 def test_the_applied_landing_zone_backup_account_is_used(session):
     session.add(record("applied", 1, {"acme-backup": "123456789012", "acme-network": "210987654321"}))
     session.commit()
-    assert BackupAccountResolver(None, LandingZoneRepository(session)).resolve() == "123456789012"
+    assert BackupAccountResolver({"aws": None}, LandingZoneRepository(session)).resolve() == "123456789012"
 
 
 def test_a_landing_zone_without_a_backup_account_has_none(session):
     session.add(record("applied", 1, None))
     session.commit()
-    assert BackupAccountResolver(None, LandingZoneRepository(session)).resolve() is None
+    assert BackupAccountResolver({"aws": None}, LandingZoneRepository(session)).resolve() is None
+
+
+def test_other_clouds_use_only_their_configured_account(session):
+    session.add(record("applied", 1, {"acme-backup": "123456789012"}))
+    session.commit()
+    resolver = BackupAccountResolver({"gcp": None}, LandingZoneRepository(session))
+    assert resolver.resolve("gcp") is None

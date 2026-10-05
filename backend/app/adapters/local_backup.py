@@ -1,5 +1,6 @@
 import json
 import uuid
+from abc import ABC, abstractmethod
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -10,6 +11,32 @@ STATE_FILE = "backup.json"
 CENTRAL_VAULT = "cloudinfra-teardown-{region}"
 RETENTION_DAYS = 60
 SUPER_USER_ROLE = "CloudInfraBackupSuperUser"
+
+
+class BackupStyle(ABC):
+    """How a cloud names its locked central vault, its recovery points, and who may delete them after the lock."""
+
+    super_user: str
+
+    @abstractmethod
+    def vault(self, backup_account_id: str, region: str, resource_type: str) -> str:
+        ...
+
+    @abstractmethod
+    def ref(self, backup_account_id: str, region: str, resource_type: str) -> str:
+        ...
+
+
+class AwsBackupStyle(BackupStyle):
+    """AWS Backup: a central vault per region with Vault Lock in compliance mode."""
+
+    super_user = SUPER_USER_ROLE
+
+    def vault(self, backup_account_id, region, resource_type):
+        return CENTRAL_VAULT.format(region=region)
+
+    def ref(self, backup_account_id, region, resource_type):
+        return f"arn:aws:backup:{region}:{backup_account_id}:recovery-point:{uuid.uuid4()}"
 
 
 class RecoveryPointLockedError(Exception):
@@ -23,10 +50,11 @@ class LocalBackup(BackupPort):
     platform's port has no deletion."""
 
     def __init__(self, root, backup_account_id: str, clock: Callable[[], datetime] | None = None,
-                 provider: str = "aws"):
+                 provider: str = "aws", style: BackupStyle | None = None):
         self._state_file = Path(root) / provider / STATE_FILE
         self._account = backup_account_id
         self._clock = clock or (lambda: datetime.now(UTC))
+        self._style = style or AwsBackupStyle()
 
     def back_up(self, source: BackupSource) -> RecoveryPoint:
         state = self._read()
@@ -34,8 +62,9 @@ class LocalBackup(BackupPort):
             raise RuntimeError(f"Backup of {source.source_ref} failed.")
         completed = self._clock()
         point = RecoveryPoint(
-            ref=f"arn:aws:backup:{source.region}:{self._account}:recovery-point:{uuid.uuid4()}",
-            vault=CENTRAL_VAULT.format(region=source.region), account_id=self._account, region=source.region,
+            ref=self._style.ref(self._account, source.region, source.resource_type),
+            vault=self._style.vault(self._account, source.region, source.resource_type), account_id=self._account,
+            region=source.region,
             source_ref=source.source_ref, resource_type=source.resource_type, completed_at=completed,
             locked_until=completed + timedelta(days=RETENTION_DAYS))
         state["recovery_points"].append(_point_json(point))
@@ -85,8 +114,8 @@ class LocalBackup(BackupPort):
         point = self.recovery_point(ref)
         if at < point.locked_until:
             raise RecoveryPointLockedError(f"{ref} is locked until {point.locked_until.isoformat()}.")
-        if role != SUPER_USER_ROLE:
-            raise PermissionError(f"Only {SUPER_USER_ROLE} can delete recovery points.")
+        if role != self._style.super_user:
+            raise PermissionError(f"Only {self._style.super_user} can delete recovery points.")
         state = self._read()
         state["recovery_points"] = [item for item in state["recovery_points"] if item["ref"] != ref]
         self._write(state)

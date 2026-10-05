@@ -19,7 +19,7 @@ from app.provisioning.steps import ConfigureEnvironmentsStep, ExistingBootstrapS
 from app.readback.manifest import MANIFEST_PATH, ManifestSealer, ManifestSigner
 from app.readback.subjects import ownership_properties
 from app.synth.request import ProjectRequest
-from app.teardown.inventory import DataStore, TeardownToolkit
+from app.teardown.inventory import DataStore
 from app.teardown.repository import TeardownRepository
 from app.teardown.scheduler import TeardownScheduler
 from app.teardown.states import EnvironmentState, RestoreState, TeardownScope, TeardownState, overall_state
@@ -123,7 +123,8 @@ class TeardownJobRunner:
         stores, _ = toolkit.inventory.for_environment(request, row.environment, row.account_id, row.regions)
         backup = self._cloud.backup(teardown.backup_account_id)
         regions = [region for region in row.regions if any(store.region == region for store in stores)]
-        steps = [Step(f"vault:{region}", lambda region=region: _require_locked(backup, toolkit, region)) for region in regions]
+        steps = [Step(f"vault:{region}", lambda region=region: _require_locked(
+            backup, toolkit.vault_name(region, teardown.backup_account_id), region)) for region in regions]
         steps += [Step(f"backup:{store.region}:{store.service_id}",
                        lambda store=store: self._back_up(backup, row, store)) for store in stores]
         steps.append(Step("verify-backups", lambda: self._verify(backup, row, stores)))
@@ -282,10 +283,10 @@ class RestoreJobRunner:
         self._committer.commit(project, request, f"Restore after teardown {teardown.id} (revision {project.revision + 1})")
 
 
-def _require_locked(backup: BackupPort, toolkit: TeardownToolkit, region: str) -> None:
+def _require_locked(backup: BackupPort, vault: str, region: str) -> None:
     lock = backup.vault_lock(region)
     if not lock.locked or lock.min_retention_days < RETENTION.days:
-        raise RuntimeError(f"The central vault {toolkit.vault_name(region)} is not locked for at least "
+        raise RuntimeError(f"The central vault {vault} is not locked for at least "
                            f"{RETENTION.days} days.")
 
 

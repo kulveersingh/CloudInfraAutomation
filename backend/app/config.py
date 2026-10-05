@@ -37,6 +37,10 @@ class Settings(BaseSettings):
         """The adapter mode for a cloud provider: the `<provider>_mode` setting (`aws_mode` for AWS)."""
         return getattr(self, f"{provider}_mode")
 
+    def backup_accounts(self) -> dict[str, str | None]:
+        """The configured central backup account per cloud provider (on Google Cloud, the vault project)."""
+        return {"aws": self.backup_account_id, "gcp": self.gcp_backup_project}
+
     def sqlalchemy_url(self) -> str:
         if self.database_password is None:
             return self.database_url

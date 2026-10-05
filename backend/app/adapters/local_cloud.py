@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import ClassVar
 
-from app.adapters.local_backup import LocalBackup
+from app.adapters.local_backup import BackupStyle, LocalBackup
 from app.adapters.ports import BootstrapOutputs, BootstrapRequest, ProviderPort
 from app.config import Settings
 
@@ -51,8 +51,12 @@ class LocalCloud(ProviderPort, ABC):
     def import_stack(self, account_id: str, region: str, stack_name: str, logical_ids: list[str]) -> None:
         self._operate("import_stack", account_id, region, f"{stack_name} {','.join(logical_ids)}")
 
-    def backup(self, backup_account_id: str) -> LocalBackup:
-        return LocalBackup(self._root, backup_account_id, provider=self.provider)
+    def backup(self, backup_account_id: str, clock=None) -> LocalBackup:
+        return LocalBackup(self._root, backup_account_id, clock, provider=self.provider, style=self._backup_style())
+
+    @abstractmethod
+    def _backup_style(self) -> BackupStyle:
+        """How this cloud's locked vault names its recovery points."""
 
     def operations(self) -> list[dict]:
         """The stack and data-store operations, in order, each with when it happened."""

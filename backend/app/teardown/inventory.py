@@ -37,12 +37,18 @@ class DataStoreInventory(ABC):
 
 @dataclass(frozen=True)
 class TeardownToolkit:
-    """What a provider gives teardowns (§21.9): its data stores, what its backup service cannot keep, and the name
-    of the locked central vault per region."""
+    """What a provider gives teardowns (§21.9): its data stores, what its backup service cannot keep, the name of
+    the locked central vault per region, the deploy units a teardown deletes, and what to say when no vault is set."""
 
     inventory: DataStoreInventory
     notes: tuple[str, ...]
-    vault_pattern: str
+    vault_pattern: str  # {region} and {account} (the backup account)
+    unit_patterns: tuple[str, ...]  # {project} and {region}
+    missing_vault: str
 
-    def vault_name(self, region: str) -> str:
-        return self.vault_pattern.format(region=region)
+    def vault_name(self, region: str, account: str) -> str:
+        return self.vault_pattern.format(region=region, account=account)
+
+    def deploy_units(self, project: str, regions: list[str]) -> list[str]:
+        return list(dict.fromkeys(pattern.format(project=project, region=region)
+                                  for pattern in self.unit_patterns for region in regions))

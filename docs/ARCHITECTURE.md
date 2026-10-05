@@ -1,10 +1,11 @@
 # CloudInfraAutomation — Architecture
 
-**Status:** v2.25, approved; implementation in progress. No code is written until this design is approved.
+**Status:** v2.26, approved; implementation in progress. No code is written until this design is approved.
 **Date:** 2026-10-05
 **Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9). Every solution is **DR-capable**: it can run in one region, as DR (primary active, secondary standby) or as an HA pair (both active), with **any region pair chosen in the UI** (default us-east-1 / us-east-2) (§10).
 
 **Changes in v2:** added the org registry and tagging strategy (§4); permissions based on tags (§4.5–4.8); multi-account, five-environment model (§5); promotion pipeline (§8). Payload, provisioning, security and scaling sections are updated to match.
+**Changes in v2.26:** MC-2d: Google Cloud release risk from Terraform plans; teardown inventory from the configuration; Bucket-Locked and Backup and DR vault backups in the vault project; restore with import (§22.9.7 notes).
 **Changes in v2.25:** MC-2c: Google Cloud provisioning, read-back and Change infrastructure end to end; ownership labels through a per-provider tag policy; deployments named `cloudinfra-{project}-{region}`; removal wording in change previews (§22.9.7 notes).
 **Changes in v2.24:** MC-2b implemented: Google Cloud Terraform JSON generation with curated services, exact-resource bindings, Eventarc triggers, lint against the provider schema, preview notes and the Infrastructure Manager workflow (§22.9.7 notes).
 **Changes in v2.23:** MC-2 design (§22.9): Google Cloud projects on Terraform JSON and Infrastructure Manager, Workload Identity Federation, exact-resource IAM, locked-bucket teardown backups, and a cloud picker.
@@ -3882,6 +3883,19 @@ Delete steps: delete the Infrastructure Manager deployment (secondary region fir
 - **Labels in the document.** Ownership values known when the code is generated (portfolio, product, data classification, resilience) are written into `local.labels` directly. The cost center can change in the registry, so it is a variable without a default, passed from `ORG_COST_CENTER` at deploy.
 - **Deployment names.** Deployments are `cloudinfra-{project}-{region}`, as designed, and function code is `bootstrap/{project}.zip`.
 - **Removal wording.** Blocks can say what removal does (`removal_effect()`). The change summary carries it as `removal` next to `retained`, and the pull request and the UI's change preview use it. A Google Cloud bucket says "deleted only if empty"; it still needs confirming, like any removal that can delete data.
+
+**MC-2d implementation notes.**
+- **Release rows.** `ResourceClassifier` gains `rows(document)`, the (address, type) rows a first plan of a document has, so the local pipeline simulator no longer reads CloudFormation directly. On Google Cloud:
+  - `TerraformResourceClassifier` marks data types stateful (buckets, Firestore, Cloud SQL, AlloyDB, Spanner, Bigtable, BigQuery, Filestore, subscriptions, KMS, secrets) and `*_iam_*`, service accounts, deny and organization policies as permission changes;
+  - `TerraformPlanReader` turns `terraform show -json` of a preview's plan into rows: create → Add, update → Modify, delete → Remove, delete-and-create (either order) → a replacement. Data sources and no-ops are skipped.
+- **Teardown inventory.** `TerraformInventory` reads the configuration the current request generates:
+  - each service's main resource, its name resolved for the environment (`${var.…}` and the bucket's `substr(sha1(var.project_id), 0, 8)`);
+  - buckets, Firestore, Cloud SQL and AlloyDB are backed up. A primary-only resource (dual-region bucket, multi-region Firestore) is backed up once, in the primary region;
+  - Spanner, Bigtable, BigQuery and Filestore block the teardown, and so does a name the configuration does not give.
+- **Vault.** Local backups now have a per-cloud `BackupStyle`. On Google Cloud, objects and Firestore exports go to the Bucket-Locked bucket `cloudinfra-teardown-{region}-{vault project}` (refs `gs://…`), and Cloud SQL and AlloyDB to the Backup and DR vault `projects/{vault project}/locations/{region}/backupVaults/cloudinfra-teardown`. After 60 days only `group:cloudinfra-backup-super-users` may delete.
+- **Per-provider teardown settings.** `TeardownToolkit` now names the deploy units a teardown deletes (`cloudinfra-{project}-{region}` and the bootstrap on Google Cloud), the vault with the backup account in its name, and the message when no vault is configured. The backup account resolves per provider (`Settings.backup_accounts()`); the landing zone's Backup account applies only to AWS until MC-3.
+- **Buckets on deletion.** Firestore (`ABANDON`) is deleted by the teardown after its deployment, like retained stores on AWS. Buckets are deleted with the deployment; the real adapter empties the backed-up buckets first, because `force_destroy = false` makes deleting a non-empty bucket fail.
+
 
 #### 22.9.8 Decisions
 

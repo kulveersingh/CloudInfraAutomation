@@ -32,10 +32,14 @@ class GcpProvider(CloudProvider):
         return gcp_project()
 
     def teardown(self):
-        raise ValidationFailedError("Teardowns on Google Cloud are not available yet.")
+        from app.providers.gcp.teardown import gcp_teardown
+
+        return gcp_teardown()
 
     def resources(self):
-        raise ValidationFailedError("Releases on Google Cloud are not available yet.")
+        from app.providers.gcp.releases import TerraformResourceClassifier
+
+        return TerraformResourceClassifier()
 
     def landing_zone(self):
         raise ValidationFailedError("The Google Cloud landing zone is not available yet.")

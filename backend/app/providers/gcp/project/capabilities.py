@@ -29,6 +29,11 @@ class GcpBlock(Block, ABC):
     def primary_only(self, body: dict) -> dict:
         return {"count": PRIMARY_ONLY, **body} if self.spans_regions else body
 
+    @property
+    def main_resource(self) -> tuple[str, str]:
+        """(type, name) of the resource that is the service itself, e.g. the bucket rather than its bindings."""
+        return self.provider_types[0], self.spec.id
+
     def reference(self, type_name: str, name: str, attribute: str) -> str:
         """An attribute of one of this block's resources, indexed when the resource is primary-only."""
         return f"${{{type_name}.{name}{'[0]' if self.spans_regions else ''}.{attribute}}}"

@@ -14,6 +14,10 @@ class ResourceClassifier(ABC):
     def is_permission(self, resource_type: str) -> bool:
         ...
 
+    @abstractmethod
+    def rows(self, document: dict) -> list[tuple[str, str]]:
+        """(address, type) of each resource of a generated document: the rows a first plan of it would have."""
+
 
 class RiskLevel:
     LOW = "low"

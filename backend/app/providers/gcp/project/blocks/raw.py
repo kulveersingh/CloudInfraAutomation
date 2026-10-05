@@ -17,6 +17,10 @@ class RawResourceBlock(GcpBlock):
     multi_region = "regional"
     terraform_type: ClassVar[str]
 
+    @property
+    def main_resource(self):
+        return self.terraform_type, self.spec.id
+
     def contract_entry(self) -> dict:
         return {"terraformType": self.terraform_type}
 

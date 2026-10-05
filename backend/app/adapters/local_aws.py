@@ -1,3 +1,4 @@
+from app.adapters.local_backup import AwsBackupStyle
 from app.adapters.local_cloud import LocalCloud
 from app.adapters.ports import BootstrapOutputs, BootstrapRequest
 
@@ -13,3 +14,6 @@ class LocalAws(LocalCloud):
 
     def _role_arn(self, request: BootstrapRequest, role: str) -> str:
         return f"arn:aws:iam::{request.account_id}:role/cloudinfra/{request.project}-{role}"
+
+    def _backup_style(self):
+        return AwsBackupStyle()

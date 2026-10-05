@@ -1,9 +1,11 @@
+from app.adapters.ports import BOOTSTRAP_STACK
 from app.providers.aws.project.toolkit import aws_project
 from app.synth.blocks.registry import BlockRegistry
 from app.synth.request import ProjectRequest
 from app.synth.synthesizer import TemplateSynthesizer
 from app.teardown.inventory import DataStore, DataStoreInventory, TeardownToolkit
 
+NO_BACKUP_ACCOUNT = "No central Backup account is configured: add a Backup account to the landing zone first."
 RETAINING_POLICIES = ("Retain", "RetainExceptOnCreate")
 PRIMARY_ONLY = "IsPrimary"
 
@@ -112,4 +114,5 @@ class CloudFormationInventory(DataStoreInventory):
 def aws_teardown() -> TeardownToolkit:
     return TeardownToolkit(inventory=CloudFormationInventory.default(),
                            notes=("CloudWatch Logs: not supported by AWS Backup",),
-                           vault_pattern="cloudinfra-teardown-{region}")
+                           vault_pattern="cloudinfra-teardown-{region}",
+                           unit_patterns=("{project}", BOOTSTRAP_STACK), missing_vault=NO_BACKUP_ACCOUNT)

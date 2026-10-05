@@ -33,7 +33,7 @@ class ServiceContainer:
         self.read_back = RepositoryReader.default(github, settings.github_owner, signer)
         self.project_changes = ProjectChangeService.for_session(session, github, settings.github_owner)
         self.teardowns = TeardownService.for_session(session, adapters.clouds(settings), settings.github_owner,
-                                                     settings.backup_account_id)
+                                                     settings.backup_accounts())
 
     @classmethod
     def provide(cls, request: Request) -> Iterator["ServiceContainer"]:

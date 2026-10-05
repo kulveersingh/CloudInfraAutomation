@@ -17,16 +17,16 @@ class LocalPipelineSimulator:
         self._resources = resources
 
     def plan(self, request: ProjectRequest, environment: str, requested_by: str, high_risk: bool = False) -> PlanSubmission:
-        resources = self._synthesizer.synthesize(request)["Resources"]
-        replaced = self._replaced_resource(resources) if high_risk else None
-        changes = [self._change(logical_id, body["Type"], logical_id == replaced) for logical_id, body in resources.items()]
+        rows = self._resources.rows(self._synthesizer.synthesize(request))
+        replaced = self._replaced_resource(rows) if high_risk else None
+        changes = [self._change(address, resource_type, address == replaced) for address, resource_type in rows]
         return PlanSubmission(project_name=request.project_name, environment=environment,
                               commit_sha=secrets.token_hex(COMMIT_BYTES), artifact_digest=self._artifact(request),
                               changes=changes, evidence=Evidence(tests_passed=True, signed=True),
                               requested_by=requested_by)
 
-    def _replaced_resource(self, resources: dict) -> str | None:
-        return next((logical_id for logical_id, body in resources.items() if self._resources.is_stateful(body["Type"])), None)
+    def _replaced_resource(self, rows: list[tuple[str, str]]) -> str | None:
+        return next((address for address, resource_type in rows if self._resources.is_stateful(resource_type)), None)
 
     def _change(self, logical_id: str, resource_type: str, replaced: bool) -> ChangeSpec:
         action = "Modify" if replaced else "Add"
