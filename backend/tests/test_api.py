@@ -34,7 +34,7 @@ def test_environments(client):
 # ---- admin: regions ----
 
 def test_list_regions(client):
-    assert len(client.get("/v1/admin/regions").json()) == 6
+    assert len(client.get("/v1/admin/regions", params={"provider": "aws"}).json()) == 6
 
 
 def test_enable_region(client):

@@ -105,7 +105,7 @@ def test_resource_types_are_searched_per_provider(client):
 
 
 def test_resource_types_of_an_unknown_provider(client):
-    assert client.get("/v1/catalog/gcp/types").status_code == 404
+    assert client.get("/v1/catalog/azure/types").status_code == 404
 
 
 def test_catalog_is_per_provider(client):

@@ -45,8 +45,8 @@ def test_control_identifiers_are_global_control_catalog_arns():
 
 def test_landing_zone_for_an_unknown_provider_is_rejected(client):
     response = client.post("/v1/admin/landing-zone:propose",
-                           json={"provider": "gcp", "answers": answers_dict(), "edits": []}, headers=ALEX)
-    assert (response.status_code, response.json()["detail"]) == (422, "Unknown cloud provider 'gcp'.")
+                           json={"provider": "azure", "answers": answers_dict(), "edits": []}, headers=ALEX)
+    assert (response.status_code, response.json()["detail"]) == (422, "Unknown cloud provider 'azure'.")
 
 
 @pytest.mark.parametrize("package", ["landing_zone"])

@@ -60,5 +60,5 @@ def test_networks_default_to_aws():
 
 
 def test_networks_of_an_unknown_provider_are_rejected():
-    with pytest.raises(ValidationError, match="Unknown cloud provider 'gcp'"):
-        network(provider="gcp")
+    with pytest.raises(ValidationError, match="Unknown cloud provider 'azure'"):
+        network(provider="azure")
