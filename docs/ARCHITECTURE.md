@@ -1,10 +1,11 @@
 # CloudInfraAutomation — Architecture
 
-**Status:** v2.21, approved; implementation in progress. No code is written until this design is approved.
-**Date:** 2026-10-04
+**Status:** v2.22, approved; implementation in progress. No code is written until this design is approved.
+**Date:** 2026-10-05
 **Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9). Every solution is **DR-capable**: it can run in one region, as DR (primary active, secondary standby) or as an HA pair (both active), with **any region pair chosen in the UI** (default us-east-1 / us-east-2) (§10).
 
 **Changes in v2:** added the org registry and tagging strategy (§4); permissions based on tags (§4.5–4.8); multi-account, five-environment model (§5); promotion pipeline (§8). Payload, provisioning, security and scaling sections are updated to match.
+**Changes in v2.22:** multi-cloud (§22): a cloud-neutral core with AWS, Google Cloud and Azure provider plug-ins; native IaC per cloud; neutral service kinds, control packs and backup strategies; phased delivery.
 **Changes in v2.21:** teardown (§21.9): remove an environment or decommission a project, backup-first into a vault locked for 60 days (deleted only manually by super users), with a teardown record and restore.
 **Changes in v2.20:** Change infrastructure for projects (§21.8): edit a read-back project in the wizard; the platform opens a pull request with the regenerated, signed files and records the new revision when it is merged.
 **Changes in v2.19:** service settings (§6.4.1): each curated block declares its settings, which are validated, used as defaults and shown as fields in the Services step.
@@ -52,6 +53,7 @@
 19. [Appendix A: Approval and workflow diagrams](#19-appendix-a-approval-and-workflow-diagrams)
 20. [Landing zone workflow: AWS Organizations OU structure with Control Tower controls](#20-landing-zone-workflow-aws-organizations-ou-structure-with-control-tower-controls)
 21. [Read-back: editing generated repositories in the UI](#21-read-back-editing-generated-repositories-in-the-ui)
+22. [Multi-cloud: one platform for AWS, Google Cloud and Azure](#22-multi-cloud-one-platform-for-aws-google-cloud-and-azure)
 
 ---
 
@@ -3558,3 +3560,132 @@ Restore needs only the record and the recovery points, which stay for 60 days at
 | TD7 | Restore in v1 | **Included:** restore an environment or a whole project from its teardown record |
 
 **Found while researching (separate fixes):** curated blocks silently ignored unknown `config` keys, and the UI had no fields for their settings; both are fixed by §6.4.1. (The UI sends `config.properties` only for schema-driven resources, which read it, so no settings were being dropped.) §6.1 says "sorted keys" but templates keep insertion order; only `infra.json` is sorted.
+
+---
+
+## 22. Multi-cloud: one platform for AWS, Google Cloud and Azure
+
+The platform's workflows are cloud-neutral: the questionnaire and the OU-tree editor, approvals, read-back, change requests, teardown, releases, cost centers and topology. Its **outputs** are AWS-specific: CloudFormation, IAM, Organizations and Control Tower, AWS Backup. This section splits the two.
+- A **cloud-neutral core** holds the concepts and workflows.
+- **Provider plug-ins** (AWS, Google Cloud, Azure) implement them, registered by id: Open/Closed. A fourth cloud is a new package, not a change to the core.
+
+### 22.1 Research findings
+
+| # | Finding | Consequence |
+|---|---|---|
+| M1 | The code already has extension points for most concepts. Blocks, binders, lint rules, file renderers, provisioning steps, topologies, stack renderers, answer handlers, selectors, packs, templates, design rules, risk and gate rules, read-back checks, teardown blockers and backup targets are all registries or ABCs. But their **contracts** are AWS-shaped: `cloudformation_types`, ARNs, IAM statements, `AwsPort`. Some things are hard-coded with no abstraction: `Template` (a CloudFormation document), naming, IAM policies, the deploy workflow, the landing-zone stacks, and AWS-only lists such as `STATEFUL_TYPES`. | Keep the extension points and make their contracts neutral. Move the AWS details behind a provider. |
+| M2 | Nothing records a cloud. Ids are sized for AWS: 12-digit accounts, `vpc-`/`subnet-`/`sg-` patterns, `String(12)` columns. Region tables hold AWS ids. The UI says "Control Tower", "OU", "CloudFormation" and "VPC" everywhere. | A `provider` dimension on requests, designs and registry rows; wider ids; UI wording from the provider. |
+| M3 | **Native IaC per cloud.** Google Cloud: **Infrastructure Manager** (managed Terraform, GA, with previews and drift, Git or local source). Deployment Manager is shut down after 30 June 2027. Infrastructure Manager runs Terraform **≤ 1.5.7** only. Azure: **Bicep** with **deployment stacks** (GA; `actionOnUnmanage`, deny settings) and **what-if**. Stack what-if is new and maturity is unverified. | Generated documents per cloud: CloudFormation (AWS), Terraform HCL for Infrastructure Manager (Google Cloud), Bicep deployment stacks (Azure). |
+| M4 | **Identity.** GitHub OIDC works on every cloud. AWS: an IAM role per environment account. Google Cloud: Workload Identity Federation with a mandatory attribute condition on repository and environment. Azure: a user-assigned managed identity with a federated credential `repo:ORG/REPO:environment:ENV`, at most 20 per identity, exact match. | The trust subject the platform already computes (`repo:…:environment:…`) is neutral. Each provider turns it into its own trust. |
+| M5 | **Hierarchy.** Organization → OU → account (AWS); organization → folder → project (Google Cloud); tenant → management group → subscription, plus resource groups (Azure). Vending: Account Factory; Fabric FAST project factory or the Enterprise Foundations Blueprint; the ALZ subscription-vending AVM module. Google Cloud has **no managed landing-zone service** like Control Tower. Azure ALZ: use the **Bicep or Terraform AVM** accelerators; classic ALZ-Bicep was retired in February 2026. | A neutral hierarchy model: nodes and isolation units. One designer and tree editor. Vending and landing-zone IaC per provider. |
+| M6 | **Guardrails.** AWS: SCPs (actions), RCPs (resource perimeter), Control Tower controls. Google Cloud: Organization Policy, including custom CEL constraints and dry-run; IAM deny policies; VPC Service Controls; SCC Security Posture (preventive and detective); Compliance Manager (detective). Azure: Azure Policy deny/modify/deployIfNotExists and regulatory initiatives (mostly **audit**). Deny assignments come only through deployment stacks. **No RCP equivalent.** | A neutral guardrail model (preventive, detective, proactive) with **neutral control packs** that each provider maps to its own controls. Where a cloud can only detect, the pack says so. |
+| M7 | **ABAC.** AWS compares principal and resource tags. Google Cloud IAM conditions compare **resource tags to literals**; labels cannot drive IAM. Azure ABAC works only on **storage data-plane** actions. | Isolation is "same project, same environment" everywhere, but the mechanism differs. Google Cloud uses one tag-conditioned binding per value. Azure uses **one resource group per project and environment** as the scope. |
+| M8 | **Locked backups.** AWS: Vault Lock compliance mode. Google Cloud: Backup and DR vaults with enforced, indelible retention, but **only VMs, disks, Cloud SQL, AlloyDB and Filestore**. For **GCS and Firestore**, copy or export into a **Bucket Lock**ed bucket in a vault project. Bucket Lock is irreversible and puts a lien on that project. Azure: a **locked immutable vault** (irreversible), Resource Guard multi-user authorization, and Blob vaulted backup that must be **in the same region**. **Cosmos DB backups live in the account and die with it**, so export to an immutable, locked Blob container first. | A neutral `BackupStrategy` per data-store kind and provider. The 60-day lock holds on every cloud, through each cloud's own mechanism. |
+| M9 | **Service mapping** for the curated blocks: S3 / GCS / Blob Storage; Lambda / Cloud Run functions / Azure Functions Flex Consumption; DynamoDB / Firestore / Cosmos DB for NoSQL; SQS / Pub/Sub / Service Bus; S3 events / Eventarc or GCS notifications / Event Grid. Google Cloud and Azure have no paired-region model like AWS: Google Cloud uses dual- and multi-region services, and Azure pairs are fixed with some regions unpaired. | Curated services become **neutral kinds** with one implementation per provider. Resilience stays neutral (primary/secondary); each provider supplies how a service replicates. |
+| M10 | **Plan and drift.** AWS: change sets and drift detection. Google Cloud: Infrastructure Manager previews and resource drifts (computed per preview). Azure: what-if (noisy) and stack deny settings that prevent drift rather than detect it. | Release rows (Add/Modify/Remove/replacement) come from each provider's plan. Risk rules read block metadata (`stateful`, `permission`), not AWS type lists. |
+
+### 22.2 Neutral vocabulary
+
+| Neutral concept | AWS | Google Cloud | Azure |
+|---|---|---|---|
+| Organization | Organization | Organization | Entra tenant + root management group |
+| Hierarchy node | OU | Folder | Management group |
+| Isolation unit (one per environment) | Account | Project | Subscription (+ one resource group per project) |
+| Unit vending | Account Factory | Project factory (FAST / Foundations Blueprint) | Subscription vending (AVM) |
+| IaC document / deploy unit | CloudFormation template / stack | Terraform HCL / Infrastructure Manager deployment | Bicep / deployment stack |
+| Plan | Change set | Infrastructure Manager preview | What-if (stack what-if) |
+| Deployer identity | IAM role trusted by GitHub OIDC | Service account via Workload Identity Federation | User-assigned identity with federated credential |
+| Ownership labels | Tags (`org:*`) | Labels (cost) + tags (IAM) | Tags |
+| Preventive policy | SCP | Org Policy / IAM deny | Azure Policy deny |
+| Resource perimeter | RCP | VPC Service Controls | Policy deny + private endpoints (partial) |
+| Detective control | Config rule / Control Tower detective | SCC posture / Compliance Manager | Azure Policy audit / Defender for Cloud |
+| Private network | VPC + Transit Gateway | Shared VPC + Network Connectivity Center | Hub-spoke VNet / Virtual WAN |
+| Firewall | Network Firewall | Cloud NGFW / hierarchical firewall policies | Azure Firewall |
+| Locked backup | AWS Backup vault, Vault Lock | Backup and DR vault + Bucket Lock exports | Locked immutable Backup vault + immutable Blob exports |
+| Object storage / function / key-value table / queue | S3 / Lambda / DynamoDB / SQS | GCS / Cloud Run functions / Firestore / Pub/Sub | Blob / Functions / Cosmos DB / Service Bus |
+
+### 22.3 Architecture
+
+```
+app/core/            neutral: request and design models, workflows, registries, topology, IPAM, tags
+app/providers/base.py  CloudProvider ABC + ProviderRegistry
+app/providers/aws/     today's AWS code, moved behind the ABCs (CloudFormation, IAM, Control Tower, AWS Backup)
+app/providers/gcp/     Terraform for Infrastructure Manager, Workload Identity Federation, Org Policy/SCC, Backup and DR + Bucket Lock
+app/providers/azure/   Bicep deployment stacks, federated identity, Azure Policy, locked immutable vault
+```
+
+A **`CloudProvider`** gives the core one object per concern. Each is an ABC with a per-provider implementation:
+
+| Component | Responsibility | AWS today |
+|---|---|---|
+| `Vocabulary` | UI words (account/project/subscription, OU/folder/management group, …) | — |
+| `RegionCatalog` | Regions, defaults, pairing hint | `Region` table |
+| `BlockSet` | Curated block per neutral kind, plus the Tier-2 raw-type resolver and schema catalog | S3, Lambda, DynamoDB, SQS blocks; CloudFormation schema catalog |
+| `AccessModel` | Access levels → permissions; the isolation condition (same project and environment) | `access.py`, `policies.py` |
+| `IacDialect` | Document type, file names, serializer, native linter, naming and references | `Template`, naming, `NoAliasDumper`, cfn-lint |
+| `LabelPolicy` | `org:*` keys → valid tag/label keys and values | `TagSet` |
+| `IdentityTrust` | GitHub OIDC trust per environment | bootstrap stack, `trust_subject` |
+| `WorkflowRenderer` | deploy.yml and the GitHub variables it reads | `DeployWorkflowRenderer`, `EnvironmentVariables` |
+| `ProviderPort` (adapter by mode) | bootstrap, delete deploy unit, delete data store, adopt/import, backup service | `AwsPort`, `LocalAws` |
+| `BackupStrategies` | Data-store detection and backup/restore per kind, lock check | `BackupTarget`s, `BackupPort` |
+| `PlanReader` | Plan rows and stateful/permission predicates for releases | change set rows, `STATEFUL_TYPES` |
+| `LandingZoneProvider` | Hierarchy rules and limits, guardrail builder, control catalog and pack mapping, vending, network, landing-zone bundle and executor | `landing_zone/cloudformation/*`, control catalog |
+
+**What stays in the core, unchanged in behaviour:**
+- Request validation rules, binders' intent (`access.grant`, `event.notify`), settings.
+- Topology (single/DR/HA), cost centers, environments.
+- Read-back, signed manifests, change requests, teardown orchestration (approvals, scheduling, checkpoints, records), release gates.
+- The landing-zone questionnaire, OU-tree editor, selectors, pack resolver, industry templates (neutral answers), IPAM math.
+
+### 22.4 Model changes
+
+| Area | Change |
+|---|---|
+| Request | `ProjectRequest.provider` (default `aws` for existing data). Curated `type` becomes a neutral kind: `storage.bucket`, `compute.function`, `database.table`, `messaging.queue`. The AWS ids (`s3.bucket`, …) stay accepted as aliases, so stored `infra.json` files still read back. Tier-2 raw types are provider-qualified (`AWS::SNS::Topic`, `google_pubsub_topic`, `Microsoft.ServiceBus/namespaces`). Settings are per provider block (runtimes differ). |
+| Registry | `regions` and `account_bindings` gain `provider`. Account ids widen to 64 characters, with a provider-specific validator (12 digits / project id / GUID). Each provider binds environments to its own isolation units. |
+| Networks | `vpc_id` → `network_ref`, `security_group_ids` → `firewall_refs`, widened, plus `provider`. Validators come from the provider. |
+| Landing zone | `landing_zone_designs.provider`. Answers split into neutral answers (environments, grouping, account model, optional OUs, packs, network intent) and provider answers (AWS: management email, Control Tower home region; Azure: billing scope; Google Cloud: billing account, org id). One landing zone per provider, each in its own repository (`landing-zone-<provider>-infra`). |
+| Controls | **Neutral packs** (`foundation`, `data-protection`, `pci-cde`, …) with a provider mapping file each. AWS maps to Control Tower ids. Google Cloud maps to Org Policy constraints, IAM deny and SCC posture detectors. Azure maps to Azure Policy definitions and initiatives. Each mapped control keeps `behavior` (preventive/detective/proactive), so packs show honestly where a cloud only detects. |
+| Teardown | `BackupStrategy` per (provider, data-store kind); recovery points keep a provider-neutral `ref`. Ids widen; `provider` on teardowns. Decommission archives the repository on every cloud; the platform never deletes isolation units (as on AWS today). |
+| Releases | Change rows carry the provider. Risk rules use block metadata (`stateful`, `permission`) instead of AWS type lists. |
+| API/UI | `GET /v1/providers` returns vocabulary, regions and catalog per provider. The project wizard and landing zone start with a provider choice; every AWS word in the UI comes from the vocabulary. The Tier-2 search becomes `GET /v1/catalog/{provider}/types`. |
+| Policy | §1 technology policy becomes "AWS, Google Cloud, Azure, GitHub and open source". The platform's own control plane stays on AWS (§2.2a). |
+
+### 22.5 What differs between clouds (the platform shows it, does not hide it)
+
+| Topic | AWS | Google Cloud | Azure |
+|---|---|---|---|
+| Project isolation (ABAC) | Principal tag = resource tag | Tag-conditioned IAM bindings per value | Scope: one resource group per project and environment (ABAC only for storage data) |
+| Resource perimeter | RCP | VPC Service Controls | None: Azure Policy deny + private endpoints |
+| Managed landing zone | Control Tower | None: platform-run Terraform (FAST-style) | ALZ accelerator modules (platform-run) |
+| Detective vs preventive packs | Both | Both (SCC Premium for postures) | Mostly detective (audit) |
+| Drift | Detect | Detect per preview | Prevent with deny settings; what-if only predicts |
+| Locked backup coverage | All supported stores | Vault for SQL/AlloyDB/Filestore/VM; GCS and Firestore via exports into locked buckets | Vault for Blob (same region); Cosmos via exports into immutable containers |
+| Region pairs | Any two regions | Dual/multi-region service locations | Fixed pairs; some regions unpaired |
+| IaC limits | 500 resources per stack | Terraform ≤ 1.5.7 in Infrastructure Manager | Stack-unsupported resource types |
+
+### 22.6 Delivery
+
+| Phase | Scope | Exit |
+|---|---|---|
+| **MC-1 Neutral core** | Provider ABCs and registry. Move the AWS code behind them. `provider` columns (default `aws`), widened ids, neutral UI wording from the vocabulary API. **No behaviour change.** | Every existing test passes unchanged, apart from renamed fields; 100% coverage. |
+| **MC-2 Google Cloud projects** | Blocks (GCS, Cloud Run functions, Firestore, Pub/Sub) and binders; Terraform for Infrastructure Manager; Workload Identity Federation bootstrap; deploy workflow; plan rows from previews; backup strategies (Backup and DR vault, Bucket Lock exports); local stand-ins. | A Google Cloud project previews, provisions, reads back, changes and tears down locally. |
+| **MC-3 Google Cloud landing zone** | Folders and projects, Org Policy/IAM deny/SCC pack mapping, project factory, Shared VPC + Network Connectivity Center, vault project with locked buckets. | Templates propose without problems; the generated Terraform validates. |
+| **MC-4 Azure projects** | Blocks (Blob, Functions Flex, Cosmos DB, Service Bus) on Bicep deployment stacks; federated identity; what-if plan rows; locked immutable vault + Cosmos exports. | As MC-2. |
+| **MC-5 Azure landing zone** | Management groups and subscription vending (AVM), Azure Policy pack mapping, hub-spoke/vWAN, backup subscription with Resource Guard. | As MC-3; generated Bicep builds. |
+
+Each phase gets its own detailed design section and TDD, like §21.
+
+### 22.7 Decisions
+
+| # | Decision | Recommendation |
+|---|---|---|
+| MC1 | IaC per cloud | **Native per cloud:** CloudFormation, Terraform for Infrastructure Manager, Bicep deployment stacks. Each cloud keeps its managed state, plan and protection features, and the AWS work is kept. The alternative, OpenTofu everywhere, needs a state backend per cloud and loses change sets, stack policies and deployment-stack deny settings. |
+| MC2 | Clouds per project | **One provider per project.** Cross-cloud connections are a later feature. |
+| MC3 | Curated services | **Neutral kinds with one implementation per provider**; raw types stay provider-qualified; old AWS ids remain aliases. |
+| MC4 | Landing zones | **One per provider**, sharing the questionnaire, OU-tree editor, neutral packs and industry templates. |
+| MC5 | Unequal guarantees | **Accept and show them** (§22.5): isolation by resource group on Azure, VPC Service Controls on Google Cloud, detective-only controls marked as such. |
+| MC6 | Backups | **The 60-day lock on every cloud** through its own immutable mechanism (§22.1 M8); deletion after 60 days only by super users. |
+| MC7 | Platform credentials for Google Cloud and Azure | Control plane stays on AWS. **Google Cloud:** Workload Identity Federation trusting the platform's AWS role (supported). **Azure:** a federated credential if the platform can present an OIDC token, else a certificate in Secrets Manager. **Open question:** verify the AWS-to-Azure federation path in MC-4. |
+| MC8 | Order | **MC-1 → MC-2 → MC-3 → MC-4 → MC-5**: Google Cloud before Azure, as asked |
+| MC9 | Technology policy | Extend §1 to AWS, Google Cloud, Azure, GitHub and open source |
