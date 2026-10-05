@@ -1,4 +1,6 @@
-import type { Classification, ConnectionRequest, ProjectRequest, ResilienceMode, ResourceRequest } from "../api/types";
+import type {
+  Classification, ConnectionRequest, ProjectRequest, ResilienceMode, ResourceRequest, SettingValue,
+} from "../api/types";
 
 const NAME_PATTERN = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
 const NAME_LENGTH = { min: 3, max: 30 };
@@ -9,6 +11,8 @@ export interface DraftResource {
   id: string;
   type: string;
   properties: Record<string, unknown>;
+  /** Curated service settings the user changed; the platform's defaults apply to the rest. */
+  settings: Record<string, SettingValue>;
 }
 
 export interface DraftValues {
@@ -56,7 +60,7 @@ export class ProjectDraft {
   }
 
   withResource(type: string) {
-    const resource = { id: this.nextResourceId(type), type, properties: {} };
+    const resource = { id: this.nextResourceId(type), type, properties: {}, settings: {} };
     return this.with({ resources: [...this.values.resources, resource] });
   }
 
@@ -72,6 +76,17 @@ export class ProjectDraft {
     return this.with({
       resources: this.values.resources.map(
         (resource) => (resource.id === resourceId ? { ...resource, properties } : resource)),
+    });
+  }
+
+  /** Sets one setting, or clears it back to the service default when the value is undefined. */
+  withResourceSetting(resourceId: string, name: string, value: SettingValue | undefined) {
+    return this.with({
+      resources: this.values.resources.map((resource) => {
+        if (resource.id !== resourceId) return resource;
+        const { [name]: _previous, ...others } = resource.settings;
+        return { ...resource, settings: value === undefined ? others : { ...others, [name]: value } };
+      }),
     });
   }
 
@@ -148,5 +163,7 @@ export class ProjectDraft {
 
 function toResourceRequest(resource: DraftResource): ResourceRequest {
   const base = { id: resource.id, type: resource.type };
-  return Object.keys(resource.properties).length > 0 ? { ...base, config: { properties: resource.properties } } : base;
+  const properties = Object.keys(resource.properties).length > 0 ? { properties: resource.properties } : {};
+  const config = { ...resource.settings, ...properties };
+  return Object.keys(config).length > 0 ? { ...base, config } : base;
 }

@@ -2,11 +2,14 @@ from abc import ABC, abstractmethod
 
 from app.synth.access import SAME_TAG_RESOURCE_CONDITION, AccessActions
 from app.synth.blocks.base import AccessTarget, Block
+from app.synth.blocks.settings import TextSetting
 from app.synth.policies import SameTagPolicy
 from app.synth.template import Template
 
 DEFAULT_PARTITION_KEY = "pk"
 STRING_ATTRIBUTE = "S"
+KEY_PATTERN = r"^[A-Za-z0-9_.-]{1,255}$"
+KEY_RULE = "1 to 255 characters of letters, digits and _ . -"
 
 
 class TableShape(ABC):
@@ -64,6 +67,10 @@ class DynamoDbTableBlock(Block, AccessTarget):
     multi_region = "global"
     logical_id_suffix = "Table"
     cloudformation_types = ("AWS::DynamoDB::Table", "AWS::DynamoDB::GlobalTable")
+    settings = (
+        TextSetting("partition_key", "Partition key", DEFAULT_PARTITION_KEY, KEY_PATTERN, KEY_RULE),
+        TextSetting("sort_key", "Sort key", None, KEY_PATTERN, KEY_RULE, optional=True),
+    )
 
     ACTIONS = AccessActions(
         read=["dynamodb:GetItem", "dynamodb:Query", "dynamodb:BatchGetItem"],
@@ -96,6 +103,7 @@ class DynamoDbTableBlock(Block, AccessTarget):
         template.add_output(f"{self.logical_id}Name", {"Value": {"Fn::Sub": self.naming.physical_name()}})
 
     def _keys(self) -> list[tuple[str, str]]:
-        partition = (self.spec.config.get("partition_key", DEFAULT_PARTITION_KEY), "HASH")
-        sort = [(self.spec.config["sort_key"], "RANGE")] if "sort_key" in self.spec.config else []
+        partition = (self.setting("partition_key"), "HASH")
+        sort_key = self.setting("sort_key")
+        sort = [(sort_key, "RANGE")] if sort_key is not None else []
         return [partition, *sort]

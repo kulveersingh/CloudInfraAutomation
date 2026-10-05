@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import ClassVar
 
+from app.synth.blocks.settings import Setting
 from app.synth.naming import ResourceNaming
 from app.synth.request import ProjectRequest, ResourceSpec
 from app.synth.template import Template
@@ -16,6 +17,7 @@ class Block(ABC):
     multi_region: ClassVar[str]
     logical_id_suffix: ClassVar[str] = ""
     cloudformation_types: ClassVar[tuple[str, ...]] = ()
+    settings: ClassVar[tuple[Setting, ...]] = ()
 
     def __init__(self, spec: ResourceSpec, request: ProjectRequest):
         self.spec = spec
@@ -29,6 +31,28 @@ class Block(ABC):
     @classmethod
     def naming_problems(cls, project_name: str, resource_id: str) -> list[str]:
         return []
+
+    @classmethod
+    def config_problems(cls, spec: ResourceSpec) -> list[str]:
+        declared = {setting.name: setting for setting in cls.settings}
+        subject = f"{cls.type_name} '{spec.id}'"
+        problems = []
+        for key, value in spec.config.items():
+            if key not in declared:
+                problems.append(f"{subject} does not accept '{key}'; {cls._allowed_settings()}.")
+            else:
+                problems += [f"{subject} setting '{key}' {reason}." for reason in declared[key].problems(value)]
+        return problems
+
+    @classmethod
+    def _allowed_settings(cls) -> str:
+        names = [setting.name for setting in cls.settings]
+        return f"allowed: {', '.join(names)}" if names else "it has no settings"
+
+    def setting(self, name: str):
+        """The value the request chose, or the declared default."""
+        declared = next(setting for setting in self.settings if setting.name == name)
+        return self.spec.config.get(name, declared.default)
 
     @property
     def uses_network(self) -> bool:

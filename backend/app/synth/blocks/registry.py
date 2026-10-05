@@ -63,7 +63,7 @@ class BlockRegistry:
 
     def problems_for(self, resource: ResourceSpec) -> list[str]:
         if resource.type in self._classes:
-            return []
+            return self._classes[resource.type].config_problems(resource)
         alias = self._curated_alias(resource.type)
         if alias is not None:
             return [f"Use the curated service '{alias}' instead of '{resource.type}' for '{resource.id}'."]

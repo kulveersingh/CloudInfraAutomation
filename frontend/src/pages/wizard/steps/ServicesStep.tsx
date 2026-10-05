@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { useApi } from "../../../api/ApiContext";
-import type { CloudFormationType } from "../../../api/types";
+import type { CatalogEntry, CloudFormationType } from "../../../api/types";
 import { ErrorAlert } from "../../../components/Notices";
 import { parseJsonObject } from "../../../wizard/json";
 import type { DraftResource } from "../../../wizard/ProjectDraft";
+import { SettingsEditor } from "./SettingsEditor";
 import type { StepProps } from "./StepProps";
 
 const CLOUDFORMATION_PREFIX = "AWS::";
@@ -28,7 +29,7 @@ export function ServicesStep({ draft, onChange, reference }: StepProps) {
           </div>
           <CloudFormationSearch onAdd={(type) => onChange(draft.withResource(type))} />
         </div>
-        <SelectedResources draft={draft} onChange={onChange} />
+        <SelectedResources draft={draft} onChange={onChange} catalog={reference.catalog} />
       </div>
     </>
   );
@@ -70,8 +71,9 @@ function CloudFormationSearch({ onAdd }: { onAdd: (type: string) => void }) {
   );
 }
 
-function SelectedResources({ draft, onChange }: Pick<StepProps, "draft" | "onChange">) {
+function SelectedResources({ draft, onChange, catalog }: Pick<StepProps, "draft" | "onChange"> & { catalog: CatalogEntry[] }) {
   const { resources } = draft.values;
+  const settingsOf = (type: string) => catalog.find((entry) => entry.type === type)?.settings ?? [];
   return (
     <div className="panel">
       <div className="panel-h"><h3>Selected ({resources.length})</h3></div>
@@ -87,6 +89,8 @@ function SelectedResources({ draft, onChange }: Pick<StepProps, "draft" | "onCha
                 Remove
               </button>
             </div>
+            <SettingsEditor resource={resource} settings={settingsOf(resource.type)}
+                            onSetting={(name, value) => onChange(draft.withResourceSetting(resource.id, name, value))} />
             {resource.type.startsWith(CLOUDFORMATION_PREFIX) && (
               <PropertiesEditor resource={resource} onProperties={(properties) => onChange(draft.withResourceProperties(resource.id, properties))} />
             )}

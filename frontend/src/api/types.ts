@@ -36,11 +36,25 @@ export interface RegionInfo {
   enabled: boolean;
 }
 
+interface SettingBase {
+  name: string;
+  label: string;
+}
+
+/** A `config` key a curated service accepts, as the platform declares it (§6.4.1). */
+export type ServiceSetting =
+  | (SettingBase & { kind: "choice"; default: string; choices: string[] })
+  | (SettingBase & { kind: "integer"; default: number; minimum: number; maximum: number; unit: string })
+  | (SettingBase & { kind: "text"; default: string | null; pattern: string; rule: string; optional: boolean });
+
+export type SettingValue = string | number;
+
 export interface CatalogEntry {
   type: string;
   name: string;
   category: string;
   multi_region: string;
+  settings: ServiceSetting[];
 }
 
 export interface CloudFormationType {

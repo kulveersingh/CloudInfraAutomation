@@ -9,4 +9,5 @@ def test_catalog_lists_every_registered_block():
 
 def test_catalog_entry_shape():
     entry = next(item for item in ServiceCatalog(BlockRegistry.default()).entries() if item["type"] == "s3.bucket")
-    assert entry == {"type": "s3.bucket", "name": "S3 bucket", "category": "Storage", "multi_region": "replicated"}
+    assert entry == {"type": "s3.bucket", "name": "S3 bucket", "category": "Storage", "multi_region": "replicated",
+                     "settings": []}

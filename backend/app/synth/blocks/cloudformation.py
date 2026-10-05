@@ -103,8 +103,13 @@ class SchemaDrivenBlockResolver:
             return [f"'{resource.type}' for '{resource.id}' is managed by the platform and cannot be requested."]
         if not self._catalog.has(resource.type):
             return [f"Unknown resource type '{resource.type}' for '{resource.id}'."]
+        subject = f"{resource.type} '{resource.id}'"
+        extra = [f"{subject} accepts only 'properties' in config, not '{key}'."
+                 for key in resource.config if key != "properties"]
         provided = resource.config.get("properties", {})
-        return [f"{resource.type} '{resource.id}' needs property '{name}'."
+        if not isinstance(provided, dict):
+            return [*extra, f"{subject} properties must be a JSON object."]
+        return extra + [f"{subject} needs property '{name}'."
                 for name in self._catalog.required_properties(resource.type) if name not in provided]
 
     def _platform_managed(self, type_name: str) -> bool:

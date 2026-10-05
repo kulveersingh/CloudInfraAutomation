@@ -1,4 +1,5 @@
 from app.synth.blocks.base import Block, InvocableFunction, RuntimePrincipal
+from app.synth.blocks.settings import ChoiceSetting, IntegerSetting, TextSetting
 from app.synth.policies import POLICY_VERSION
 from app.synth.template import Template
 
@@ -6,6 +7,8 @@ DEFAULT_RUNTIME = "python3.13"
 DEFAULT_HANDLER = "lambda_function.lambda_handler"
 DEFAULT_MEMORY_MB = 256
 DEFAULT_TIMEOUT_SEC = 30
+# Runtimes Lambda supports on arm64; provided.al2023 runs compiled languages such as Go and Rust.
+RUNTIMES = ("python3.13", "python3.12", "nodejs22.x", "nodejs20.x", "java21", "provided.al2023")
 LOG_RETENTION_DAYS = 30
 ARCHITECTURE = "arm64"
 VPC_ACCESS_POLICY = {"Fn::Sub": "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"}
@@ -21,6 +24,13 @@ class LambdaFunctionBlock(Block, RuntimePrincipal, InvocableFunction):
     multi_region = "replicated"
     logical_id_suffix = "Function"
     cloudformation_types = ("AWS::Lambda::Function",)
+    settings = (
+        ChoiceSetting("runtime", "Runtime", DEFAULT_RUNTIME, RUNTIMES),
+        TextSetting("handler", "Handler", DEFAULT_HANDLER, r"^[A-Za-z0-9_.:/$-]{1,128}$",
+                    "1 to 128 characters of letters, digits and _ . : / $ -"),
+        IntegerSetting("memory_mb", "Memory", DEFAULT_MEMORY_MB, 128, 10240, "MB"),
+        IntegerSetting("timeout_sec", "Timeout", DEFAULT_TIMEOUT_SEC, 1, 900, "seconds"),
+    )
 
     def __init__(self, spec, request):
         super().__init__(spec, request)
@@ -68,9 +78,6 @@ class LambdaFunctionBlock(Block, RuntimePrincipal, InvocableFunction):
         template.add_resource(self.logical_id, self._function())
         template.add_output(f"{self.logical_id}Arn", {"Value": self.arn()})
 
-    def _setting(self, key: str, default):
-        return self.spec.config.get(key, default)
-
     def _log_group(self) -> dict:
         return {"Type": "AWS::Logs::LogGroup", "Properties": {
             "LogGroupName": {"Fn::Sub": f"/aws/lambda/{self.naming.physical_name()}"},
@@ -109,12 +116,12 @@ class LambdaFunctionBlock(Block, RuntimePrincipal, InvocableFunction):
     def _function(self) -> dict:
         properties = {
             "FunctionName": {"Fn::Sub": self.naming.physical_name()},
-            "Runtime": self._setting("runtime", DEFAULT_RUNTIME),
-            "Handler": self._setting("handler", DEFAULT_HANDLER),
+            "Runtime": self.setting("runtime"),
+            "Handler": self.setting("handler"),
             "Code": {"S3Bucket": {"Ref": "CodeS3Bucket"}, "S3Key": {"Ref": "CodeS3Key"}},
             "Role": {"Fn::GetAtt": [self.role_id, "Arn"]},
-            "MemorySize": self._setting("memory_mb", DEFAULT_MEMORY_MB),
-            "Timeout": self._setting("timeout_sec", DEFAULT_TIMEOUT_SEC),
+            "MemorySize": self.setting("memory_mb"),
+            "Timeout": self.setting("timeout_sec"),
             "Architectures": [ARCHITECTURE],
             "LoggingConfig": {"LogGroup": {"Ref": self.log_group_id}, "LogFormat": "JSON"},
             "ReservedConcurrentExecutions": {"Fn::If": ["IsActive", {"Ref": "AWS::NoValue"}, 0]},

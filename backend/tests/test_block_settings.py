@@ -110,8 +110,8 @@ def test_curated_service_does_not_take_cloudformation_properties():
 @pytest.mark.parametrize("config, problem", [
     ({"memory_mb": 64}, "setting 'memory_mb' must be a whole number from 128 to 10240 MB"),
     ({"timeout_sec": 901}, "setting 'timeout_sec' must be a whole number from 1 to 900 seconds"),
-    ({"runtime": "python2.7"}, "setting 'runtime' must be one of python3.13, python3.12, nodejs22.x, nodejs20.x, "
-                               "java21, provided.al2023"),
+    ({"runtime": "python2.7"}, ("setting 'runtime' must be one of python3.13, python3.12, nodejs22.x, nodejs20.x, "
+                                "java21, provided.al2023")),
     ({"handler": "bad handler"}, "setting 'handler' must be 1 to 128 characters of letters, digits and _ . : / $ -"),
 ])
 def test_invalid_lambda_settings(config, problem):

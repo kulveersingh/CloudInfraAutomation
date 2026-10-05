@@ -9,4 +9,6 @@ class ServiceCatalog:
 
     def entries(self) -> list[dict]:
         return [{"type": block_class.type_name, "name": block_class.display_name, "category": block_class.category,
-                 "multi_region": block_class.multi_region} for block_class in self._blocks.classes()]
+                 "multi_region": block_class.multi_region,
+                 "settings": [setting.describe() for setting in block_class.settings]}
+                for block_class in self._blocks.classes()]
