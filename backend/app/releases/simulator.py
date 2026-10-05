@@ -1,9 +1,8 @@
 import hashlib
 import secrets
 
-from app.providers.aws.project.toolkit import aws_project
 from app.releases.plan import ChangeSpec, Evidence, PlanSubmission
-from app.releases.risk import STATEFUL_TYPES
+from app.releases.risk import ResourceClassifier
 from app.synth.request import ProjectRequest
 from app.synth.synthesizer import TemplateSynthesizer
 
@@ -13,12 +12,9 @@ COMMIT_BYTES = 6
 class LocalPipelineSimulator:
     """Produces the plan a project's pipeline would send, so approvals can be exercised locally."""
 
-    def __init__(self, synthesizer: TemplateSynthesizer):
+    def __init__(self, synthesizer: TemplateSynthesizer, resources: ResourceClassifier):
         self._synthesizer = synthesizer
-
-    @classmethod
-    def default(cls) -> "LocalPipelineSimulator":
-        return cls(aws_project().synthesizer)
+        self._resources = resources
 
     def plan(self, request: ProjectRequest, environment: str, requested_by: str, high_risk: bool = False) -> PlanSubmission:
         resources = self._synthesizer.synthesize(request)["Resources"]
@@ -30,7 +26,7 @@ class LocalPipelineSimulator:
                               requested_by=requested_by)
 
     def _replaced_resource(self, resources: dict) -> str | None:
-        return next((logical_id for logical_id, body in resources.items() if body["Type"] in STATEFUL_TYPES), None)
+        return next((logical_id for logical_id, body in resources.items() if self._resources.is_stateful(body["Type"])), None)
 
     def _change(self, logical_id: str, resource_type: str, replaced: bool) -> ChangeSpec:
         action = "Modify" if replaced else "Add"

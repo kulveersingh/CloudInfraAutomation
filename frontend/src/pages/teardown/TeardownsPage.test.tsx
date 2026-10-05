@@ -9,7 +9,7 @@ import { TeardownsPage } from "./TeardownsPage";
 const user = () => userEvent.setup();
 const POINT = { service_id: "uploads", resource_type: "AWS::S3::Bucket", physical_name: "invoice-ingest--uploads",
   region: "us-east-1", account_id: "999999999999",
-  recovery_point_arn: "arn:aws:backup:us-east-1:999999999999:recovery-point:rp-1", vault: "cloudinfra-teardown-us-east-1",
+  recovery_point_ref: "arn:aws:backup:us-east-1:999999999999:recovery-point:rp-1", vault: "cloudinfra-teardown-us-east-1",
   completed_at: "2026-10-04T10:05:00+00:00", locked_until: "2026-12-03T10:05:00+00:00" };
 const COMPLETED = teardown({ state: "completed", environments: [{ ...teardown().environments[0], state: "completed",
   decided_by: "sam", revision: 2, recovery_points: [POINT] }] });
@@ -53,7 +53,7 @@ describe("TeardownsPage", () => {
   it("lists the backups with their lock date", async () => {
     renderTeardowns([COMPLETED]);
     expect([await screen.findByText("uploads · us-east-1 · locked until 2026-12-03"),
-      screen.getByText(POINT.recovery_point_arn)]).toHaveLength(2);
+      screen.getByText(POINT.recovery_point_ref)]).toHaveLength(2);
   });
 
   it("requests a restore of a completed teardown", async () => {

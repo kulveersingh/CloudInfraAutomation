@@ -20,6 +20,14 @@ class ResourceTypeCatalog(ABC):
         ...
 
 
+class WorkflowVariables(ABC):
+    """The GitHub environment variables a provider's deploy workflow reads, per environment."""
+
+    @abstractmethod
+    def for_environment(self, context, environment: str) -> dict[str, str]:
+        """`context` is the provisioning context: accounts, topology, bootstrap outputs and networks."""
+
+
 @dataclass(frozen=True)
 class ProjectToolkit:
     """What a provider gives the core to generate a project's repository (§22.3)."""
@@ -31,6 +39,7 @@ class ProjectToolkit:
     linter: TemplateLinter
     bundle: RepositoryBundle
     types: ResourceTypeCatalog
+    variables: WorkflowVariables
 
     def catalog(self) -> list[dict]:
         return ServiceCatalog(self.blocks).entries()

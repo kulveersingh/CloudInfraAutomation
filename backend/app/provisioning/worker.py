@@ -5,9 +5,10 @@ from collections.abc import Callable
 from sqlalchemy.orm import sessionmaker
 
 from app.adapters.factory import AdapterFactory
-from app.adapters.ports import AwsPort, GitHubPort
+from app.adapters.ports import CloudPorts, GitHubPort
 from app.config import Settings
 from app.db.database import Database
+from app.providers.base import DEFAULT_PROVIDER
 from app.provisioning.change_runner import ChangeJobRunner
 from app.provisioning.queue import JobQueue
 from app.provisioning.runner import JobRunner
@@ -21,11 +22,11 @@ RUNNERS = {"provision": JobRunner, "change": ChangeJobRunner, "teardown": Teardo
 class Worker:
     """Claims and runs one queued job at a time. Runs as its own ECS service on AWS."""
 
-    def __init__(self, session_factory: sessionmaker, github: GitHubPort, aws: AwsPort, owner: str,
+    def __init__(self, session_factory: sessionmaker, github: GitHubPort, clouds: CloudPorts, owner: str,
                  signer: ManifestSigner):
         self._session_factory = session_factory
         self._github = github
-        self._aws = aws
+        self._clouds = clouds
         self._owner = owner
         self._signer = signer
 
@@ -34,7 +35,8 @@ class Worker:
             job = JobQueue(session).claim_next()
             if job is None:
                 return False
-            RUNNERS[job.kind].for_session(session, self._github, self._aws, self._owner, self._signer).run(job)
+            cloud = self._clouds.get(job.payload.get("provider", DEFAULT_PROVIDER))
+            RUNNERS[job.kind].for_session(session, self._github, cloud, self._owner, self._signer).run(job)
             return True
 
 
@@ -46,7 +48,7 @@ class WorkerCommand:
     def run(self, max_iterations: int | None = None) -> None:
         adapters = AdapterFactory()
         worker = Worker(Database(self._settings.sqlalchemy_url()).session_factory, adapters.github(self._settings),
-                        adapters.aws(self._settings), self._settings.github_owner,
+                        adapters.clouds(self._settings), self._settings.github_owner,
                         ManifestSigner.from_settings(self._settings))
         for _ in self._iterations(max_iterations):
             if not worker.process_one():

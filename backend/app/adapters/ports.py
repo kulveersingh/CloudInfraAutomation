@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from app.config import Settings
+from app.errors import NotFoundError
 
 DEFAULT_BRANCH = "main"
 BOOTSTRAP_STACK = "cloudinfra-bootstrap-{project}"
@@ -53,8 +54,8 @@ class RepositorySnapshot:
 
 @dataclass(frozen=True)
 class BootstrapOutputs:
-    deploy_role_arn: str
-    cfn_execution_role_arn: str
+    deployer_identity: str  # what the deploy workflow signs in as (AWS: the deploy role)
+    execution_identity: str  # what applies the IaC document (AWS: the CloudFormation execution role)
 
 
 class GitHubPort(ABC):
@@ -135,12 +136,13 @@ class GitHubPort(ABC):
         ...
 
 
-class AwsPort(ABC):
-    """What the platform needs from AWS to bootstrap a project in an account and region."""
+class ProviderPort(ABC):
+    """What the platform needs from a cloud: bootstrap trust per environment, delete and adopt deploy units and
+    data stores, and its backup service. Implementations: LocalAws now; one per cloud and mode later."""
 
     @classmethod
     @abstractmethod
-    def from_settings(cls, settings: Settings) -> "AwsPort":
+    def from_settings(cls, settings: Settings) -> "ProviderPort":
         ...
 
     @abstractmethod
@@ -177,16 +179,16 @@ class BackupSource:
     account_id: str
     region: str
     resource_type: str
-    source_arn: str
+    source_ref: str
 
 
 @dataclass(frozen=True)
 class RecoveryPoint:
-    arn: str
+    ref: str
     vault: str
     account_id: str
     region: str
-    source_arn: str
+    source_ref: str
     resource_type: str
     completed_at: datetime
     locked_until: datetime
@@ -199,7 +201,7 @@ class VaultLock:
 
 
 class BackupPort(ABC):
-    """AWS Backup for teardowns, from `AwsPort.backup`: back up into the locked central vault, check the lock,
+    """A cloud's backup service for teardowns, from `ProviderPort.backup`: back up into the locked central vault, check the lock,
     restore. It has no way to delete a recovery point: only super users do that, manually, after the lock (§21.9.1)."""
 
     @abstractmethod
@@ -211,9 +213,21 @@ class BackupPort(ABC):
         ...
 
     @abstractmethod
-    def recovery_point(self, arn: str) -> RecoveryPoint | None:
+    def recovery_point(self, ref: str) -> RecoveryPoint | None:
         ...
 
     @abstractmethod
-    def restore(self, recovery_point_arn: str, account_id: str, region: str, physical_name: str) -> None:
+    def restore(self, recovery_point_ref: str, account_id: str, region: str, physical_name: str) -> None:
         ...
+
+
+class CloudPorts:
+    """One adapter per cloud provider; work for a project uses its provider's adapter."""
+
+    def __init__(self, ports: dict[str, ProviderPort]):
+        self._ports = ports
+
+    def get(self, provider: str) -> ProviderPort:
+        if provider not in self._ports:
+            raise NotFoundError(f"No adapter for cloud provider '{provider}'.")
+        return self._ports[provider]

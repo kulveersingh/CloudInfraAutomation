@@ -2,7 +2,7 @@ from functools import partial
 
 from sqlalchemy.orm import Session
 
-from app.adapters.ports import AwsPort, GitHubPort
+from app.adapters.ports import GitHubPort, ProviderPort
 from app.db import models
 from app.projects.change_repository import ChangeState, ProjectChangeRepository
 from app.provisioning.runner import JobRunner
@@ -22,9 +22,9 @@ class ChangeJobRunner:
         self._planner = planner
 
     @classmethod
-    def for_session(cls, session: Session, github: GitHubPort, aws: AwsPort, owner: str,
+    def for_session(cls, session: Session, github: GitHubPort, cloud: ProviderPort, owner: str,
                     signer: ManifestSigner) -> "ChangeJobRunner":
-        return cls(JobRunner.for_session(session, github, aws, owner, signer), ProjectChangeRepository(session),
+        return cls(JobRunner.for_session(session, github, cloud, owner, signer), ProjectChangeRepository(session),
                    ChangePlanner())
 
     def run(self, job: models.Job) -> None:

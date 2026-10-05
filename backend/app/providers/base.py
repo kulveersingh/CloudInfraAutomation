@@ -5,7 +5,9 @@ from typing import TYPE_CHECKING, ClassVar
 from app.errors import NotFoundError
 
 if TYPE_CHECKING:
+    from app.releases.risk import ResourceClassifier
     from app.synth.toolkit import ProjectToolkit
+    from app.teardown.inventory import TeardownToolkit
 
 DEFAULT_PROVIDER = "aws"
 
@@ -41,6 +43,14 @@ class CloudProvider(ABC):
     @abstractmethod
     def project(self) -> "ProjectToolkit":
         """Blocks, binders, IaC dialect, validation, linting and repository files for projects on this cloud."""
+
+    @abstractmethod
+    def teardown(self) -> "TeardownToolkit":
+        """Data stores, backup notes and the locked vault, for teardowns (§21.9)."""
+
+    @abstractmethod
+    def resources(self) -> "ResourceClassifier":
+        """Which plan rows hold data and which change permissions, for release risk (§8.4.2)."""
 
     def describe(self) -> dict:
         primary, secondary = self.default_regions()

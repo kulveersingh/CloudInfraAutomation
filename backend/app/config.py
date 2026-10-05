@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     worker_poll_seconds: float = 2.0
     cors_origins: list[str] = ["http://localhost:5173", "http://localhost:8080"]
 
+    def cloud_mode(self, provider: str) -> str:
+        """The adapter mode for a cloud provider: the `<provider>_mode` setting (`aws_mode` for AWS)."""
+        return getattr(self, f"{provider}_mode")
+
     def sqlalchemy_url(self) -> str:
         if self.database_password is None:
             return self.database_url

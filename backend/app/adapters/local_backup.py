@@ -29,13 +29,13 @@ class LocalBackup(BackupPort):
 
     def back_up(self, source: BackupSource) -> RecoveryPoint:
         state = self._read()
-        if source.source_arn in state["failing"]:
-            raise RuntimeError(f"Backup of {source.source_arn} failed.")
+        if source.source_ref in state["failing"]:
+            raise RuntimeError(f"Backup of {source.source_ref} failed.")
         completed = self._clock()
         point = RecoveryPoint(
-            arn=f"arn:aws:backup:{source.region}:{self._account}:recovery-point:{uuid.uuid4()}",
+            ref=f"arn:aws:backup:{source.region}:{self._account}:recovery-point:{uuid.uuid4()}",
             vault=CENTRAL_VAULT.format(region=source.region), account_id=self._account, region=source.region,
-            source_arn=source.source_arn, resource_type=source.resource_type, completed_at=completed,
+            source_ref=source.source_ref, resource_type=source.resource_type, completed_at=completed,
             locked_until=completed + timedelta(days=RETENTION_DAYS))
         state["recovery_points"].append(_point_json(point))
         self._write(state)
@@ -45,15 +45,15 @@ class LocalBackup(BackupPort):
         lock = self._read()["locks"].get(region, {"locked": True, "min_retention_days": RETENTION_DAYS})
         return VaultLock(locked=lock["locked"], min_retention_days=lock["min_retention_days"])
 
-    def recovery_point(self, arn: str) -> RecoveryPoint | None:
-        return next((point for point in self.recovery_points() if point.arn == arn), None)
+    def recovery_point(self, ref: str) -> RecoveryPoint | None:
+        return next((point for point in self.recovery_points() if point.ref == ref), None)
 
-    def restore(self, recovery_point_arn: str, account_id: str, region: str, physical_name: str) -> None:
-        point = self.recovery_point(recovery_point_arn)
+    def restore(self, recovery_point_ref: str, account_id: str, region: str, physical_name: str) -> None:
+        point = self.recovery_point(recovery_point_ref)
         if point is None:
-            raise KeyError(f"Recovery point {recovery_point_arn} does not exist.")
+            raise KeyError(f"Recovery point {recovery_point_ref} does not exist.")
         state = self._read()
-        state["restores"].append({"recovery_point": point.arn, "account": account_id, "region": region,
+        state["restores"].append({"recovery_point": point.ref, "account": account_id, "region": region,
                                   "physical_name": physical_name, "resource_type": point.resource_type})
         self._write(state)
 
@@ -65,9 +65,9 @@ class LocalBackup(BackupPort):
     def restores(self) -> list[dict]:
         return self._read()["restores"]
 
-    def fail_backups_of(self, source_arn: str) -> None:
+    def fail_backups_of(self, source_ref: str) -> None:
         state = self._read()
-        state["failing"].append(source_arn)
+        state["failing"].append(source_ref)
         self._write(state)
 
     def clear_failures(self) -> None:
@@ -80,14 +80,14 @@ class LocalBackup(BackupPort):
         state["locks"][region] = {"locked": locked, "min_retention_days": min_retention_days}
         self._write(state)
 
-    def delete_recovery_point(self, arn: str, role: str, at: datetime) -> None:
-        point = self.recovery_point(arn)
+    def delete_recovery_point(self, ref: str, role: str, at: datetime) -> None:
+        point = self.recovery_point(ref)
         if at < point.locked_until:
-            raise RecoveryPointLockedError(f"{arn} is locked until {point.locked_until.isoformat()}.")
+            raise RecoveryPointLockedError(f"{ref} is locked until {point.locked_until.isoformat()}.")
         if role != SUPER_USER_ROLE:
             raise PermissionError(f"Only {SUPER_USER_ROLE} can delete recovery points.")
         state = self._read()
-        state["recovery_points"] = [item for item in state["recovery_points"] if item["arn"] != arn]
+        state["recovery_points"] = [item for item in state["recovery_points"] if item["ref"] != ref]
         self._write(state)
 
     def _read(self) -> dict:

@@ -5,11 +5,12 @@ from typing import Literal
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.adapters.ports import BOOTSTRAP_STACK, AwsPort, BackupPort
+from app.adapters.ports import BOOTSTRAP_STACK, BackupPort, CloudPorts
 from app.db import models
 from app.errors import ConflictError, NotFoundError, ValidationFailedError
 from app.landing_zone.repository import LandingZoneRepository
 from app.projects.repository import ProjectRepository
+from app.providers.base import ProviderRegistry
 from app.provisioning.queue import JobQueue
 from app.provisioning.states import ProjectStatus
 from app.provisioning.topology import TopologyFactory
@@ -18,7 +19,7 @@ from app.releases.policy import Actor
 from app.synth.request import ProjectRequest
 from app.teardown.backup_account import BackupAccountResolver
 from app.teardown.blockers import BlockerContext, TeardownBlockers
-from app.teardown.inventory import DataStore, DataStoreInventory
+from app.teardown.inventory import DataStore
 from app.teardown.policy import PLATFORM_ADMIN, REVIEWER, TeardownPolicy, approver_role
 from app.teardown.records import TeardownRecords
 from app.teardown.repository import TeardownRepository
@@ -26,7 +27,6 @@ from app.teardown.scheduler import TeardownScheduler
 from app.teardown.states import EnvironmentState, RestoreState, TeardownScope, TeardownState, overall_state
 
 RETENTION_DAYS = 60
-NOT_BACKED_UP_LOGS = "CloudWatch Logs: not supported by AWS Backup"
 NO_BACKUP_ACCOUNT = "No central Backup account is configured: add a Backup account to the landing zone first."
 RESTORE_JOB = "restore"
 
@@ -52,25 +52,25 @@ class TeardownService:
     """Teardown of an environment or a whole project (§21.9): preview, request, one approval per environment,
     retry, and restore from the teardown record."""
 
-    def __init__(self, session: Session, aws: AwsPort, owner: str, backup_account: BackupAccountResolver):
+    def __init__(self, session: Session, clouds: CloudPorts, owner: str, backup_account: BackupAccountResolver):
         self._projects = ProjectRepository(session)
         self._teardowns = TeardownRepository(session)
         self._registry = RegistryService.for_session(session)
         self._topologies = TopologyFactory.default()
-        self._inventory = DataStoreInventory.default()
+        self._providers = ProviderRegistry.default()
         self._blockers = TeardownBlockers.for_session(session)
         self._queue = JobQueue(session)
         self._scheduler = TeardownScheduler(self._teardowns, self._queue)
         self._records = TeardownRecords(self._teardowns)
         self._policy = TeardownPolicy()
-        self._aws = aws
+        self._clouds = clouds
         self._owner = owner
         self._backup_account = backup_account
 
     @classmethod
-    def for_session(cls, session: Session, aws: AwsPort, owner: str,
+    def for_session(cls, session: Session, clouds: CloudPorts, owner: str,
                     configured_backup_account: str | None) -> "TeardownService":
-        return cls(session, aws, owner, BackupAccountResolver(configured_backup_account,
+        return cls(session, clouds, owner, BackupAccountResolver(configured_backup_account,
                                                               LandingZoneRepository(session)))
 
     # ---- preview and request ----
@@ -79,7 +79,8 @@ class TeardownService:
         project = self._project(project_name)
         planned = self._plan(project, body)
         request = ProjectRequest.model_validate(project.request)
-        not_backed_up = [*self._inventory.not_backed_up(request), NOT_BACKED_UP_LOGS]
+        teardown = self._providers.get(project.provider).teardown()
+        not_backed_up = [*teardown.inventory.not_backed_up(request), *teardown.notes]
         backup_account = self._backup_account.resolve()
         return {"scope": body.scope, "backup_account": backup_account, "retention_days": RETENTION_DAYS,
                 "blockers": self._problems(project, body.scope, planned, backup_account),
@@ -175,7 +176,7 @@ class TeardownService:
         if teardown.restore_state == RestoreState.RESTORED:
             raise ConflictError("This teardown was already restored.")
         project = self._projects.get(teardown.project_name)
-        backup = self._aws.backup(teardown.backup_account_id)
+        backup = self._clouds.get(teardown.provider).backup(teardown.backup_account_id)
         for row in completed:
             self._require_restorable(project, row, backup)
         teardown.restore_state, teardown.restore_requested_by = RestoreState.REQUESTED, actor.name
@@ -185,7 +186,7 @@ class TeardownService:
         if project.status != ProjectStatus.DECOMMISSIONED and row.environment in project.request["environments"]:
             raise ConflictError(f"{row.environment} exists in the project again, so it cannot be restored over.")
         for point in self._teardowns.recovery_points(row):
-            if backup.recovery_point(point.recovery_point_arn) is None:
+            if backup.recovery_point(point.recovery_point_ref) is None:
                 raise ConflictError(f"The backup of {point.service_id} in {row.environment} ({point.region}) no "
                                     "longer exists, so it cannot be restored.")
 
@@ -201,7 +202,7 @@ class TeardownService:
             teardown.restore_state = RestoreState.REJECTED
             return
         job = self._queue.enqueue(teardown.project_name, f"restore-{uuid.uuid4()}",
-                                  {"teardown_id": str(teardown.id)}, kind=RESTORE_JOB)
+                                  {"teardown_id": str(teardown.id), "provider": teardown.provider}, kind=RESTORE_JOB)
         teardown.restore_state, teardown.restore_job_id = RestoreState.QUEUED, job.id
 
     # ---- helpers ----
@@ -233,10 +234,11 @@ class TeardownService:
         environments.sort(key=lambda environment: catalog[environment]["position"])
         accounts = self._registry.target_accounts(request.provider, request.ownership.portfolio_id, environments)
         topology = self._topologies.for_resilience(request.resilience)
+        inventory = self._providers.get(project.provider).teardown().inventory
         planned = []
         for environment in environments:
             regions = topology.regions_for(environment)
-            stores, problems = self._inventory.for_environment(request, environment, accounts[environment], regions)
+            stores, problems = inventory.for_environment(request, environment, accounts[environment], regions)
             planned.append(PlannedEnvironment(environment, catalog[environment]["position"],
                                               approver_role(catalog[environment]["requires_approval"]),
                                               accounts[environment], regions, stores, problems))

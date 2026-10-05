@@ -89,9 +89,9 @@ function EnvironmentRow({ project, environment, onDecide }: {
         </div>
       )}
       {environment.recovery_points.map((point) => (
-        <div key={point.recovery_point_arn} className="stack">
+        <div key={point.recovery_point_ref} className="stack">
           <span>{`${point.service_id} · ${point.region} · locked until ${point.locked_until.slice(0, 10)}`}</span>
-          <span className="mono">{point.recovery_point_arn}</span>
+          <span className="mono">{point.recovery_point_ref}</span>
         </div>
       ))}
     </div>

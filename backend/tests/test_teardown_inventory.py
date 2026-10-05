@@ -1,14 +1,14 @@
 import pytest
 
+from app.providers.aws.teardown import CloudFormationInventory
 from app.synth.request import ProjectRequest
-from app.teardown.inventory import DataStoreInventory
 from tests.factories import dr_request_dict, request_dict
 
 ACCOUNT = "555555555555"
 
 
 def inventory(payload: dict, environment: str = "prod", regions=("us-east-1",)):
-    return DataStoreInventory.default().for_environment(ProjectRequest.model_validate(payload), environment, ACCOUNT,
+    return CloudFormationInventory.default().for_environment(ProjectRequest.model_validate(payload), environment, ACCOUNT,
                                                         list(regions))
 
 
@@ -66,5 +66,5 @@ def test_data_stores_without_a_name_in_the_template_cannot_be_backed_up(resource
 
 
 def test_services_that_are_not_backed_up_are_listed():
-    assert DataStoreInventory.default().not_backed_up(ProjectRequest.model_validate(request_dict())) == [
+    assert CloudFormationInventory.default().not_backed_up(ProjectRequest.model_validate(request_dict())) == [
         "processor (lambda.function): rebuilt from the template and the application repository"]

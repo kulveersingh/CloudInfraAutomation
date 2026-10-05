@@ -1,10 +1,11 @@
 import re
 
+from app.providers.aws.provider import AwsProvider
 from app.releases.simulator import LocalPipelineSimulator
 from app.synth.request import ProjectRequest
 from tests.factories import request_dict
 
-SIMULATOR = LocalPipelineSimulator.default()
+SIMULATOR = LocalPipelineSimulator(AwsProvider().project().synthesizer, AwsProvider().resources())
 REQUEST = ProjectRequest.model_validate(request_dict())
 
 

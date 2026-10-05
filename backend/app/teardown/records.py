@@ -50,7 +50,7 @@ class TeardownRecords:
 def _point(point: models.TeardownRecoveryPoint) -> dict:
     return {"service_id": point.service_id, "logical_id": point.logical_id, "resource_type": point.resource_type,
             "physical_name": point.physical_name, "region": point.region, "account_id": point.account_id,
-            "recovery_point_arn": point.recovery_point_arn, "vault": point.vault,
+            "recovery_point_ref": point.recovery_point_ref, "vault": point.vault,
             "completed_at": point.completed_at.isoformat(), "locked_until": point.locked_until.isoformat()}
 
 

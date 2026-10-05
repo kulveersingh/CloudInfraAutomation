@@ -13,6 +13,7 @@ from app.providers.aws.project.blocks.sqs_queue import SqsQueueBlock
 from app.providers.aws.project.dialect import CloudFormationDialect
 from app.providers.aws.project.lint import aws_linter
 from app.providers.aws.project.render import aws_bundle
+from app.providers.aws.project.variables import AwsEnvironmentVariables
 from app.synth.binders.registry import BinderRegistry
 from app.synth.blocks.registry import BlockRegistry
 from app.synth.synthesizer import TemplateSynthesizer
@@ -49,4 +50,5 @@ def aws_project() -> ProjectToolkit:
     return ProjectToolkit(blocks=blocks, binders=binders,
                           synthesizer=TemplateSynthesizer(blocks, binders, CloudFormationDialect()),
                           validator=RequestValidator.default(blocks, binders), linter=aws_linter(),
-                          bundle=aws_bundle(), types=CloudFormationSchemaCatalog.bundled())
+                          bundle=aws_bundle(), types=CloudFormationSchemaCatalog.bundled(),
+                          variables=AwsEnvironmentVariables())

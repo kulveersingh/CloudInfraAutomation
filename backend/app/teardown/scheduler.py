@@ -25,7 +25,8 @@ class TeardownScheduler:
 
     def enqueue(self, teardown: models.Teardown, environment: models.TeardownEnvironment) -> None:
         job = self._queue.enqueue(teardown.project_name, f"teardown-{uuid.uuid4()}",
-                                  {"teardown_environment_id": str(environment.id)}, kind=TEARDOWN_JOB)
+                                  {"teardown_environment_id": str(environment.id), "provider": teardown.provider},
+                                  kind=TEARDOWN_JOB)
         environment.job_id, environment.state, environment.error = job.id, EnvironmentState.QUEUED, None
 
     def _has_turn(self, environment: models.TeardownEnvironment,

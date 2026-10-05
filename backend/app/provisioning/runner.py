@@ -2,13 +2,14 @@ from functools import partial
 
 from sqlalchemy.orm import Session
 
-from app.adapters.ports import AwsPort, GitHubPort
+from app.adapters.ports import GitHubPort, ProviderPort
 from app.db import models
 from app.networks.service import NetworkService
 from app.projects.files import ProjectFiles
 from app.projects.readback import GENERATOR, INPUT_FILE, KIND, REVISION
 from app.projects.repository import ProjectRepository
 from app.projects.tags import TagSet
+from app.providers.base import ProviderRegistry
 from app.provisioning.queue import JobQueue
 from app.provisioning.saga import Saga
 from app.provisioning.states import ProjectStatus
@@ -24,7 +25,7 @@ class JobRunner:
 
     def __init__(self, queue: JobQueue, projects: ProjectRepository, registry: RegistryService,
                  files: ProjectFiles, topologies: TopologyFactory,
-                 planner: ProvisioningPlanner, networks: NetworkService, github: GitHubPort, aws: AwsPort,
+                 planner: ProvisioningPlanner, networks: NetworkService, github: GitHubPort, cloud: ProviderPort,
                  owner: str, sealer: ManifestSealer):
         self._queue = queue
         self._projects = projects
@@ -34,16 +35,16 @@ class JobRunner:
         self._planner = planner
         self._networks = networks
         self._github = github
-        self._aws = aws
+        self._cloud = cloud
         self._owner = owner
         self._sealer = sealer
 
     @classmethod
-    def for_session(cls, session: Session, github: GitHubPort, aws: AwsPort, owner: str,
+    def for_session(cls, session: Session, github: GitHubPort, cloud: ProviderPort, owner: str,
                     signer: ManifestSigner) -> "JobRunner":
         return cls(JobQueue(session), ProjectRepository(session), RegistryService.for_session(session),
                    ProjectFiles.for_session(session),
-                   TopologyFactory.default(), ProvisioningPlanner(), NetworkService.for_session(session), github, aws,
+                   TopologyFactory.default(), ProvisioningPlanner(), NetworkService.for_session(session), github, cloud,
                    owner, ManifestSealer(signer))
 
     def run(self, job: models.Job) -> None:
@@ -70,8 +71,8 @@ class JobRunner:
         return ProvisioningContext(
             request_id=request_id, request=request, owner=self._owner,
             files=self._files(request, revision), accounts=accounts,
-            topology=topology, tags=TagSet(request, cost_center).as_dict(), github=self._github, aws=self._aws,
-            networks=self._networks.resolve(request, topology, accounts))
+            topology=topology, tags=TagSet(request, cost_center).as_dict(), github=self._github, cloud=self._cloud,
+            variables=ProviderRegistry.default().get(request.provider).project().variables, networks=self._networks.resolve(request, topology, accounts))
 
     def _files(self, request: ProjectRequest, revision: int) -> dict[str, str]:
         files = self._project_files.render(request)

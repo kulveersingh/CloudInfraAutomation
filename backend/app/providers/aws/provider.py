@@ -1,5 +1,7 @@
 from app.providers.base import CloudProvider, Vocabulary
+from app.releases.risk import ResourceClassifier
 from app.synth.toolkit import ProjectToolkit
+from app.teardown.inventory import TeardownToolkit
 
 
 class AwsProvider(CloudProvider):
@@ -18,3 +20,13 @@ class AwsProvider(CloudProvider):
         from app.providers.aws.project.toolkit import aws_project
 
         return aws_project()
+
+    def teardown(self) -> TeardownToolkit:
+        from app.providers.aws.teardown import aws_teardown
+
+        return aws_teardown()
+
+    def resources(self) -> ResourceClassifier:
+        from app.providers.aws.releases import CloudFormationResourceClassifier
+
+        return CloudFormationResourceClassifier()

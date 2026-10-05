@@ -2,12 +2,17 @@ from abc import ABC, abstractmethod
 
 from app.releases.plan import ChangeSpec
 
-STATEFUL_TYPES = frozenset({
-    "AWS::S3::Bucket", "AWS::DynamoDB::Table", "AWS::DynamoDB::GlobalTable", "AWS::RDS::DBCluster",
-    "AWS::RDS::DBInstance", "AWS::EFS::FileSystem", "AWS::Kinesis::Stream", "AWS::SQS::Queue",
-    "AWS::OpenSearchService::Domain", "AWS::ElastiCache::ReplicationGroup", "AWS::Neptune::DBCluster",
-    "AWS::DocDB::DBCluster", "AWS::KMS::Key", "AWS::SecretsManager::Secret",
-})
+
+class ResourceClassifier(ABC):
+    """A provider's view of its plan rows: which resource types hold data, and which change permissions."""
+
+    @abstractmethod
+    def is_stateful(self, resource_type: str) -> bool:
+        ...
+
+    @abstractmethod
+    def is_permission(self, resource_type: str) -> bool:
+        ...
 
 
 class RiskLevel:
@@ -30,17 +35,20 @@ class RiskRule(ABC):
 
 
 class StatefulDestructionRule(RiskRule):
+    def __init__(self, resources: ResourceClassifier):
+        self._resources = resources
+
     def risk_of(self, change):
         destroys = change.action == "Remove" or change.replacement
-        return RiskLevel.HIGH if change.resource_type in STATEFUL_TYPES and destroys else None
+        return RiskLevel.HIGH if self._resources.is_stateful(change.resource_type) and destroys else None
 
 
 class PermissionChangeRule(RiskRule):
+    def __init__(self, resources: ResourceClassifier):
+        self._resources = resources
+
     def risk_of(self, change):
-        resource_type = change.resource_type
-        permission = (resource_type.startswith("AWS::IAM::") or resource_type.endswith("Policy")
-                      or resource_type == "AWS::Lambda::Permission")
-        return RiskLevel.MEDIUM if permission else None
+        return RiskLevel.MEDIUM if self._resources.is_permission(change.resource_type) else None
 
 
 class ResourceRemovalRule(RiskRule):
@@ -53,8 +61,8 @@ class ChangeRiskClassifier:
         self._rules = rules
 
     @classmethod
-    def default(cls) -> "ChangeRiskClassifier":
-        return cls([StatefulDestructionRule(), PermissionChangeRule(), ResourceRemovalRule()])
+    def for_resources(cls, resources: ResourceClassifier) -> "ChangeRiskClassifier":
+        return cls([StatefulDestructionRule(resources), PermissionChangeRule(resources), ResourceRemovalRule()])
 
     def risk_of(self, change: ChangeSpec) -> str:
         return RiskLevel.highest([level for rule in self._rules if (level := rule.risk_of(change)) is not None])

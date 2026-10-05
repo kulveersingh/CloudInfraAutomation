@@ -220,7 +220,7 @@ export interface RecoveryPointInfo {
   physical_name: string;
   region: string;
   account_id: string;
-  recovery_point_arn: string;
+  recovery_point_ref: string;
   vault: string;
   completed_at: string;
   locked_until: string;

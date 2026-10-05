@@ -1,7 +1,8 @@
+from app.providers.aws.releases import CloudFormationResourceClassifier
 from app.releases.risk import ChangeRiskClassifier, RiskLevel, RiskRule
 from tests.release_factories import change
 
-CLASSIFIER = ChangeRiskClassifier.default()
+CLASSIFIER = ChangeRiskClassifier.for_resources(CloudFormationResourceClassifier())
 
 
 def test_code_change_is_low_risk():

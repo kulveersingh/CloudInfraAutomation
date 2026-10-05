@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.db import models
 from app.errors import NotFoundError, ValidationFailedError
 from app.projects.repository import ProjectRepository
+from app.providers.base import ProviderRegistry
 from app.registry.repository import RegistryRepository
 from app.registry.service import require
 from app.releases.executor import ReleaseExecutor
@@ -25,23 +26,22 @@ class ReleaseService:
     """Release workflow: plan intake, automated gate, overrides, reviewer approval, execution."""
 
     def __init__(self, releases: ReleaseRepository, projects: ProjectRepository, registry: RegistryRepository,
-                 classifier: ChangeRiskClassifier, gate: GateEvaluator, machine: ReleaseStateMachine,
-                 policy: ApprovalPolicy, executor: ReleaseExecutor, simulator: LocalPipelineSimulator):
+                 providers: ProviderRegistry, gate: GateEvaluator, machine: ReleaseStateMachine,
+                 policy: ApprovalPolicy, executor: ReleaseExecutor):
         self._releases = releases
         self._projects = projects
         self._registry = registry
-        self._classifier = classifier
+        self._providers = providers
         self._gate = gate
         self._machine = machine
         self._policy = policy
         self._executor = executor
-        self._simulator = simulator
 
     @classmethod
     def for_session(cls, session: Session, executor: ReleaseExecutor) -> "ReleaseService":
         return cls(ReleaseRepository(session), ProjectRepository(session), RegistryRepository(session),
-                   ChangeRiskClassifier.default(), GateEvaluator.default(), ReleaseStateMachine(), ApprovalPolicy(),
-                   executor, LocalPipelineSimulator.default())
+                   ProviderRegistry.default(), GateEvaluator.default(), ReleaseStateMachine(), ApprovalPolicy(),
+                   executor)
 
     # ---- intake ----
 
@@ -49,10 +49,11 @@ class ReleaseService:
         project = self._project(submission.project_name)
         environment = self._enabled_environment(project, submission.environment)
         self._supersede_pending(project.name, environment.id)
+        classifier = ChangeRiskClassifier.for_resources(self._providers.get(project.provider).resources())
         release = models.Release(
             project_name=project.name, environment_id=environment.id, commit_sha=submission.commit_sha,
-            artifact_digest=submission.artifact_digest, changes=self._classifier.classify(submission.changes),
-            evidence=submission.evidence.model_dump(), risk=self._classifier.overall(submission.changes),
+            artifact_digest=submission.artifact_digest, changes=classifier.classify(submission.changes),
+            evidence=submission.evidence.model_dump(), risk=classifier.overall(submission.changes),
             gate_findings=[], state=ReleaseState.PLANNED, requested_by=submission.requested_by)
         self._releases.add(release)
         release.gate_findings = self._gate.findings(GateContext(
@@ -64,7 +65,9 @@ class ReleaseService:
     def simulate(self, project_name: str, environment_id: str, actor: Actor, high_risk: bool) -> dict:
         project = self._project(project_name)
         request = ProjectRequest.model_validate(project.request)
-        return self.submit_plan(self._simulator.plan(request, environment_id, actor.name, high_risk))
+        provider = self._providers.get(project.provider)
+        simulator = LocalPipelineSimulator(provider.project().synthesizer, provider.resources())
+        return self.submit_plan(simulator.plan(request, environment_id, actor.name, high_risk))
 
     # ---- decisions ----
 

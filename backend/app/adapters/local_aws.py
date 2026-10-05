@@ -3,14 +3,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from app.adapters.local_backup import LocalBackup
-from app.adapters.ports import AwsPort, BootstrapOutputs, BootstrapRequest
+from app.adapters.ports import BootstrapOutputs, BootstrapRequest, ProviderPort
 from app.config import Settings
 
 STATE_FILE = "bootstrap-stacks.json"
 OPERATIONS_FILE = "stack-operations.json"
 
 
-class LocalAws(AwsPort):
+class LocalAws(ProviderPort):
     """AWS stand-in for local development: records the bootstrap stacks that would be deployed."""
 
     def __init__(self, root):
@@ -29,8 +29,8 @@ class LocalAws(AwsPort):
 
     def ensure_bootstrap_stack(self, request: BootstrapRequest) -> BootstrapOutputs:
         outputs = BootstrapOutputs(
-            deploy_role_arn=self._role_arn(request, "deploy"),
-            cfn_execution_role_arn=self._role_arn(request, "cfn-exec"))
+            deployer_identity=self._role_arn(request, "deploy"),
+            execution_identity=self._role_arn(request, "cfn-exec"))
         self._save([*self._others(request), self._record(request, outputs)])
         return outputs
 
@@ -74,8 +74,8 @@ class LocalAws(AwsPort):
     def _record(self, request: BootstrapRequest, outputs: BootstrapOutputs) -> dict:
         return {"stack": request.stack_name, "account": request.account_id, "region": request.region,
                 "environment": request.environment, "trust_subject": request.trust_subject,
-                "deploy_role_arn": outputs.deploy_role_arn,
-                "cfn_execution_role_arn": outputs.cfn_execution_role_arn}
+                "deployer_identity": outputs.deployer_identity,
+                "execution_identity": outputs.execution_identity}
 
     def _save(self, stacks: list[dict]) -> None:
         self._state_file.parent.mkdir(parents=True, exist_ok=True)

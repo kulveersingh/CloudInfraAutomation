@@ -285,7 +285,7 @@ class TeardownRecoveryPoint(Base):
     physical_name: Mapped[str] = mapped_column(String(255))
     region: Mapped[str] = mapped_column(String(32))
     account_id: Mapped[str] = mapped_column(String(64))
-    recovery_point_arn: Mapped[str] = mapped_column(String(512))
+    recovery_point_ref: Mapped[str] = mapped_column(String(512))
     vault: Mapped[str] = mapped_column(String(128))
     completed_at: Mapped[datetime]
     locked_until: Mapped[datetime]
