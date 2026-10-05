@@ -20,7 +20,7 @@ describe("ProjectDraft", () => {
   });
 
   it("derives resource ids from the type", () => {
-    expect(ready().values.resources[0]).toEqual({ id: "bucket", type: "s3.bucket", properties: {} });
+    expect(ready().values.resources[0]).toEqual({ id: "bucket", type: "s3.bucket", properties: {}, settings: {} });
   });
 
   it("derives resource ids from CloudFormation types", () => {
@@ -55,6 +55,22 @@ describe("ProjectDraft", () => {
   it("stores properties for a resource", () => {
     const draft = ready().withResourceProperties("bucket", { Foo: 1 });
     expect(draft.values.resources[0].properties).toEqual({ Foo: 1 });
+  });
+
+  it("sends the settings a user changed in the resource config", () => {
+    const request = ready().withResource("lambda.function").withResourceSetting("function", "memory_mb", 1024)
+      .withResourceSetting("function", "runtime", "java21").toRequest();
+    expect(request.resources[1]).toEqual({ id: "function", type: "lambda.function", config: { memory_mb: 1024, runtime: "java21" } });
+  });
+
+  it("clearing a setting goes back to the service default", () => {
+    const draft = ready().withResourceSetting("bucket", "memory_mb", 1024).withResourceSetting("bucket", "memory_mb", undefined);
+    expect(draft.toRequest().resources[0]).toEqual({ id: "bucket", type: "s3.bucket" });
+  });
+
+  it("setting a value leaves other resources unchanged", () => {
+    const draft = ready().withResource("lambda.function").withResourceSetting("function", "timeout_sec", 60);
+    expect(draft.values.resources[0].settings).toEqual({});
   });
 
   it("removes a connection by position", () => {

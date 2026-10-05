@@ -36,9 +36,20 @@ export const REGIONS: RegionInfo[] = [
   { id: "ap-southeast-2", name: "Asia Pacific (Sydney)", enabled: false },
 ];
 
+const KEY_RULE = "1 to 255 characters of letters, digits and _ . -";
+
 export const CATALOG: CatalogEntry[] = [
-  { type: "lambda.function", name: "Lambda function", category: "Compute", multi_region: "replicated" },
-  { type: "s3.bucket", name: "S3 bucket", category: "Storage", multi_region: "replicated" },
+  { type: "lambda.function", name: "Lambda function", category: "Compute", multi_region: "replicated", settings: [
+    { kind: "choice", name: "runtime", label: "Runtime", default: "python3.13", choices: ["python3.13", "java21"] },
+    { kind: "text", name: "handler", label: "Handler", default: "lambda_function.lambda_handler",
+      pattern: "^[A-Za-z0-9_.:/$-]{1,128}$", rule: "1 to 128 characters of letters, digits and _ . : / $ -", optional: false },
+    { kind: "integer", name: "memory_mb", label: "Memory", default: 256, minimum: 128, maximum: 10240, unit: "MB" },
+  ] },
+  { type: "s3.bucket", name: "S3 bucket", category: "Storage", multi_region: "replicated", settings: [] },
+  { type: "dynamodb.table", name: "DynamoDB table", category: "Database", multi_region: "global", settings: [
+    { kind: "text", name: "sort_key", label: "Sort key", default: null, pattern: "^[A-Za-z0-9_.-]{1,255}$", rule: KEY_RULE,
+      optional: true },
+  ] },
 ];
 
 export const COST_CENTERS: CostCenterSettings = {

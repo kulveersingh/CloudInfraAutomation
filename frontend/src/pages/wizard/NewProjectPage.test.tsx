@@ -154,6 +154,97 @@ describe("NewProjectPage", () => {
     expect(screen.getByText("Properties must be a JSON object.")).toBeInTheDocument();
   });
 
+  describe("service settings", () => {
+    async function addService(name: string) {
+      await screen.findByLabelText("Portfolio");
+      await goTo("Services");
+      await user().click(screen.getByRole("button", { name: `Add ${name}` }));
+    }
+
+    async function previewedResource(api: PlatformApiPort) {
+      await user().click(screen.getByRole("button", { name: "Generate preview" }));
+      return vi.mocked(api.preview).mock.calls[0][0].resources[0];
+    }
+
+    async function toPreview() {
+      await goTo("Ownership");
+      await fillOwnership();
+      await goTo("Environments");
+      await user().click(screen.getByLabelText("DEV"));
+      await goTo("Preview");
+    }
+
+    it("shows each setting of a curated service with its default", async () => {
+      renderWizard();
+      await addService("Lambda function");
+      expect([(screen.getByLabelText("Runtime for function") as HTMLSelectElement).value,
+        (screen.getByLabelText("Handler for function") as HTMLInputElement).value,
+        (screen.getByLabelText("Memory for function (MB)") as HTMLInputElement).value]).toEqual(
+        ["python3.13", "lambda_function.lambda_handler", "256"]);
+    });
+
+    it("sends only the settings the user changed", async () => {
+      const { api } = renderWizard();
+      await addService("Lambda function");
+      await user().selectOptions(screen.getByLabelText("Runtime for function"), "java21");
+      await user().clear(screen.getByLabelText("Memory for function (MB)"));
+      await user().type(screen.getByLabelText("Memory for function (MB)"), "1024");
+      await toPreview();
+      expect(await previewedResource(api)).toEqual({ id: "function", type: "lambda.function",
+        config: { runtime: "java21", memory_mb: 1024 } });
+    });
+
+    it("choosing the default again sends nothing", async () => {
+      const { api } = renderWizard();
+      await addService("Lambda function");
+      await user().selectOptions(screen.getByLabelText("Runtime for function"), "java21");
+      await user().selectOptions(screen.getByLabelText("Runtime for function"), "python3.13");
+      await toPreview();
+      expect((await previewedResource(api)).config).toBeUndefined();
+    });
+
+    it("flags numbers out of range and keeps the last valid value", async () => {
+      const { api } = renderWizard();
+      await addService("Lambda function");
+      await user().clear(screen.getByLabelText("Memory for function (MB)"));
+      await user().type(screen.getByLabelText("Memory for function (MB)"), "64");
+      expect(screen.getByText("Memory must be a whole number from 128 to 10240 MB.")).toBeInTheDocument();
+      await toPreview();
+      expect((await previewedResource(api)).config).toBeUndefined();
+    });
+
+    it("flags text that does not fit the rule", async () => {
+      renderWizard();
+      await addService("Lambda function");
+      await user().clear(screen.getByLabelText("Handler for function"));
+      await user().type(screen.getByLabelText("Handler for function"), "bad handler");
+      expect(screen.getByText("Handler must be 1 to 128 characters of letters, digits and _ . : / $ -.")).toBeInTheDocument();
+    });
+
+    it("sets and clears an optional setting", async () => {
+      const { api } = renderWizard();
+      await addService("DynamoDB table");
+      await user().type(screen.getByLabelText("Sort key for table (optional)"), "created");
+      await toPreview();
+      expect((await previewedResource(api)).config).toEqual({ sort_key: "created" });
+    });
+
+    it("an empty optional setting is not sent", async () => {
+      const { api } = renderWizard();
+      await addService("DynamoDB table");
+      await user().type(screen.getByLabelText("Sort key for table (optional)"), "created");
+      await user().clear(screen.getByLabelText("Sort key for table (optional)"));
+      await toPreview();
+      expect((await previewedResource(api)).config).toBeUndefined();
+    });
+
+    it("services without settings show no fields", async () => {
+      renderWizard();
+      await addService("S3 bucket");
+      expect(screen.queryByLabelText(/for bucket/)).toBeNull();
+    });
+  });
+
   it("adds and removes connections", async () => {
     renderWizard();
     await screen.findByLabelText("Portfolio");
