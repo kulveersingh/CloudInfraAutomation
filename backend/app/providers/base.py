@@ -77,9 +77,11 @@ class ProviderRegistry:
     @classmethod
     def default(cls) -> "ProviderRegistry":
         from app.providers.aws.provider import AwsProvider
+        from app.providers.gcp.provider import GcpProvider
 
         registry = cls()
         registry.register(AwsProvider())
+        registry.register(GcpProvider())
         return registry
 
     def register(self, provider: CloudProvider) -> None:

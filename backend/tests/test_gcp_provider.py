@@ -83,8 +83,8 @@ def test_valid_google_cloud_network_with_one_regional_subnet():
     ("account_id", "Payments", "Google Cloud project ids are 6 to 30 lowercase letters, digits and hyphens."),
     ("network_ref", "shared-vpc", "'shared-vpc' is not a VPC network (projects/…/global/networks/…)."),
     ("subnet_refs", [f"projects/{HOST}/regions/us-east4/subnetworks/x"],
-     f"'projects/{HOST}/regions/us-east4/subnetworks/x' is not a subnetwork in us-east1 "
-     "(projects/…/regions/us-east1/subnetworks/…)."),
+     (f"'projects/{HOST}/regions/us-east4/subnetworks/x' is not a subnetwork in us-east1 "
+      "(projects/…/regions/us-east1/subnetworks/…).")),
     ("firewall_refs", ["Web"], "'Web' is not a network tag (lowercase letters, digits and hyphens)."),
 ])
 def test_google_cloud_networks_explain_what_is_wrong(field, value, message):

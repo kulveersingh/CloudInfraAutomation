@@ -42,6 +42,17 @@ class ReferenceData:
         ("eu-central-1", "Europe (Frankfurt)", True),
         ("ap-southeast-2", "Asia Pacific (Sydney)", False),
     )
+    GCP_REGIONS = (
+        ("asia-southeast1", "Singapore", False),
+        ("europe-west1", "Belgium", True),
+        ("europe-west4", "Netherlands", True),
+        ("us-central1", "Iowa", True),
+        ("us-east1", "South Carolina", True),
+        ("us-east4", "Northern Virginia", True),
+        ("us-west1", "Oregon", True),
+    )
+    GCP_NETWORK_HOST = "cloudinfra-net-host"
+    GCP_NETWORK_REGIONS = ("us-east1", "us-east4")
     ACCOUNT_PREFIXES: ClassVar[dict[str, tuple[str, ...]]] = {"pf-payments": ("1", "2", "3", "4", "5"), "pf-retail": ("61", "62", "63", "64", "65"),
                         "pf-data": ("71", "72", "73", "74", "66")}
 
@@ -52,9 +63,20 @@ class ReferenceData:
     NETWORK_REGIONS = ("us-east-1", "us-east-2")
 
     def networks(self) -> list[models.Network]:
-        accounts = [binding.account_id for binding in self.account_bindings()]
+        accounts = [binding.account_id for binding in self._aws_bindings()]
         pairs = [(account, region) for account in accounts for region in self.NETWORK_REGIONS]
-        return [self._network(account, region, index) for index, (account, region) in enumerate(pairs, start=1)]
+        projects = [binding.account_id for binding in self._gcp_bindings()]
+        shared = [(project, region) for project in projects for region in self.GCP_NETWORK_REGIONS]
+        return [*[self._network(account, region, index) for index, (account, region) in enumerate(pairs, start=1)],
+                *[self._shared_vpc(project, region, index) for index, (project, region) in enumerate(shared, start=1)]]
+
+    def _shared_vpc(self, project: str, region: str, index: int) -> models.Network:
+        host = f"projects/{self.GCP_NETWORK_HOST}"
+        return models.Network(
+            id=f"net-{project}-{region}", provider="gcp", name="Org Shared VPC", account_id=project, region=region,
+            network_ref=f"{host}/global/networks/shared-vpc", cidr=f"10.{128 + index}.0.0/16",
+            subnet_refs=[f"{host}/regions/{region}/subnetworks/{project.removeprefix('cloudinfra-')}"],
+            firewall_refs=[project], is_default=True)
 
     def _network(self, account_id: str, region: str, index: int) -> models.Network:
         digest = hashlib.sha1(f"{account_id}{region}".encode()).hexdigest()
@@ -65,6 +87,15 @@ class ReferenceData:
             firewall_refs=[f"sg-{digest[4:21]}"], is_default=True)
 
     def account_bindings(self) -> list[models.AccountBinding]:
+        return [*self._aws_bindings(), *self._gcp_bindings()]
+
+    def _gcp_bindings(self) -> list[models.AccountBinding]:
+        """One Google Cloud project per portfolio and environment, e.g. cloudinfra-payments-dev."""
+        return [models.AccountBinding(provider="gcp", environment_id=environment[0], portfolio_id=portfolio_id,
+                                      account_id=f"cloudinfra-{portfolio_id.removeprefix('pf-')}-{environment[0]}")
+                for portfolio_id in self.ACCOUNT_PREFIXES for environment in self.ENVIRONMENTS]
+
+    def _aws_bindings(self) -> list[models.AccountBinding]:
         environment_ids = [environment[0] for environment in self.ENVIRONMENTS]
         return [models.AccountBinding(provider=DEFAULT_PROVIDER, environment_id=environment_id,
                                       portfolio_id=portfolio_id,
@@ -89,8 +120,10 @@ class ReferenceData:
                 for eid, name, tier, position, approval in self.ENVIRONMENTS]
 
     def _regions(self) -> list:
-        return [models.Region(provider=DEFAULT_PROVIDER, id=rid, name=name, enabled=enabled)
-                for rid, name, enabled in self.REGIONS]
+        return [*[models.Region(provider=DEFAULT_PROVIDER, id=rid, name=name, enabled=enabled)
+                  for rid, name, enabled in self.REGIONS],
+                *[models.Region(provider="gcp", id=rid, name=name, enabled=enabled)
+                  for rid, name, enabled in self.GCP_REGIONS]]
 
 
 class ReferenceDataSeeder:

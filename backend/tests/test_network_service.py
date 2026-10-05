@@ -21,7 +21,7 @@ def resolve(service: NetworkService, payload: dict):
 
 
 def test_seed_provides_networks_for_default_regions(service):
-    assert len(service.networks()) == 30
+    assert len(service.networks()) == 60  # 30 AWS VPCs and 30 Google Cloud Shared VPC subnets
 
 
 def test_filter_by_account_and_region(service):

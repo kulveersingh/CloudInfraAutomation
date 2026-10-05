@@ -22,8 +22,9 @@ class LocalBackup(BackupPort):
     `delete_recovery_point` exists only here, to test the lock the way a super user meets it in the console; the
     platform's port has no deletion."""
 
-    def __init__(self, root, backup_account_id: str, clock: Callable[[], datetime] | None = None):
-        self._state_file = Path(root) / "aws" / STATE_FILE
+    def __init__(self, root, backup_account_id: str, clock: Callable[[], datetime] | None = None,
+                 provider: str = "aws"):
+        self._state_file = Path(root) / provider / STATE_FILE
         self._account = backup_account_id
         self._clock = clock or (lambda: datetime.now(UTC))
 

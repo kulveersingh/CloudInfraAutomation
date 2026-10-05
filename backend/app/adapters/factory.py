@@ -1,4 +1,5 @@
 from app.adapters.local_aws import LocalAws
+from app.adapters.local_gcp import LocalGcp
 from app.adapters.local_github import LocalGitHub
 from app.adapters.ports import CloudPorts, GitHubPort, ProviderPort
 from app.config import Settings
@@ -16,7 +17,7 @@ class AdapterFactory:
 
     def __init__(self):
         self._github: dict[str, type[GitHubPort]] = {"local": LocalGitHub}
-        self._clouds: dict[str, dict[str, type[ProviderPort]]] = {"aws": {"local": LocalAws}}
+        self._clouds: dict[str, dict[str, type[ProviderPort]]] = {"aws": {"local": LocalAws}, "gcp": {"local": LocalGcp}}
         self._executors: dict[str, type[ReleaseExecutor]] = {"local": LocalReleaseExecutor}
         self._landing_zone: dict[str, type[LandingZoneExecutor]] = {"local": LocalLandingZoneExecutor}
 

@@ -130,7 +130,7 @@ def test_target_account_missing(service, seeded):
 
 
 def test_regions_listed(service):
-    assert len(service.regions()) == 6
+    assert len(service.regions()) == 13  # 6 AWS and 7 Google Cloud
 
 
 def test_enable_region(service):
