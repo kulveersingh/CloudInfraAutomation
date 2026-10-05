@@ -3,9 +3,21 @@ from dataclasses import dataclass
 
 from app.config import Settings
 
+DEFAULT_BRANCH = "main"
+
 
 class RepositoryConflictError(Exception):
     """The repository exists but was not created by this provisioning request."""
+
+
+class MergeConflictError(Exception):
+    """The pull request cannot be merged or closed in its current state."""
+
+
+@dataclass(frozen=True)
+class PullRequest:
+    number: int
+    url: str
 
 
 @dataclass(frozen=True)
@@ -68,11 +80,28 @@ class GitHubPort(ABC):
         ...
 
     @abstractmethod
-    def commit_files(self, owner: str, name: str, files: dict[str, str], message: str) -> str:
+    def commit_files(self, owner: str, name: str, files: dict[str, str], message: str,
+                     branch: str = DEFAULT_BRANCH) -> str:
+        """One commit on the branch; a new branch starts from the default branch."""
+
+    @abstractmethod
+    def read_files(self, owner: str, name: str, branch: str = DEFAULT_BRANCH) -> RepositorySnapshot:
         ...
 
     @abstractmethod
-    def read_files(self, owner: str, name: str) -> RepositorySnapshot:
+    def delete_branch(self, owner: str, name: str, branch: str) -> None:
+        ...
+
+    @abstractmethod
+    def open_pull_request(self, owner: str, name: str, branch: str, title: str, body: str) -> PullRequest:
+        ...
+
+    @abstractmethod
+    def merge_pull_request(self, owner: str, name: str, number: int) -> str:
+        """Local stand-in for a person merging in GitHub (§21.8 C2); returns the new default-branch commit."""
+
+    @abstractmethod
+    def close_pull_request(self, owner: str, name: str, number: int) -> None:
         ...
 
     @abstractmethod

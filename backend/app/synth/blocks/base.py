@@ -18,6 +18,8 @@ class Block(ABC):
     logical_id_suffix: ClassVar[str] = ""
     cloudformation_types: ClassVar[tuple[str, ...]] = ()
     settings: ClassVar[tuple[Setting, ...]] = ()
+    # Whether removing the service keeps its data (a retain DeletionPolicy) or deletes it on the next deploy.
+    retained_on_removal: ClassVar[bool] = False
 
     def __init__(self, spec: ResourceSpec, request: ProjectRequest):
         self.spec = spec

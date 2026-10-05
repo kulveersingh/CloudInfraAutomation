@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from app.db import models
 from app.errors import ConflictError, NotFoundError, ValidationFailedError
 from app.networks.service import NetworkService
+from app.projects.change_repository import ProjectChangeRepository
 from app.projects.readback import ProjectSubject
 from app.projects.repository import ProjectRepository
 from app.projects.tags import TagSet
@@ -24,7 +25,7 @@ class ProjectService:
 
     def __init__(self, registry: RegistryService, synthesizer: TemplateSynthesizer, validator: RequestValidator,
                  linter: TemplateLinter, bundle: RepositoryBundle, topologies: TopologyFactory, queue: JobQueue,
-                 projects: ProjectRepository, networks: NetworkService):
+                 projects: ProjectRepository, networks: NetworkService, changes: ProjectChangeRepository):
         self._registry = registry
         self._synthesizer = synthesizer
         self._validator = validator
@@ -34,6 +35,7 @@ class ProjectService:
         self._queue = queue
         self._projects = projects
         self._networks = networks
+        self._changes = changes
 
     @classmethod
     def for_session(cls, session: Session) -> "ProjectService":
@@ -41,7 +43,7 @@ class ProjectService:
         return cls(RegistryService.for_session(session), TemplateSynthesizer(blocks, binders),
                    RequestValidator.default(blocks, binders), TemplateLinter.default(), RepositoryBundle.default(),
                    TopologyFactory.default(), JobQueue(session), ProjectRepository(session),
-                   NetworkService.for_session(session))
+                   NetworkService.for_session(session), ProjectChangeRepository(session))
 
     def preview(self, request: ProjectRequest) -> dict:
         self._validate(request)
@@ -52,25 +54,37 @@ class ProjectService:
         return {"files": self._bundle.render(request, template), "tags": TagSet(request, cost_center).as_dict(),
                 "targets": self._targets(request), "lint": self._linter.lint(template)}
 
-    def create(self, request: ProjectRequest, idempotency_key: str) -> models.Job:
+    def check(self, request: ProjectRequest) -> None:
+        """Everything that must hold before the platform provisions or changes a project."""
         self._validate(request)
         self._targets(request)
         self._reject_lint_findings(self._synthesizer.synthesize(request))
+
+    def create(self, request: ProjectRequest, idempotency_key: str) -> models.Job:
+        self.check(request)
         if self._queue.by_request_id(idempotency_key) is None:
             self._register(request)
         return self._queue.enqueue(request.project_name, idempotency_key, request.model_dump(mode="json"))
 
     def projects(self) -> list[dict]:
         return [{"name": project.name, "portfolio_id": project.portfolio_id, "product_id": project.product_id,
-                 "resilience_mode": project.resilience_mode, "status": project.status}
+                 "resilience_mode": project.resilience_mode, "status": project.status, "revision": project.revision,
+                 "open_change": self._open_change(project.name)}
                 for project in self._projects.all()]
+
+    def _open_change(self, project_name: str) -> dict | None:
+        change = self._changes.active(project_name)
+        if change is None:
+            return None
+        return {"id": str(change.id), "revision": change.revision, "state": change.state,
+                "pull_request": pull_request_json(change)}
 
     def repository_subject(self, project_name: str) -> ProjectSubject:
         """The project to read back from its infrastructure repository (§21)."""
         project = require(self._projects.get(project_name), NotFoundError(f"Unknown project '{project_name}'."))
-        return ProjectSubject(project, self._render)
+        return ProjectSubject(project, self.render)
 
-    def _render(self, request: ProjectRequest) -> dict[str, str]:
+    def render(self, request: ProjectRequest) -> dict[str, str]:
         return self._bundle.render(request, self._synthesizer.synthesize(request))
 
     def _validate(self, request: ProjectRequest) -> None:
@@ -108,3 +122,9 @@ class ProjectService:
             name=request.project_name, portfolio_id=request.ownership.portfolio_id,
             product_id=request.ownership.product_id, resilience_mode=request.resilience.mode,
             status=ProjectStatus.PROVISIONING, request=request.model_dump(mode="json")))
+
+
+def pull_request_json(change: models.ProjectChange) -> dict | None:
+    if change.pull_request_number is None:
+        return None
+    return {"number": change.pull_request_number, "url": change.pull_request_url}

@@ -7,6 +7,7 @@ from app.adapters.factory import AdapterFactory
 from app.config import Settings
 from app.landing_zone.service import LandingZoneService
 from app.networks.service import NetworkService
+from app.projects.changes import ProjectChangeService
 from app.projects.service import ProjectService
 from app.provisioning.queue import JobQueue
 from app.readback.manifest import ManifestSigner
@@ -29,6 +30,7 @@ class ServiceContainer:
         self.landing_zone = LandingZoneService.for_session(session, github, adapters.landing_zone_executor(settings),
                                                            settings.github_owner, signer)
         self.read_back = RepositoryReader.default(github, settings.github_owner, signer)
+        self.project_changes = ProjectChangeService.for_session(session, github, settings.github_owner)
 
     @classmethod
     def provide(cls, request: Request) -> Iterator["ServiceContainer"]:

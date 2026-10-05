@@ -3352,6 +3352,10 @@ Removing a service deletes its CloudFormation resources on the next deploy unles
 6. **Merge (decision C2):** reviewers merge the PR in GitHub (CODEOWNERS and branch rules apply). The `pull_request` webhook (`closed`, merged) marks the change `merged` and updates the project: `request`, `revision`, `commit_sha` (the merge commit). Closing without merging marks it `closed`. Locally, `POST /v1/projects/{name}/changes/{id}:merge` and `:close` stand in for GitHub (like the release simulator, §8).
 7. After the merge, read-back returns the new revision; the manifest on main says revision *n*, so `RecordCheck` passes.
 
+**Implementation notes.**
+- Existing environments run an `outputs:{env}:{region}` step that re-reads their bootstrap outputs and is never undone; only environments the change adds get a `bootstrap:` step that a failure removes.
+- GitHub environment variables (for example a new VPC choice) are updated when the change job runs, before the PR is merged, because the deploy workflow reads them as soon as the merge lands on main. A closed change leaves those variables in place; the next change or the reconciler (§5.5.4) brings them back in line.
+
 #### Platform changes
 
 | Area | Change |

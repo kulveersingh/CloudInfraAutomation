@@ -92,7 +92,29 @@ class Project(Base):
     status: Mapped[str] = mapped_column(String(32))
     request: Mapped[dict] = mapped_column(JsonDocument)
     commit_sha: Mapped[str | None] = mapped_column(String(64))
+    revision: Mapped[int] = mapped_column(default=1, server_default="1")
     created_at: Mapped[datetime] = mapped_column(default=utc_now)
+
+
+class ProjectChange(Base):
+    """A "Change infrastructure" request: the new request, its pull request and where it is (§21.8)."""
+
+    __tablename__ = "project_changes"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    project_name: Mapped[str] = mapped_column(ForeignKey("projects.name"), index=True)
+    revision: Mapped[int]
+    request: Mapped[dict] = mapped_column(JsonDocument)
+    summary: Mapped[dict] = mapped_column(JsonDocument)
+    base_commit: Mapped[str] = mapped_column(String(64))
+    branch: Mapped[str] = mapped_column(String(128))
+    state: Mapped[str] = mapped_column(String(16))
+    pull_request_number: Mapped[int | None]
+    pull_request_url: Mapped[str | None] = mapped_column(String(512))
+    merge_commit: Mapped[str | None] = mapped_column(String(64))
+    created_by: Mapped[str] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now)
 
 
 class Job(Base):
@@ -102,6 +124,8 @@ class Job(Base):
     project_name: Mapped[str] = mapped_column(String(64))
     request_id: Mapped[str] = mapped_column(String(128), unique=True)
     payload: Mapped[dict] = mapped_column(JsonDocument)
+    kind: Mapped[str] = mapped_column(String(16), default="provision", server_default="provision")
+    change_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("project_changes.id"))
     state: Mapped[str] = mapped_column(String(32))
     error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(default=utc_now)

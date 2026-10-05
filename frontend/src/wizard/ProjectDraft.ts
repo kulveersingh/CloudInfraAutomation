@@ -42,6 +42,19 @@ export class ProjectDraft {
     });
   }
 
+  /** A project read back from its repository (§21.8): settings and CloudFormation properties come apart again. */
+  static fromRequest(request: ProjectRequest): ProjectDraft {
+    const initial = ProjectDraft.initial().values;
+    const { ownership, resilience, network } = request;
+    return new ProjectDraft({
+      ...initial, name: request.project_name, portfolioId: ownership.portfolio_id, productId: ownership.product_id,
+      classification: ownership.data_classification, mode: resilience.mode, primaryRegion: resilience.primary_region,
+      secondaryRegion: resilience.secondary_region ?? initial.secondaryRegion, environments: [...request.environments],
+      resources: request.resources.map(fromResourceRequest), connections: [...request.connections],
+      attachCompute: network.attach_compute, networkSelections: { ...network.selections },
+    });
+  }
+
   withName(name: string) { return this.with({ name }); }
 
   withOwnership(portfolioId: string, productId: string) { return this.with({ portfolioId, productId }); }
@@ -166,4 +179,9 @@ function toResourceRequest(resource: DraftResource): ResourceRequest {
   const properties = Object.keys(resource.properties).length > 0 ? { properties: resource.properties } : {};
   const config = { ...resource.settings, ...properties };
   return Object.keys(config).length > 0 ? { ...base, config } : base;
+}
+
+function fromResourceRequest({ id, type, config = {} }: ResourceRequest): DraftResource {
+  const { properties, ...settings } = config as { properties?: Record<string, unknown> } & Record<string, SettingValue>;
+  return { id, type, properties: properties ?? {}, settings };
 }

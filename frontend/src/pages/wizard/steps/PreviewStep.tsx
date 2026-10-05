@@ -30,9 +30,7 @@ export function PreviewStep({ draft, newKey, onCreated }: PreviewStepProps) {
   return (
     <>
       <h2>Preview</h2>
-      {problems.length > 0 && (
-        <div className="notice warn"><b>Fix before continuing:</b><ul>{problems.map((p) => <li key={p}>{p}</li>)}</ul></div>
-      )}
+      <DraftProblems problems={problems} />
       <ErrorAlert message={error} />
       <div className="row">
         <button className="btn" disabled={problems.length > 0} onClick={preview}>Generate preview</button>
@@ -43,7 +41,12 @@ export function PreviewStep({ draft, newKey, onCreated }: PreviewStepProps) {
   );
 }
 
-function PreviewDetails({ result }: { result: PreviewResult }) {
+export function DraftProblems({ problems }: { problems: string[] }) {
+  if (problems.length === 0) return null;
+  return <div className="notice warn"><b>Fix before continuing:</b><ul>{problems.map((p) => <li key={p}>{p}</li>)}</ul></div>;
+}
+
+export function PreviewDetails({ result }: { result: PreviewResult }) {
   return (
     <div className="stack">
       <span className="label">Target accounts</span>

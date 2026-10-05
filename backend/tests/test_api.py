@@ -154,7 +154,8 @@ def test_projects_list(client):
     create(client, request_dict())
     assert client.get("/v1/projects").json() == [{
         "name": "invoice-ingest", "portfolio_id": "pf-payments", "product_id": "pr-invoicing",
-        "resilience_mode": "single", "status": "provisioning"}]
+        "resilience_mode": "single", "status": "provisioning", "revision": 1,
+        "open_change": None}]
 
 
 def test_job_has_steps_list(client):

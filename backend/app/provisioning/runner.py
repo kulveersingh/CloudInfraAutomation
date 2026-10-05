@@ -52,24 +52,32 @@ class JobRunner:
 
     def run(self, job: models.Job) -> None:
         request = ProjectRequest.model_validate(job.payload)
-        context = self._context(job, request)
+        context = self.context(job.request_id, request, REVISION)
         outcome = Saga(self._planner.steps_for(context), partial(self._queue.record_step, job)).run(context)
         self._queue.finish(job, outcome.state, outcome.error)
         self._projects.set_status(request.project_name, ProjectStatus.for_job_state(outcome.state), context.commit_sha)
 
-    def _context(self, job: models.Job, request: ProjectRequest) -> ProvisioningContext:
+    @property
+    def queue(self) -> JobQueue:
+        return self._queue
+
+    @property
+    def projects(self) -> ProjectRepository:
+        return self._projects
+
+    def context(self, request_id: str, request: ProjectRequest, revision: int) -> ProvisioningContext:
         ownership = request.ownership
         cost_center = self._registry.resolve_cost_center(ownership.portfolio_id, ownership.product_id,
                                                          request.project_name)
         accounts = self._registry.target_accounts(ownership.portfolio_id, request.environments)
         topology = self._topologies.for_resilience(request.resilience)
         return ProvisioningContext(
-            request_id=job.request_id, request=request, owner=self._owner,
-            files=self._files(request), accounts=accounts,
+            request_id=request_id, request=request, owner=self._owner,
+            files=self._files(request, revision), accounts=accounts,
             topology=topology, tags=TagSet(request, cost_center).as_dict(), github=self._github, aws=self._aws,
             networks=self._networks.resolve(request, topology, accounts))
 
-    def _files(self, request: ProjectRequest) -> dict[str, str]:
+    def _files(self, request: ProjectRequest, revision: int) -> dict[str, str]:
         files = self._bundle.render(request, self._synthesizer.synthesize(request))
-        return self._sealer.seal(kind=KIND, id=request.project_name, revision=REVISION, generator=GENERATOR,
+        return self._sealer.seal(kind=KIND, id=request.project_name, revision=revision, generator=GENERATOR,
                                  input=INPUT_FILE, files=files)

@@ -1,6 +1,6 @@
 import type { StepProps } from "./StepProps";
 
-export function EnvironmentsStep({ draft, onChange, reference }: StepProps) {
+export function EnvironmentsStep({ draft, onChange, reference, change }: StepProps) {
   return (
     <>
       <h2>Environments</h2>
@@ -9,6 +9,7 @@ export function EnvironmentsStep({ draft, onChange, reference }: StepProps) {
         {reference.environments.map((environment) => (
           <li key={environment.id} className="row">
             <input id={`env-${environment.id}`} type="checkbox" checked={draft.values.environments.includes(environment.id)}
+                   disabled={change?.environments.includes(environment.id)}
                    onChange={(event) => onChange(draft.withEnvironment(environment.id, event.target.checked))} />
             <label htmlFor={`env-${environment.id}`}>{environment.name}</label>
             <span className={`chip ${environment.requires_approval ? "warn" : "idle"}`}>

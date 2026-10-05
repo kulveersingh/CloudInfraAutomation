@@ -207,3 +207,19 @@ def test_unknown_pull_request(local_github):
     with_main(local_github)
     with pytest.raises(KeyError):
         local_github.pull_request("acme", "demo-infra", 7)
+
+
+def test_deleting_a_missing_branch_does_nothing(local_github):
+    main = with_main(local_github)
+    local_github.delete_branch("acme", "demo-infra", "gone")
+    assert local_github.read_files("acme", "demo-infra").commit_sha == main
+
+
+def test_merging_one_pull_request_leaves_the_others_open(local_github):
+    with_main(local_github)
+    local_github.commit_files("acme", "demo-infra", {"a.txt": "x"}, "one", branch="one")
+    local_github.commit_files("acme", "demo-infra", {"a.txt": "y"}, "two", branch="two")
+    local_github.open_pull_request("acme", "demo-infra", "one", "One", "Body")
+    local_github.open_pull_request("acme", "demo-infra", "two", "Two", "Body")
+    local_github.merge_pull_request("acme", "demo-infra", 2)
+    assert local_github.pull_request("acme", "demo-infra", 1)["state"] == "open"

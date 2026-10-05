@@ -67,6 +67,7 @@ class DynamoDbTableBlock(Block, AccessTarget):
     multi_region = "global"
     logical_id_suffix = "Table"
     cloudformation_types = ("AWS::DynamoDB::Table", "AWS::DynamoDB::GlobalTable")
+    retained_on_removal = True
     settings = (
         TextSetting("partition_key", "Partition key", DEFAULT_PARTITION_KEY, KEY_PATTERN, KEY_RULE),
         TextSetting("sort_key", "Sort key", None, KEY_PATTERN, KEY_RULE, optional=True),

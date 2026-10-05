@@ -1,6 +1,7 @@
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import type { ProjectSummary } from "../api/types";
 import { fakeApi, PROJECTS } from "../test/fakes";
 import { renderWithApi } from "../test/render";
 import { ProjectsPage } from "./ProjectsPage";
@@ -28,8 +29,9 @@ describe("ProjectsPage", () => {
   });
 
   describe("changes", () => {
-    const OPEN = { ...PROJECTS[0], open_change: { id: "chg-1", revision: 2, state: "open" as const,
-      pull_request: { number: 1, url: "https://github.com/acme-platform/invoice-ingest-infra/pull/1" } } };
+    const OPEN_CHANGE = { id: "chg-1", revision: 2, state: "open" as const,
+      pull_request: { number: 1, url: "https://github.com/acme-platform/invoice-ingest-infra/pull/1" } };
+    const OPEN: ProjectSummary = { ...PROJECTS[0], open_change: OPEN_CHANGE };
     const withProjects = (projects = [OPEN]) => fakeApi({ projects: vi.fn().mockResolvedValue(projects) });
 
     it("offers Change infrastructure for active projects", async () => {
@@ -60,7 +62,7 @@ describe("ProjectsPage", () => {
 
     it("shows a queued change without a link", async () => {
       renderWithApi(<ProjectsPage onNewProject={() => {}} onChangeProject={() => {}} />,
-        withProjects([{ ...OPEN, open_change: { ...OPEN.open_change, state: "queued", pull_request: null } }]));
+        withProjects([{ ...OPEN, open_change: { ...OPEN_CHANGE, state: "queued", pull_request: null } }]));
       expect(await screen.findByText("Revision 2 · queued")).toBeInTheDocument();
     });
 

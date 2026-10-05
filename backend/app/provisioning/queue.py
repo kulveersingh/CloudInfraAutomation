@@ -20,18 +20,23 @@ class JobQueue:
     def __init__(self, session: Session):
         self._session = session
 
-    def enqueue(self, project_name: str, request_id: str, payload: dict) -> models.Job:
+    def enqueue(self, project_name: str, request_id: str, payload: dict, kind: str = "provision",
+                change_id: uuid.UUID | None = None) -> models.Job:
         existing = self.by_request_id(request_id)
         if existing is not None:
             self._ensure_same_request(existing, project_name, payload)
             return existing
-        job = models.Job(project_name=project_name, request_id=request_id, payload=payload, state=JobState.QUEUED)
+        job = models.Job(project_name=project_name, request_id=request_id, payload=payload, kind=kind,
+                         change_id=change_id, state=JobState.QUEUED)
         self._session.add(job)
         self._session.commit()
         return job
 
     def by_request_id(self, request_id: str) -> models.Job | None:
         return self._session.scalar(select(models.Job).where(models.Job.request_id == request_id))
+
+    def for_change(self, change_id: uuid.UUID) -> models.Job | None:
+        return self._session.scalar(select(models.Job).where(models.Job.change_id == change_id))
 
     def get(self, job_id: uuid.UUID) -> models.Job | None:
         return self._session.get(models.Job, job_id)

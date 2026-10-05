@@ -16,6 +16,7 @@ class S3BucketBlock(Block, AccessTarget, NotificationSource):
     logical_id_suffix = "Bucket"
     cloudformation_types = ("AWS::S3::Bucket",)
     notification_principal = "s3.amazonaws.com"
+    retained_on_removal = True
 
     OBJECT_ACTIONS = AccessActions(read=["s3:GetObject"], write=["s3:PutObject", "s3:AbortMultipartUpload"])
     LIST_ACTIONS = ("s3:ListBucket",)

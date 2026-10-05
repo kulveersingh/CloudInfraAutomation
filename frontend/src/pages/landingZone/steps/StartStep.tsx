@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useApi } from "../../../api/ApiContext";
 import type { LandingZoneReadBack, TemplateSummary } from "../../../api/types";
 import { ErrorAlert } from "../../../components/Notices";
+import { RefusedRepository } from "../../../components/RefusedRepository";
 import { useLoad } from "../../../hooks/useLoad";
 import { plural } from "../../../landingZone/plural";
 import type { StepProps } from "./StepProps";
@@ -40,7 +41,7 @@ export function StartStep({ draft, onTemplate, onRepository }: StepProps) {
       <p className="sub">Start from an industry template, or from the platform's recommendations. You can change every
         answer, environment, OU and control pack afterwards.</p>
       <ErrorAlert message={templates.error ?? error} />
-      {refused && <RefusedRepository readBack={refused} />}
+      {refused && <RefusedRepository title="The landing zone repository can't be loaded" readBack={refused} />}
       <div className="choice templates">
         <button type="button" className="opt" onClick={editCurrent}>
           <b>Edit the current landing zone</b>
@@ -60,25 +61,6 @@ export function StartStep({ draft, onTemplate, onRepository }: StepProps) {
 }
 
 export const LANDING_ZONE_REPOSITORY = "landing-zone-infra";
-
-function RefusedRepository({ readBack }: { readBack: LandingZoneReadBack }) {
-  return (
-    <section className="notice crit" aria-labelledby="refused-repository">
-      <b id="refused-repository">The landing zone repository can't be loaded</b>
-      {readBack.findings.map((finding) => (
-        <div key={finding.check}>
-          <p>{finding.message}</p>
-          {finding.files.map((file) => (
-            <div key={file.path}>
-              <code>{file.path}</code>
-              {file.diff && <pre className="file">{file.diff}</pre>}
-            </div>
-          ))}
-        </div>
-      ))}
-    </section>
-  );
-}
 
 function TemplateCard({ template, chosen, onChoose }: { template: TemplateSummary; chosen: boolean; onChoose: () => void }) {
   const controls = Object.values(template.control_counts).reduce((total, count) => total + count, 0);

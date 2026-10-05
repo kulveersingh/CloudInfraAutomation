@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
-from app.adapters.ports import AwsPort, BootstrapOutputs, BootstrapRequest, GitHubPort
+from app.adapters.ports import AwsPort, BootstrapOutputs, BootstrapRequest, GitHubPort, PullRequest
 from app.projects.readback import KIND, repository_name
 from app.provisioning.topology import RegionTopology
 from app.readback.subjects import ownership_properties
@@ -27,6 +27,11 @@ class ProvisioningContext:
     bootstrap_outputs: dict[tuple[str, str], BootstrapOutputs] = field(default_factory=dict)
     repository_created: bool = False
     commit_sha: str | None = None
+    # A change (§21.8) commits to its own branch and opens a pull request instead of committing to main.
+    branch: str | None = None
+    title: str = COMMIT_MESSAGE
+    body: str = ""
+    pull_request: PullRequest | None = None
 
     @property
     def repository_name(self) -> str:
@@ -150,6 +155,38 @@ class CommitFilesStep(ProvisioningStep):
                                                          COMMIT_MESSAGE)
 
 
+class ExistingBootstrapStep(BootstrapAccountStep):
+    """Reads the outputs of an environment the project already has; a failed change must not remove it."""
+
+    def __init__(self, environment: str, region: str):
+        super().__init__(environment, region)
+        self.name = f"outputs:{environment}:{region}"
+
+    def compensate(self, context):
+        return None
+
+
+class CommitBranchStep(ProvisioningStep):
+    name = "commit_branch"
+
+    def execute(self, context):
+        context.commit_sha = context.github.commit_files(context.owner, context.repository_name, context.files,
+                                                         context.title, branch=context.branch)
+
+    def compensate(self, context):
+        context.github.delete_branch(context.owner, context.repository_name, context.branch)
+
+
+class OpenPullRequestStep(ProvisioningStep):
+    """The last step of a change, so nothing after it can fail and require closing the pull request again."""
+
+    name = "open_pull_request"
+
+    def execute(self, context):
+        context.pull_request = context.github.open_pull_request(context.owner, context.repository_name,
+                                                                context.branch, context.title, context.body)
+
+
 class ProvisioningPlanner:
     """Orders the steps: repository, AWS trust in every account/region, GitHub settings, then one commit."""
 
@@ -157,3 +194,16 @@ class ProvisioningPlanner:
         bootstrap = [BootstrapAccountStep(environment, region) for environment in context.request.environments
                      for region in context.topology.regions_for(environment)]
         return [CreateRepositoryStep(), *bootstrap, ConfigureEnvironmentsStep(), CommitFilesStep()]
+
+
+class ChangePlanner:
+    """A change: outputs of existing environments, bootstrap of added ones, GitHub settings, branch, pull request."""
+
+    def steps_for(self, context: ProvisioningContext, current: ProjectRequest) -> list[ProvisioningStep]:
+        existing = {(environment, region) for environment in current.environments
+                    for region in context.topology.regions_for(environment)}
+        environments = [ExistingBootstrapStep(environment, region) if (environment, region) in existing
+                        else BootstrapAccountStep(environment, region)
+                        for environment in context.request.environments
+                        for region in context.topology.regions_for(environment)]
+        return [*environments, ConfigureEnvironmentsStep(), CommitBranchStep(), OpenPullRequestStep()]

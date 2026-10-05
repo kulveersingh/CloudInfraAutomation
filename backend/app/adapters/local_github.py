@@ -5,10 +5,18 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from app.adapters.ports import GitHubPort, RepositoryConflictError, RepositorySnapshot
+from app.adapters.ports import (
+    DEFAULT_BRANCH,
+    GitHubPort,
+    MergeConflictError,
+    PullRequest,
+    RepositoryConflictError,
+    RepositorySnapshot,
+)
 from app.config import Settings
 
-BRANCH = "main"
+BRANCH = DEFAULT_BRANCH
+PULL_REQUEST_URL = "https://github.com/{owner}/{name}/pull/{number}"
 MARKER_FILE = "cloudinfra-marker"
 SETTINGS_FILE = "cloudinfra-settings.json"
 FILE_MODE = "100644"
@@ -39,7 +47,7 @@ class LocalGitHub(GitHubPort):
         path.parent.mkdir(parents=True, exist_ok=True)
         subprocess.run(["git", "init", "--quiet", "--bare", "--initial-branch", BRANCH, str(path)], check=True)
         (path / MARKER_FILE).write_text(marker)
-        self._write_settings(path, {"repository": {}, "environments": {}, "properties": {}})
+        self._write_settings(path, {"repository": {}, "environments": {}, "properties": {}, "pull_requests": []})
         return True
 
     def delete_repository(self, owner: str, name: str) -> None:
@@ -60,13 +68,60 @@ class LocalGitHub(GitHubPort):
     def environment(self, owner: str, name: str, environment: str) -> dict[str, str]:
         return self._read_settings(self._existing(owner, name))["environments"][environment]
 
-    def commit_files(self, owner: str, name: str, files: dict[str, str], message: str) -> str:
+    def commit_files(self, owner: str, name: str, files: dict[str, str], message: str, branch: str = BRANCH) -> str:
         repository = GitPlumbing(self._existing(owner, name))
         with tempfile.TemporaryDirectory() as work:
-            return repository.commit(files, message, Path(work) / "index")
+            return repository.commit(files, message, Path(work) / "index", branch)
 
-    def read_files(self, owner: str, name: str) -> RepositorySnapshot:
-        return GitPlumbing(self._existing(owner, name)).snapshot()
+    def read_files(self, owner: str, name: str, branch: str = BRANCH) -> RepositorySnapshot:
+        return GitPlumbing(self._existing(owner, name)).snapshot(branch)
+
+    def delete_branch(self, owner: str, name: str, branch: str) -> None:
+        GitPlumbing(self._existing(owner, name)).delete_branch(branch)
+
+    def open_pull_request(self, owner: str, name: str, branch: str, title: str, body: str) -> PullRequest:
+        path = self._existing(owner, name)
+        settings = self._read_settings(path)
+        pull_requests = settings.setdefault("pull_requests", [])
+        number = len(pull_requests) + 1
+        pull_requests.append({"number": number, "branch": branch, "title": title, "body": body, "state": "open",
+                              "merge_commit": None})
+        self._write_settings(path, settings)
+        return PullRequest(number=number, url=PULL_REQUEST_URL.format(owner=owner, name=name, number=number))
+
+    def pull_request(self, owner: str, name: str, number: int) -> dict:
+        pull_requests = self._read_settings(self._existing(owner, name)).get("pull_requests", [])
+        found = next((pull_request for pull_request in pull_requests if pull_request["number"] == number), None)
+        if found is None:
+            raise KeyError(f"Pull request #{number} does not exist in {owner}/{name}.")
+        return found
+
+    def merge_pull_request(self, owner: str, name: str, number: int) -> str:
+        pull_request = self._open(owner, name, number)
+        repository = GitPlumbing(self._existing(owner, name))
+        head = repository.fast_forward(pull_request["branch"])
+        repository.delete_branch(pull_request["branch"])
+        self._set_pull_request(owner, name, number, state="merged", merge_commit=head)
+        return head
+
+    def close_pull_request(self, owner: str, name: str, number: int) -> None:
+        pull_request = self._open(owner, name, number)
+        GitPlumbing(self._existing(owner, name)).delete_branch(pull_request["branch"])
+        self._set_pull_request(owner, name, number, state="closed")
+
+    def _open(self, owner: str, name: str, number: int) -> dict:
+        pull_request = self.pull_request(owner, name, number)
+        if pull_request["state"] != "open":
+            raise MergeConflictError(f"Pull request #{number} is {pull_request['state']}.")
+        return pull_request
+
+    def _set_pull_request(self, owner: str, name: str, number: int, **changes) -> None:
+        path = self._existing(owner, name)
+        settings = self._read_settings(path)
+        for pull_request in settings["pull_requests"]:
+            if pull_request["number"] == number:
+                pull_request.update(changes)
+        self._write_settings(path, settings)
 
     def set_repository_properties(self, owner: str, name: str, properties: dict[str, str]) -> None:
         self._update_settings(owner, name, "properties", dict(properties))
@@ -104,9 +159,9 @@ class GitPlumbing:
     def __init__(self, repository: Path):
         self._repository = repository
 
-    def commit(self, files: dict[str, str], message: str, index_file: Path) -> str:
+    def commit(self, files: dict[str, str], message: str, index_file: Path, branch: str = BRANCH) -> str:
         environment = {**os.environ, **COMMITTER, "GIT_INDEX_FILE": str(index_file)}
-        parents = self._parents()
+        parents = self._parents(branch) or self._parents(BRANCH)
         for parent in parents:
             self._git(environment, "read-tree", parent)
         for path, content in sorted(files.items()):
@@ -115,11 +170,25 @@ class GitPlumbing:
         tree = self._git(environment, "write-tree")
         parent_arguments = [argument for parent in parents for argument in ("-p", parent)]
         commit = self._git(environment, "commit-tree", tree, *parent_arguments, "-m", message)
-        self._git(environment, "update-ref", f"refs/heads/{BRANCH}", commit)
+        self._git(environment, "update-ref", f"refs/heads/{branch}", commit)
         return commit
 
-    def snapshot(self) -> RepositorySnapshot:
-        parents = self._parents()
+    def delete_branch(self, branch: str) -> None:
+        if self._parents(branch):
+            self._git(dict(os.environ), "update-ref", "-d", f"refs/heads/{branch}")
+
+    def fast_forward(self, branch: str) -> str:
+        """Moves the default branch to the branch head; refuses when the default branch moved since."""
+        [main], [head] = self._parents(BRANCH), self._parents(branch)
+        ancestor = subprocess.run(["git", "--git-dir", str(self._repository), "merge-base", "--is-ancestor", main,
+                                   head], check=False).returncode == 0
+        if not ancestor:
+            raise MergeConflictError(f"{BRANCH} has commits that {branch} does not; the change must be redone.")
+        self._git(dict(os.environ), "update-ref", f"refs/heads/{BRANCH}", head)
+        return head
+
+    def snapshot(self, branch: str = BRANCH) -> RepositorySnapshot:
+        parents = self._parents(branch)
         if not parents:
             return RepositorySnapshot(commit_sha=None, files={})
         environment = dict(os.environ)
@@ -127,9 +196,9 @@ class GitPlumbing:
         return RepositorySnapshot(commit_sha=parents[0], files={
             path: self._git(environment, "show", f"{parents[0]}:{path}", strip=False) for path in paths if path})
 
-    def _parents(self) -> list[str]:
+    def _parents(self, branch: str = BRANCH) -> list[str]:
         head = subprocess.run(["git", "--git-dir", str(self._repository), "rev-parse", "--verify", "--quiet",
-                               f"refs/heads/{BRANCH}"], capture_output=True, text=True,
+                               f"refs/heads/{branch}"], capture_output=True, text=True,
                               check=False).stdout.strip()
         return [head] if head else []
 

@@ -5,9 +5,10 @@ import { AdminPage } from "./pages/admin/AdminPage";
 import { LandingZonePage } from "./pages/landingZone/LandingZonePage";
 import { ProjectsPage } from "./pages/ProjectsPage";
 import { ReleaseConsolePage } from "./pages/releases/ReleaseConsolePage";
+import { ChangeProjectPage } from "./pages/wizard/ChangeProjectPage";
 import { NewProjectPage } from "./pages/wizard/NewProjectPage";
 
-type Page = "projects" | "new" | "releases" | "admin" | "landing-zone";
+type Page = "projects" | "new" | "change" | "releases" | "admin" | "landing-zone";
 
 /** Local identities until SSO is connected; the API receives them as X-Actor / X-Roles. */
 export const IDENTITIES: Identity[] = [
@@ -26,9 +27,12 @@ const NAVIGATION: Array<{ page: Page; label: string }> = [
   { page: "landing-zone", label: "Landing zone" },
 ];
 
-const PAGES: Record<Page, (go: (page: Page) => void, identity: Identity) => ReactNode> = {
-  projects: (go) => <ProjectsPage onNewProject={() => go("new")} />,
+type Go = (page: Page, project?: string) => void;
+
+const PAGES: Record<Page, (go: Go, identity: Identity, project: string) => ReactNode> = {
+  projects: (go) => <ProjectsPage onNewProject={() => go("new")} onChangeProject={(name) => go("change", name)} />,
   new: () => <NewProjectPage />,
+  change: (_, __, project) => <ChangeProjectPage key={project} projectName={project} />,
   releases: (_, identity) => <ReleaseConsolePage key={identity.name} identity={identity} />,
   admin: () => <AdminPage />,
   "landing-zone": (_, identity) => <LandingZonePage key={identity.name} identity={identity} />,
@@ -37,6 +41,11 @@ const PAGES: Record<Page, (go: (page: Page) => void, identity: Identity) => Reac
 export function App() {
   const api = useApi();
   const [page, setPage] = useState<Page>("projects");
+  const [project, setProject] = useState("");
+  const go: Go = (next, name = "") => {
+    setProject(name);
+    setPage(next);
+  };
   const [identity, setIdentity] = useState(() => {
     api.setActor(DEFAULT_IDENTITY);
     return DEFAULT_IDENTITY;
@@ -66,7 +75,7 @@ export function App() {
           </select>
         </div>
       </aside>
-      <main className="content">{PAGES[page](setPage, identity)}</main>
+      <main className="content">{PAGES[page](go, identity, project)}</main>
     </div>
   );
 }

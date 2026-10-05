@@ -7,7 +7,8 @@ const MODES: Array<{ mode: ResilienceMode; label: string; description: string }>
   { mode: "ha", label: "HA pair · active / active", description: "Both regions active behind health checks." },
 ];
 
-export function ResilienceStep({ draft, onChange, reference }: StepProps) {
+export function ResilienceStep({ draft, onChange, reference, change }: StepProps) {
+  const locked = change !== undefined;
   const { mode, primaryRegion, secondaryRegion } = draft.values;
   const regions = reference.regions.filter((region) => region.enabled);
   return (
@@ -16,7 +17,7 @@ export function ResilienceStep({ draft, onChange, reference }: StepProps) {
       <div className="choice" role="radiogroup" aria-label="Resilience mode">
         {MODES.map((option) => (
           <label key={option.mode} className={`opt ${option.mode === mode ? "on" : ""}`}>
-            <input type="radio" name="mode" checked={option.mode === mode} onChange={() => onChange(draft.withMode(option.mode))} />
+            <input type="radio" name="mode" checked={option.mode === mode} disabled={locked} onChange={() => onChange(draft.withMode(option.mode))} />
             <b>{option.label}</b>
             <span className="hint">{option.description}</span>
           </label>
@@ -25,13 +26,13 @@ export function ResilienceStep({ draft, onChange, reference }: StepProps) {
       <div className="grid3">
         <div className="field">
           <label htmlFor="primary-region">Primary region</label>
-          <select id="primary-region" value={primaryRegion} onChange={(event) => onChange(draft.withPrimary(event.target.value))}>
+          <select id="primary-region" value={primaryRegion} disabled={locked} onChange={(event) => onChange(draft.withPrimary(event.target.value))}>
             {regions.map((region) => <option key={region.id} value={region.id}>{region.id} · {region.name}</option>)}
           </select>
         </div>
         <div className="field">
           <label htmlFor="secondary-region">Secondary region</label>
-          <select id="secondary-region" value={secondaryRegion} disabled={mode === "single"}
+          <select id="secondary-region" value={secondaryRegion} disabled={locked || mode === "single"}
                   onChange={(event) => onChange(draft.withSecondary(event.target.value))}>
             {regions.map((region) => <option key={region.id} value={region.id}>{region.id} · {region.name}</option>)}
           </select>

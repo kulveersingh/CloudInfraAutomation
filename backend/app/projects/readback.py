@@ -9,7 +9,7 @@ from app.synth.synthesizer import ENGINE_VERSION, GENERATOR_NAME
 INPUT_FILE = "infra.json"
 KIND = "project"
 GENERATOR = Generator(name=GENERATOR_NAME, version=ENGINE_VERSION)
-# Projects are generated once today; "Change infrastructure" (§21.7 RB5) will add revisions.
+# A project starts at revision 1; each merged change (§21.8) adds one.
 REVISION = 1
 
 
@@ -33,7 +33,7 @@ class ProjectSubject(ReadBackSubject):
 
     @property
     def revision(self):
-        return REVISION
+        return self._project.revision
 
     @property
     def repository(self):

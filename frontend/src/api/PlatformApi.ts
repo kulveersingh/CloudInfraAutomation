@@ -1,4 +1,5 @@
 import type {
+  ChangeRequestBody, ProjectChange, ProjectChangePreview, ProjectReadBack,
   CatalogEntry, CloudFormationType, CostCenterChange, CostCenterSettings, EnvironmentInfo, Identity, JobStatus,
   ControlPackCatalog, IndustryTemplate, LandingZoneDesign, LandingZoneDesignDetail, LandingZoneProposal, LandingZoneReadBack,
   LandingZoneRequest,
@@ -133,6 +134,30 @@ export class PlatformApi implements PlatformApiPort {
   projects() { return this.send<ProjectSummary[]>("GET", "/v1/projects"); }
 
   job(jobId: string) { return this.send<JobStatus>("GET", `/v1/jobs/${jobId}`); }
+
+  projectReadBack(projectName: string) {
+    return this.send<ProjectReadBack>("GET", `/v1/projects/${projectName}/repository:read-back`);
+  }
+
+  previewChange(projectName: string, body: ChangeRequestBody) {
+    return this.send<ProjectChangePreview>("POST", `/v1/projects/${projectName}/changes:preview`, body);
+  }
+
+  createChange(projectName: string, body: ChangeRequestBody) {
+    return this.send<ProjectChange>("POST", `/v1/projects/${projectName}/changes`, body);
+  }
+
+  projectChange(projectName: string, changeId: string) {
+    return this.send<ProjectChange>("GET", `/v1/projects/${projectName}/changes/${changeId}`);
+  }
+
+  mergeChange(projectName: string, changeId: string) {
+    return this.send<ProjectChange>("POST", `/v1/projects/${projectName}/changes/${changeId}:merge`);
+  }
+
+  closeChange(projectName: string, changeId: string) {
+    return this.send<ProjectChange>("POST", `/v1/projects/${projectName}/changes/${changeId}:close`);
+  }
 
   private decide(releaseId: string, decision: string, comment: string) {
     return this.send<Release>("POST", `/v1/releases/${releaseId}:${decision}`, { comment });

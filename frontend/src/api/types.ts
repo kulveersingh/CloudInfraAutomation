@@ -148,12 +148,58 @@ export interface PreviewResult {
   lint: string[];
 }
 
+export interface PullRequestLink {
+  number: number;
+  url: string;
+}
+
+/** The change a project has in flight: queued for the worker, or open as a pull request. */
+export interface OpenChange {
+  id: string;
+  revision: number;
+  state: "queued" | "open";
+  pull_request: PullRequestLink | null;
+}
+
 export interface ProjectSummary {
   name: string;
   portfolio_id: string;
   product_id: string;
   resilience_mode: ResilienceMode;
   status: string;
+  revision: number;
+  open_change: OpenChange | null;
+}
+
+export type ChangeState = "queued" | "open" | "merged" | "closed" | "failed";
+
+export interface ChangeSummary {
+  added_services: string[];
+  removed_services: Array<{ id: string; type: string; retained: boolean }>;
+  changed_services: string[];
+  added_environments: string[];
+  changed_files: string[];
+}
+
+export interface ChangeRequestBody {
+  request: ProjectRequest;
+  base_commit: string;
+  confirm_removals?: boolean;
+}
+
+export interface ProjectChange {
+  id: string;
+  project_name: string;
+  revision: number;
+  state: ChangeState;
+  base_commit: string;
+  branch: string;
+  pull_request: PullRequestLink | null;
+  summary: ChangeSummary;
+  created_by: string;
+  merge_commit: string | null;
+  job_id: string | null;
+  created_at: string;
 }
 
 export interface JobStep {
@@ -404,6 +450,7 @@ export interface RepositoryReadBack<Request> {
 }
 
 export type LandingZoneReadBack = RepositoryReadBack<LandingZoneRequest>;
+export type ProjectReadBack = RepositoryReadBack<ProjectRequest>;
 
 export interface Identity {
   name: string;
@@ -448,4 +495,12 @@ export interface PlatformApiPort {
   createProject(request: ProjectRequest, idempotencyKey: string): Promise<{ job_id: string }>;
   projects(): Promise<ProjectSummary[]>;
   job(jobId: string): Promise<JobStatus>;
+  projectReadBack(projectName: string): Promise<ProjectReadBack>;
+  previewChange(projectName: string, body: ChangeRequestBody): Promise<ProjectChangePreview>;
+  createChange(projectName: string, body: ChangeRequestBody): Promise<ProjectChange>;
+  projectChange(projectName: string, changeId: string): Promise<ProjectChange>;
+  mergeChange(projectName: string, changeId: string): Promise<ProjectChange>;
+  closeChange(projectName: string, changeId: string): Promise<ProjectChange>;
 }
+
+export type ProjectChangePreview = PreviewResult & { summary: ChangeSummary };

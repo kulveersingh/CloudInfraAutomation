@@ -8,9 +8,12 @@ from app.adapters.factory import AdapterFactory
 from app.adapters.ports import AwsPort, GitHubPort
 from app.config import Settings
 from app.db.database import Database
+from app.provisioning.change_runner import ChangeJobRunner
 from app.provisioning.queue import JobQueue
 from app.provisioning.runner import JobRunner
 from app.readback.manifest import ManifestSigner
+
+RUNNERS = {"provision": JobRunner, "change": ChangeJobRunner}
 
 
 class Worker:
@@ -29,7 +32,7 @@ class Worker:
             job = JobQueue(session).claim_next()
             if job is None:
                 return False
-            JobRunner.for_session(session, self._github, self._aws, self._owner, self._signer).run(job)
+            RUNNERS[job.kind].for_session(session, self._github, self._aws, self._owner, self._signer).run(job)
             return True
 
 
