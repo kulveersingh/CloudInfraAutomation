@@ -105,10 +105,10 @@ describe("NewProjectPage", () => {
     const { api } = renderWizard();
     await screen.findByLabelText("Portfolio");
     await goTo("Services");
-    await user().type(screen.getByLabelText("Search all CloudFormation types"), "sns");
+    await user().type(screen.getByLabelText("Search all AWS resource types"), "sns");
     await user().click(screen.getByRole("button", { name: "Search" }));
     await user().click(await screen.findByRole("button", { name: "Add AWS::SNS::Topic" }));
-    expect([api.searchCloudFormation, screen.getByText("topic")]).toBeTruthy();
+    expect([api.searchTypes, screen.getByText("topic")]).toBeTruthy();
   });
 
   it("shows required properties of a CloudFormation type", async () => {
@@ -120,7 +120,7 @@ describe("NewProjectPage", () => {
   });
 
   it("shows search errors", async () => {
-    renderWizard(fakeApi({ searchCloudFormation: vi.fn().mockRejectedValue(new Error("search failed")) }));
+    renderWizard(fakeApi({ searchTypes: vi.fn().mockRejectedValue(new Error("search failed")) }));
     await screen.findByLabelText("Portfolio");
     await goTo("Services");
     await user().click(screen.getByRole("button", { name: "Search" }));

@@ -133,4 +133,26 @@ describe("NetworksPanel", () => {
       screen.getByLabelText("Network security group IDs"),
       screen.getByText("Attach compute to the organization VNet by default")]).toHaveLength(4);
   });
+
+  it("shows one cloud's networks in its own words", async () => {
+    const { api } = renderWithApi(<NetworksPanel />);
+    await user().selectOptions(await screen.findByLabelText("Cloud"), "gcp");
+    const row = (await screen.findByText("net-cloudinfra-payments-dev-us-east1")).closest("tr")!;
+    expect([within(row).getByText("cloudinfra-payments-dev"), screen.getByRole("columnheader", { name: "Shared VPC" }),
+      screen.queryByText("net-prod-use1"), vi.mocked(api.networks).mock.calls.at(-1)]).toEqual(
+      [expect.anything(), expect.anything(), null, ["gcp"]]);
+  });
+
+  it("adds a network to the chosen cloud, starting in its default region", async () => {
+    const { api } = renderWithApi(<NetworksPanel />);
+    await user().selectOptions(await screen.findByLabelText("Cloud"), "gcp");
+    await user().click(await screen.findByRole("button", { name: "Add network" }));
+    expect(screen.getByLabelText("Region")).toHaveValue("us-east1");
+    await fillForm({ Name: "Shared VPC", "Project ID": "cloudinfra-payments-test",
+      "Shared VPC ID": "projects/h/global/networks/v", "Private CIDR": "10.130.0.0/16",
+      "Private subnet IDs": "projects/h/regions/us-east1/subnetworks/s", "Network tag IDs": "cloudinfra-payments-test" });
+    await user().click(screen.getByRole("button", { name: "Save network" }));
+    expect(vi.mocked(api.createNetwork).mock.calls[0][0]).toMatchObject({ provider: "gcp", region: "us-east1",
+      account_id: "cloudinfra-payments-test" });
+  });
 });

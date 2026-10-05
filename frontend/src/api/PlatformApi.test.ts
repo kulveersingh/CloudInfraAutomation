@@ -60,21 +60,39 @@ describe("PlatformApi", () => {
 
   it("updates a region with PUT and a JSON body", async () => {
     const fetcher = respond({ id: "us-west-2", enabled: true });
-    await new PlatformApi("", fetcher).setRegionEnabled("us-west-2", true);
-    expect(fetcher).toHaveBeenCalledWith("/v1/admin/regions/us-west-2", expect.objectContaining({
+    await new PlatformApi("", fetcher).setRegionEnabled("aws", "us-west-2", true);
+    expect(fetcher).toHaveBeenCalledWith("/v1/admin/regions/us-west-2?provider=aws", expect.objectContaining({
       method: "PUT", body: JSON.stringify({ enabled: true }) }));
   });
 
-  it("reads the curated catalog", async () => {
+  it("reads one cloud's regions", async () => {
     const fetcher = respond([]);
-    await new PlatformApi("", fetcher).catalog();
-    expect(fetcher.mock.calls[0][0]).toBe("/v1/catalog");
+    await new PlatformApi("", fetcher).regions("gcp");
+    expect(fetcher.mock.calls[0][0]).toBe("/v1/admin/regions?provider=gcp");
+  });
+
+  it("reads a cloud's curated catalog", async () => {
+    const fetcher = respond([]);
+    await new PlatformApi("", fetcher).catalog("gcp");
+    expect(fetcher.mock.calls[0][0]).toBe("/v1/catalog?provider=gcp");
   });
 
   it("searches a provider's resource types with an encoded query", async () => {
     const fetcher = respond([]);
-    await new PlatformApi("", fetcher).searchCloudFormation("sns topic");
-    expect(fetcher.mock.calls[0][0]).toBe("/v1/catalog/aws/types?search=sns%20topic");
+    await new PlatformApi("", fetcher).searchTypes("gcp", "pubsub schema");
+    expect(fetcher.mock.calls[0][0]).toBe("/v1/catalog/gcp/types?search=pubsub%20schema");
+  });
+
+  it("lists one cloud's networks", async () => {
+    const fetcher = respond([]);
+    await new PlatformApi("", fetcher).networks("gcp");
+    expect(fetcher.mock.calls[0][0]).toBe("/v1/admin/networks?provider=gcp");
+  });
+
+  it("reads network options for a cloud", async () => {
+    const fetcher = respond([]);
+    await new PlatformApi("", fetcher).networkOptions("pf-payments", "gcp");
+    expect(fetcher.mock.calls[0][0]).toBe("/v1/networks/options?portfolio_id=pf-payments&provider=gcp");
   });
 
   it("reads cost centers", async () => {

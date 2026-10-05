@@ -14,7 +14,7 @@ describe("RegionsPanel", () => {
   it("enables a region", async () => {
     const { api } = renderWithApi(<RegionsPanel />);
     await userEvent.click(await screen.findByLabelText("Enable ap-southeast-2"));
-    expect(api.setRegionEnabled).toHaveBeenCalledWith("ap-southeast-2", true);
+    expect(api.setRegionEnabled).toHaveBeenCalledWith("aws", "ap-southeast-2", true);
   });
 
   it("reflects the saved state", async () => {
@@ -33,5 +33,13 @@ describe("RegionsPanel", () => {
   it("shows loading errors", async () => {
     renderWithApi(<RegionsPanel />, fakeApi({ regions: vi.fn().mockRejectedValue(new Error("down")) }));
     expect(await screen.findByRole("alert")).toHaveTextContent("down");
+  });
+
+  it("shows one cloud's regions at a time", async () => {
+    const { api } = renderWithApi(<RegionsPanel />);
+    await userEvent.selectOptions(await screen.findByLabelText("Cloud"), "gcp");
+    await userEvent.click(await screen.findByLabelText("Enable asia-southeast1"));
+    expect([screen.queryByLabelText("Enable ap-southeast-2"), vi.mocked(api.setRegionEnabled).mock.calls[0]]).toEqual(
+      [null, ["gcp", "asia-southeast1", true]]);
   });
 });

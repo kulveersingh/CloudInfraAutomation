@@ -50,3 +50,21 @@ def test_preview_fails_when_a_region_has_no_network(client):
     payload = request_dict(resilience={"mode": "single", "primary_region": "us-west-2", "secondary_region": None})
     response = client.post("/v1/projects:preview", json=payload)
     assert (response.status_code, "No network configured" in response.json()["detail"]) == (422, True)
+
+
+def test_networks_can_be_listed_per_cloud(client):
+    networks = client.get("/v1/admin/networks", params={"provider": "gcp"}).json()
+    assert ({network["provider"] for network in networks}, len(networks)) == ({"gcp"}, 30)
+
+
+def test_wizard_options_for_google_cloud(client):
+    options = client.get("/v1/networks/options", params={"portfolio_id": "pf-payments", "provider": "gcp"}).json()
+    dev = next(option for option in options if (option["environment"], option["region"]) == ("dev", "us-east1"))
+    assert (dev["account_id"], dev["default_network_id"]) == ("cloudinfra-payments-dev",
+                                                              "net-cloudinfra-payments-dev-us-east1")
+
+
+def test_wizard_options_default_to_aws(client):
+    options = client.get("/v1/networks/options", params={"portfolio_id": "pf-payments"}).json()
+    assert {option["region"] for option in options} <= {"us-east-1", "us-east-2", "us-west-2", "eu-west-1",
+                                                         "eu-central-1", "ap-southeast-2"}

@@ -141,3 +141,8 @@ def test_google_cloud_landing_zone_is_refused_clearly(client):
                            json={"provider": "gcp", "answers": answers_dict(), "edits": []}, headers=ALEX)
     assert (response.status_code, response.json()["detail"]) == (
         422, "The Google Cloud landing zone is not available yet.")
+
+
+def test_providers_api_names_each_clouds_main_document(client):
+    assert [provider["document_file"] for provider in client.get("/v1/providers").json()] == [
+        "template.yaml", "main.tf.json"]

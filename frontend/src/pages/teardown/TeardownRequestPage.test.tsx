@@ -2,7 +2,7 @@ import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { PlatformApiPort } from "../../api/types";
-import { fakeApi, TEARDOWN_PREVIEW } from "../../test/fakes";
+import { fakeApi, PROJECTS, TEARDOWN_PREVIEW } from "../../test/fakes";
 import { renderWithApi } from "../../test/render";
 import { TeardownRequestPage } from "./TeardownRequestPage";
 
@@ -105,5 +105,21 @@ describe("TeardownRequestPage", () => {
   it("shows project loading errors", async () => {
     renderRequest(fakeApi({ projects: vi.fn().mockRejectedValue(new Error("API down")) }));
     expect(await screen.findByRole("alert")).toHaveTextContent("API down");
+  });
+
+  it("speaks the project's cloud", async () => {
+    const preview = { ...TEARDOWN_PREVIEW, backup_account: "cloudinfra-vault", environments: [{
+      ...TEARDOWN_PREVIEW.environments[0], account_id: "cloudinfra-payments-dev", regions: ["us-east1"],
+      stacks: ["cloudinfra-invoice-ingest-us-east1", "cloudinfra-bootstrap-invoice-ingest"],
+      data_stores: [{ service_id: "uploads", resource_type: "google_storage_bucket", physical_name: "invoice-ingest-uploads-1",
+        region: "us-east1", retained: false }] }] };
+    renderRequest(fakeApi({ projects: vi.fn().mockResolvedValue([{ ...PROJECTS[0], provider: "gcp" }]),
+      previewTeardown: vi.fn().mockResolvedValue(preview) }));
+    await previewIt();
+    expect([await screen.findByText("dev · project cloudinfra-payments-dev · us-east1"),
+      screen.getByText(/locked vault in project cloudinfra-vault/),
+      screen.getByText("Infrastructure Manager deployments: cloudinfra-invoice-ingest-us-east1, cloudinfra-bootstrap-invoice-ingest"),
+      screen.getByText("uploads (google_storage_bucket) in us-east1: backed up, then deleted with the Infrastructure Manager deployment")])
+      .toHaveLength(4);
   });
 });

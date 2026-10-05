@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { GCP_PROVIDER } from "../test/fakes";
 import { ProjectDraft } from "./ProjectDraft";
 
 const ready = () => ProjectDraft.initial()
@@ -177,5 +178,35 @@ describe("ProjectDraft", () => {
 
   it("deploys everything to the primary region for single-region projects", () => {
     expect(ready().regionsFor("prod")).toEqual(["us-east-1"]);
+  });
+
+  describe("cloud", () => {
+    it("starts on AWS", () => {
+      expect([ProjectDraft.initial().values.provider, ready().toRequest().provider]).toEqual(["aws", "aws"]);
+    });
+
+    it("switching the cloud takes its default regions and clears what belongs to the old cloud", () => {
+      const draft = ready().withResource("lambda.function")
+        .withConnection({ kind: "event.notify", source: "bucket", target: "function" })
+        .withNetworkSelection("dev", "us-east-1", "net-1").withProvider(GCP_PROVIDER);
+      const { provider, primaryRegion, secondaryRegion, resources, connections, networkSelections, name } = draft.values;
+      expect([provider, primaryRegion, secondaryRegion, resources, connections, networkSelections, name]).toEqual(
+        ["gcp", "us-east1", "us-east4", [], [], {}, "demo-app"]);
+    });
+
+    it("sends the cloud with the request", () => {
+      expect(ready().withProvider(GCP_PROVIDER).toRequest().provider).toBe("gcp");
+    });
+
+    it("reads the cloud back, AWS when the request predates it", () => {
+      const request = ready().withProvider(GCP_PROVIDER).withResource("storage.bucket").toRequest();
+      const { provider: _provider, ...older } = request;
+      expect([ProjectDraft.fromRequest(request).values.provider, ProjectDraft.fromRequest(older).values.provider])
+        .toEqual(["gcp", "aws"]);
+    });
+
+    it("derives resource ids from Google Cloud types", () => {
+      expect(ProjectDraft.initial().withResource("google_pubsub_schema").values.resources[0].id).toBe("schema");
+    });
   });
 });

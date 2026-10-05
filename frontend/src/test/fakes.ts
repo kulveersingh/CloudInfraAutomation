@@ -31,9 +31,21 @@ export const ENVIRONMENTS: EnvironmentInfo[] = [
 ];
 
 export const REGIONS: RegionInfo[] = [
-  { id: "us-east-1", name: "US East (N. Virginia)", enabled: true },
-  { id: "us-east-2", name: "US East (Ohio)", enabled: true },
-  { id: "ap-southeast-2", name: "Asia Pacific (Sydney)", enabled: false },
+  { provider: "aws", id: "us-east-1", name: "US East (N. Virginia)", enabled: true },
+  { provider: "aws", id: "us-east-2", name: "US East (Ohio)", enabled: true },
+  { provider: "aws", id: "ap-southeast-2", name: "Asia Pacific (Sydney)", enabled: false },
+];
+
+export const GCP_REGIONS: RegionInfo[] = [
+  { provider: "gcp", id: "europe-west1", name: "Belgium", enabled: true },
+  { provider: "gcp", id: "us-east1", name: "South Carolina", enabled: true },
+  { provider: "gcp", id: "us-east4", name: "Northern Virginia", enabled: true },
+  { provider: "gcp", id: "asia-southeast1", name: "Singapore", enabled: false },
+];
+
+export const GCP_CATALOG: CatalogEntry[] = [
+  { type: "storage.bucket", name: "Cloud Storage bucket", category: "Storage", multi_region: "replicated", settings: [] },
+  { type: "compute.function", name: "Cloud Run function", category: "Compute", multi_region: "replicated", settings: [] },
 ];
 
 const KEY_RULE = "1 to 255 characters of letters, digits and _ . -";
@@ -70,6 +82,15 @@ export const PREVIEW: PreviewResult = {
     "us-east-1": { network_id: "net-prod-use1", network_ref: "vpc-0aaa1111bbbb22223", subnet_refs: ["subnet-0a", "subnet-0b"] },
   } } },
   lint: [],
+  notes: [],
+};
+
+export const GCP_PREVIEW: PreviewResult = {
+  files: { "main.tf.json": "{\"resource\": {\"google_storage_bucket\": {}}}\n", "README.md": "# demo" },
+  tags: { org_project: "demo-app", org_cost_center: "cc-4410" },
+  targets: { dev: { account_id: "cloudinfra-payments-dev", regions: ["us-east1"], networks: {} } },
+  lint: [],
+  notes: ["uploads → processor: Eventarc cannot filter by object prefix, so processor must check CLOUDINFRA_EVENT_PREFIX."],
 };
 
 export const PROJECTS: ProjectSummary[] = [
@@ -79,10 +100,20 @@ export const PROJECTS: ProjectSummary[] = [
 
 export const PROVIDERS: CloudProviderInfo[] = [{
   id: "aws", name: "Amazon Web Services", default_regions: { primary: "us-east-1", secondary: "us-east-2" },
+  document_file: "template.yaml",
   vocabulary: { cloud: "AWS", isolation_unit: "account", hierarchy_node: "OU", iac_document: "CloudFormation template",
     deploy_unit: "stack", preventive_policy: "SCP", private_network: "VPC", firewall_group: "security group",
     landing_zone_service: "Control Tower", control_catalog: "Control Tower controls" },
+}, {
+  id: "gcp", name: "Google Cloud", default_regions: { primary: "us-east1", secondary: "us-east4" },
+  document_file: "main.tf.json",
+  vocabulary: { cloud: "Google Cloud", isolation_unit: "project", hierarchy_node: "folder",
+    iac_document: "Terraform configuration", deploy_unit: "Infrastructure Manager deployment",
+    preventive_policy: "organization policy", private_network: "Shared VPC", firewall_group: "network tag",
+    landing_zone_service: "Google Cloud Setup", control_catalog: "Security Command Center postures" },
 }];
+
+export const GCP_PROVIDER = PROVIDERS[1];
 
 /** Another cloud's words, to show the UI takes them from the provider. */
 export const OTHER_CLOUD: CloudProviderInfo[] = [{
@@ -172,11 +203,18 @@ export function pipeline(stageRelease: Release | null = release()): PipelineStag
 
 export function network(overrides: Partial<NetworkInfo> = {}): NetworkInfo {
   return {
-    id: "net-prod-use1", name: "Org shared VPC", account_id: "555555555555", region: "us-east-1",
+    id: "net-prod-use1", provider: "aws", name: "Org shared VPC", account_id: "555555555555", region: "us-east-1",
     network_ref: "vpc-0aaa1111bbbb22223", cidr: "10.5.0.0/16", subnet_refs: ["subnet-0a1111", "subnet-0b2222"],
     firewall_refs: ["sg-0c3333"], is_default: true, ...overrides,
   };
 }
+
+export const GCP_NETWORK: NetworkInfo = {
+  id: "net-cloudinfra-payments-dev-us-east1", provider: "gcp", name: "Shared VPC", account_id: "cloudinfra-payments-dev",
+  region: "us-east1", network_ref: "projects/cloudinfra-net-host/global/networks/shared-vpc", cidr: "10.128.0.0/16",
+  subnet_refs: ["projects/cloudinfra-net-host/regions/us-east1/subnetworks/payments-dev"],
+  firewall_refs: ["cloudinfra-payments-dev"], is_default: true,
+};
 
 export const NETWORK_OPTIONS: NetworkOption[] = [
   { environment: "dev", region: "us-east-1", account_id: "222222222222",
@@ -298,14 +336,15 @@ export function fakeApi(overrides: Partial<PlatformApiPort> = {}): PlatformApiPo
   return {
     orgRegistry: vi.fn().mockResolvedValue(PORTFOLIOS),
     environments: vi.fn().mockResolvedValue(ENVIRONMENTS),
-    regions: vi.fn().mockResolvedValue(REGIONS),
-    setRegionEnabled: vi.fn().mockImplementation(async (id: string, enabled: boolean) => ({
-      ...REGIONS.find((region) => region.id === id)!, enabled })),
-    catalog: vi.fn().mockResolvedValue(CATALOG),
-    searchCloudFormation: vi.fn().mockResolvedValue([
-      { type: "AWS::SNS::Topic", service: "SNS", required: [] },
-      { type: "AWS::SNS::Subscription", service: "SNS", required: ["Protocol", "TopicArn"] },
-    ]),
+    regions: vi.fn().mockImplementation(async (provider?: string) => [...REGIONS, ...GCP_REGIONS].filter(
+      (region) => provider === undefined || region.provider === provider)),
+    setRegionEnabled: vi.fn().mockImplementation(async (provider: string, id: string, enabled: boolean) => ({
+      ...[...REGIONS, ...GCP_REGIONS].find((region) => region.provider === provider && region.id === id)!, enabled })),
+    catalog: vi.fn().mockImplementation(async (provider: string) => (provider === "gcp" ? GCP_CATALOG : CATALOG)),
+    searchTypes: vi.fn().mockImplementation(async (provider: string) => (provider === "gcp"
+      ? [{ type: "google_pubsub_schema", service: "pubsub", required: ["name"] }]
+      : [{ type: "AWS::SNS::Topic", service: "SNS", required: [] },
+        { type: "AWS::SNS::Subscription", service: "SNS", required: ["Protocol", "TopicArn"] }])),
     costCenters: vi.fn().mockResolvedValue(COST_CENTERS),
     updateCostCenters: vi.fn().mockResolvedValue(COST_CENTERS),
     preview: vi.fn().mockResolvedValue(PREVIEW),
@@ -339,8 +378,8 @@ export function fakeApi(overrides: Partial<PlatformApiPort> = {}): PlatformApiPo
       status: "applied", decided_by: "riley", repository: "acme-platform/landing-zone-infra",
       commit_sha: "a".repeat(40), accounts: { "acme-payments-prod": "123456789012" } })),
     rejectLandingZoneDesign: vi.fn().mockResolvedValue(landingZoneDesign({ status: "rejected", decided_by: "riley" })),
-    networks: vi.fn().mockResolvedValue([network(), network({ id: "net-dev-use1", account_id: "222222222222",
-      is_default: false })]),
+    networks: vi.fn().mockImplementation(async (provider: string) => (provider === "gcp" ? [GCP_NETWORK]
+      : [network(), network({ id: "net-dev-use1", account_id: "222222222222", is_default: false })])),
     createNetwork: vi.fn().mockImplementation(async (input) => ({ id: "net-new", ...input })),
     updateNetwork: vi.fn().mockImplementation(async (id, input) => ({ id, ...input })),
     networkSettings: vi.fn().mockResolvedValue({ attach_compute_by_default: true }),

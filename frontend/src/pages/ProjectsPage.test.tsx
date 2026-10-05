@@ -12,6 +12,12 @@ describe("ProjectsPage", () => {
     expect(await screen.findByText("invoice-ingest")).toBeInTheDocument();
   });
 
+  it("shows each project's cloud", async () => {
+    renderWithApi(<ProjectsPage onNewProject={() => {}} onChangeProject={() => {}} onTeardown={() => {}} />,
+      fakeApi({ projects: vi.fn().mockResolvedValue([...PROJECTS, { ...PROJECTS[0], name: "orders", provider: "gcp" }]) }));
+    expect([await screen.findByText("Amazon Web Services"), screen.getByText("Google Cloud")]).toHaveLength(2);
+  });
+
   it("shows the resilience mode", async () => {
     renderWithApi(<ProjectsPage onNewProject={() => {}} onChangeProject={() => {}} onTeardown={() => {}} />);
     expect(await screen.findByText("DR · active/standby")).toBeInTheDocument();
