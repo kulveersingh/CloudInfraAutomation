@@ -119,7 +119,7 @@ def test_repository_from_before_the_manifest_is_rejected(client, settings, appli
 def provision(client, settings, session_factory) -> None:
     client.post("/v1/projects", json=request_dict(), headers={"Idempotency-Key": "k1"})
     factory = AdapterFactory()
-    Worker(session_factory, factory.github(settings), factory.aws(settings), settings.github_owner,
+    Worker(session_factory, factory.github(settings), factory.clouds(settings), settings.github_owner,
            ManifestSigner.from_settings(settings)).process_one()
 
 

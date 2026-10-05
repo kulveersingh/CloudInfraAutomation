@@ -10,12 +10,12 @@ def bootstrap_request(**overrides) -> BootstrapRequest:
 
 def test_bootstrap_returns_deploy_role(local_aws):
     outputs = local_aws.ensure_bootstrap_stack(bootstrap_request())
-    assert outputs.deploy_role_arn == "arn:aws:iam::222222222222:role/cloudinfra/demo-deploy"
+    assert outputs.deployer_identity == "arn:aws:iam::222222222222:role/cloudinfra/demo-deploy"
 
 
 def test_bootstrap_returns_execution_role(local_aws):
     outputs = local_aws.ensure_bootstrap_stack(bootstrap_request())
-    assert outputs.cfn_execution_role_arn == "arn:aws:iam::222222222222:role/cloudinfra/demo-cfn-exec"
+    assert outputs.execution_identity == "arn:aws:iam::222222222222:role/cloudinfra/demo-cfn-exec"
 
 
 def test_bootstrap_records_trust_subject(local_aws):

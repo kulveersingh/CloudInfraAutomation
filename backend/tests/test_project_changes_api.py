@@ -21,7 +21,7 @@ def github(settings) -> LocalGitHub:
 
 def run_worker(settings, session_factory) -> None:
     factory = AdapterFactory()
-    Worker(session_factory, factory.github(settings), factory.aws(settings), settings.github_owner,
+    Worker(session_factory, factory.github(settings), factory.clouds(settings), settings.github_owner,
            ManifestSigner.from_settings(settings)).process_one()
 
 

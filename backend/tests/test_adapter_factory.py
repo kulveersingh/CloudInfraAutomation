@@ -11,7 +11,7 @@ def test_local_github_by_default(tmp_path):
 
 
 def test_local_aws_by_default(tmp_path):
-    assert isinstance(AdapterFactory().aws(Settings(local_state_dir=str(tmp_path))), LocalAws)
+    assert isinstance(AdapterFactory().clouds(Settings(local_state_dir=str(tmp_path))).get("aws"), LocalAws)
 
 
 def test_unregistered_github_mode(tmp_path):
@@ -21,7 +21,7 @@ def test_unregistered_github_mode(tmp_path):
 
 def test_unregistered_aws_mode(tmp_path):
     with pytest.raises(UnsupportedAdapterModeError, match="real"):
-        AdapterFactory().aws(Settings(local_state_dir=str(tmp_path), aws_mode="real"))
+        AdapterFactory().clouds(Settings(local_state_dir=str(tmp_path), aws_mode="real"))
 
 
 def test_new_mode_can_be_registered(tmp_path):
@@ -32,5 +32,5 @@ def test_new_mode_can_be_registered(tmp_path):
 
 def test_new_aws_mode_can_be_registered(tmp_path):
     factory = AdapterFactory()
-    factory.register_aws("real", LocalAws)
-    assert isinstance(factory.aws(Settings(local_state_dir=str(tmp_path), aws_mode="real")), LocalAws)
+    factory.register_cloud("aws", "real", LocalAws)
+    assert isinstance(factory.clouds(Settings(local_state_dir=str(tmp_path), aws_mode="real")).get("aws"), LocalAws)

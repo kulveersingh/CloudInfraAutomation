@@ -15,7 +15,7 @@ def inventory(payload: dict, environment: str = "prod", regions=("us-east-1",)):
 def test_buckets_are_data_stores_with_resolved_names():
     stores, problems = inventory(request_dict())
     [bucket] = stores
-    assert (problems, bucket.service_id, bucket.resource_type, bucket.physical_name, bucket.source_arn,
+    assert (problems, bucket.service_id, bucket.resource_type, bucket.physical_name, bucket.source_ref,
             bucket.region, bucket.retained) == (
         [], "uploads", "AWS::S3::Bucket", "invoice-ingest--uploads-555555555555-us-east-1",
         "arn:aws:s3:::invoice-ingest--uploads-555555555555-us-east-1", "us-east-1", True)
@@ -34,7 +34,7 @@ def test_every_region_has_its_own_bucket():
 def test_a_global_table_is_backed_up_in_the_primary_region_only():
     payload = dr_request_dict(resources=[{"id": "orders", "type": "dynamodb.table"}], connections=[])
     stores, _ = inventory(payload, regions=("us-east-1", "us-east-2"))
-    assert [(store.resource_type, store.region, store.source_arn) for store in stores] == [
+    assert [(store.resource_type, store.region, store.source_ref) for store in stores] == [
         ("AWS::DynamoDB::GlobalTable", "us-east-1", "arn:aws:dynamodb:us-east-1:555555555555:table/invoice-ingest--orders")]
 
 
@@ -49,7 +49,7 @@ def test_schema_driven_database_with_an_identifier():
     payload = request_dict(resources=[{"id": "ledger", "type": "AWS::RDS::DBCluster", "config": {"properties": {
         "Engine": "aurora-postgresql", "DBClusterIdentifier": "ledger-db"}}}], connections=[])
     [cluster], problems = inventory(payload)
-    assert (problems, cluster.source_arn, cluster.retained) == (
+    assert (problems, cluster.source_ref, cluster.retained) == (
         [], "arn:aws:rds:us-east-1:555555555555:cluster:ledger-db", False)
 
 

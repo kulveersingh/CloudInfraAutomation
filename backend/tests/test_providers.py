@@ -24,6 +24,12 @@ class ExampleProvider(CloudProvider):
     def project(self):
         return AwsProvider().project()
 
+    def teardown(self):
+        return AwsProvider().teardown()
+
+    def resources(self):
+        return AwsProvider().resources()
+
 
 # ---- registry ----
 

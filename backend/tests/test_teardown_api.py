@@ -42,7 +42,7 @@ def aws(settings) -> LocalAws:
 
 def drain(settings, session_factory) -> None:
     factory = AdapterFactory()
-    worker = Worker(session_factory, factory.github(settings), factory.aws(settings), settings.github_owner,
+    worker = Worker(session_factory, factory.github(settings), factory.clouds(settings), settings.github_owner,
                     ManifestSigner.from_settings(settings))
     while worker.process_one():
         pass
@@ -478,7 +478,7 @@ def test_restore_is_refused_when_a_super_user_deleted_a_backup(client, settings,
     teardown = torn_down(client, settings, session_factory)
     [point] = environment(teardown, "dev")["recovery_points"]
     later = datetime.now(UTC) + timedelta(days=61)
-    backup(settings).delete_recovery_point(point["recovery_point_arn"], role="CloudInfraBackupSuperUser", at=later)
+    backup(settings).delete_recovery_point(point["recovery_point_ref"], role="CloudInfraBackupSuperUser", at=later)
     response = restore(client, teardown["id"])
     assert (response.status_code, response.json()["detail"]) == (
         409, "The backup of uploads in dev (us-east-1) no longer exists, so it cannot be restored.")
@@ -562,7 +562,7 @@ def test_restore_fails_when_a_backup_disappears_before_it_runs(client, settings,
     teardown = torn_down(client, settings, session_factory)
     restore(client, teardown["id"])
     [point] = environment(teardown, "dev")["recovery_points"]
-    backup(settings).delete_recovery_point(point["recovery_point_arn"], role="CloudInfraBackupSuperUser",
+    backup(settings).delete_recovery_point(point["recovery_point_ref"], role="CloudInfraBackupSuperUser",
                                            at=datetime.now(UTC) + timedelta(days=61))
     restore(client, teardown["id"], "approve-restore", headers=SAM)
     drain(settings, session_factory)
