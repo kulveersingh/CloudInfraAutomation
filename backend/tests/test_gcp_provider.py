@@ -123,8 +123,6 @@ def test_google_cloud_state_is_kept_apart_from_aws(tmp_path):
 # ---- what is not there yet ----
 
 @pytest.mark.parametrize("part, message", [
-    ("teardown", "Teardowns on Google Cloud are not available yet."),
-    ("resources", "Releases on Google Cloud are not available yet."),
     ("landing_zone", "The Google Cloud landing zone is not available yet."),
 ])
 def test_parts_still_to_come_say_so(part, message):
