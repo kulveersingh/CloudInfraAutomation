@@ -2,7 +2,7 @@ import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { Identity, PlatformApiPort, TreeEdit } from "../../api/types";
-import { fakeApi, landingZoneDesign, landingZoneDetail, PACK_CATALOG, PROPOSAL, READ_BACK } from "../../test/fakes";
+import { fakeApi, landingZoneDesign, landingZoneDetail, OTHER_CLOUD, PACK_CATALOG, PROPOSAL, READ_BACK } from "../../test/fakes";
 import { renderWithApi } from "../../test/render";
 import { LandingZonePage } from "./LandingZonePage";
 
@@ -764,6 +764,23 @@ describe("LandingZonePage", () => {
       renderPage(fakeApi({ landingZoneReadBack: vi.fn().mockRejectedValue(new Error("No landing zone has been applied yet.")) }));
       await editCurrent();
       expect(await screen.findByRole("alert")).toHaveTextContent("No landing zone has been applied yet.");
+    });
+  });
+
+  describe("in another cloud's words", () => {
+    const api = () => fakeApi({ providers: vi.fn().mockResolvedValue(OTHER_CLOUD) });
+
+    it("names the organization, structure and IaC as the cloud does", async () => {
+      renderPage(api());
+      expect(await screen.findByText(/Design a new Azure organization: answer the questions, review the proposed management group structure/))
+        .toHaveTextContent("commits and applies the Bicep files.");
+    });
+
+    it("titles the controls step with the cloud's control catalog", async () => {
+      renderPage(api());
+      await screen.findByText(/Design a new Azure organization/);
+      await goTo("Controls");
+      expect(screen.getByRole("heading", { name: "8. Azure Policy initiatives" })).toBeInTheDocument();
     });
   });
 });

@@ -37,7 +37,7 @@ def test_wizard_options(client):
 
 def test_preview_shows_selected_networks(client):
     targets = client.post("/v1/projects:preview", json=request_dict()).json()["targets"]
-    assert targets["prod"]["networks"]["us-east-1"]["vpc_id"].startswith("vpc-")
+    assert targets["prod"]["networks"]["us-east-1"]["network_ref"].startswith("vpc-")
 
 
 def test_preview_without_vpc_attachment_has_no_networks(client):

@@ -32,7 +32,7 @@ def test_filter_by_account_and_region(service):
 
 def test_create_network(service):
     created = service.create(NetworkInput.model_validate({**VALID, "is_default": False}))
-    assert created["vpc_id"] == "vpc-0a1b2c3d4e5f60718"
+    assert created["network_ref"] == "vpc-0a1b2c3d4e5f60718"
 
 
 def test_new_default_replaces_old_default(service):

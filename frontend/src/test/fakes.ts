@@ -67,7 +67,7 @@ export const PREVIEW: PreviewResult = {
   files: { "template.yaml": "Resources:\n  UploadsBucket: {}\n", "README.md": "# demo" },
   tags: { "org:project": "demo-app", "org:cost-center": "CC-4410" },
   targets: { prod: { account_id: "555555555555", regions: ["us-east-1", "us-east-2"], networks: {
-    "us-east-1": { network_id: "net-prod-use1", vpc_id: "vpc-0aaa1111bbbb22223", subnet_ids: ["subnet-0a", "subnet-0b"] },
+    "us-east-1": { network_id: "net-prod-use1", network_ref: "vpc-0aaa1111bbbb22223", subnet_refs: ["subnet-0a", "subnet-0b"] },
   } } },
   lint: [],
 };
@@ -79,9 +79,17 @@ export const PROJECTS: ProjectSummary[] = [
 
 export const PROVIDERS: CloudProviderInfo[] = [{
   id: "aws", name: "Amazon Web Services", default_regions: { primary: "us-east-1", secondary: "us-east-2" },
-  vocabulary: { isolation_unit: "account", hierarchy_node: "OU", iac_document: "CloudFormation template", deploy_unit: "stack",
-    preventive_policy: "SCP", private_network: "VPC", landing_zone_service: "Control Tower",
-    control_catalog: "Control Tower controls" },
+  vocabulary: { cloud: "AWS", isolation_unit: "account", hierarchy_node: "OU", iac_document: "CloudFormation template",
+    deploy_unit: "stack", preventive_policy: "SCP", private_network: "VPC", firewall_group: "security group",
+    landing_zone_service: "Control Tower", control_catalog: "Control Tower controls" },
+}];
+
+/** Another cloud's words, to show the UI takes them from the provider. */
+export const OTHER_CLOUD: CloudProviderInfo[] = [{
+  ...PROVIDERS[0], vocabulary: { cloud: "Azure", isolation_unit: "subscription", hierarchy_node: "management group",
+    iac_document: "Bicep file", deploy_unit: "deployment stack", preventive_policy: "Azure Policy", private_network: "VNet",
+    firewall_group: "network security group", landing_zone_service: "Azure Landing Zones",
+    control_catalog: "Azure Policy initiatives" },
 }];
 
 export const TEARDOWN_PREVIEW: TeardownPreview = {
@@ -165,8 +173,8 @@ export function pipeline(stageRelease: Release | null = release()): PipelineStag
 export function network(overrides: Partial<NetworkInfo> = {}): NetworkInfo {
   return {
     id: "net-prod-use1", name: "Org shared VPC", account_id: "555555555555", region: "us-east-1",
-    vpc_id: "vpc-0aaa1111bbbb22223", cidr: "10.5.0.0/16", private_subnet_ids: ["subnet-0a1111", "subnet-0b2222"],
-    security_group_ids: ["sg-0c3333"], is_default: true, ...overrides,
+    network_ref: "vpc-0aaa1111bbbb22223", cidr: "10.5.0.0/16", subnet_refs: ["subnet-0a1111", "subnet-0b2222"],
+    firewall_refs: ["sg-0c3333"], is_default: true, ...overrides,
   };
 }
 

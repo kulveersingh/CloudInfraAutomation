@@ -39,7 +39,7 @@ def test_network_lists_the_accounts_that_share_it(tmp_path):
 
 def test_network_ids_look_like_aws_ids(tmp_path):
     network = apply(tmp_path).networks[0]
-    assert (network.vpc_id.startswith("vpc-"), len(network.subnet_ids), network.security_group_id.startswith("sg-")) == (
+    assert (network.network_ref.startswith("vpc-"), len(network.subnet_refs), network.firewall_ref.startswith("sg-")) == (
         True, 2, True)
 
 

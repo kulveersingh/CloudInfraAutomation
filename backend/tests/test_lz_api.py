@@ -158,7 +158,7 @@ def test_approval_registers_environment_networks(client):
 def test_registered_network_carries_the_org_security_group(client):
     account = approve(client, submitted(client)).json()["accounts"]["acme-retail-dev"]
     network = client.get("/v1/admin/networks", params={"account_id": account}).json()[0]
-    assert network["security_group_ids"][0].startswith("sg-")
+    assert network["firewall_refs"][0].startswith("sg-")
 
 
 def test_a_later_version_updates_the_same_repository(client):

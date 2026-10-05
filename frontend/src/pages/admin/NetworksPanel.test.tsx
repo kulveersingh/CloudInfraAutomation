@@ -1,7 +1,7 @@
 import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { fakeApi, network } from "../../test/fakes";
+import { fakeApi, network, OTHER_CLOUD } from "../../test/fakes";
 import { renderWithApi } from "../../test/render";
 import { NetworksPanel } from "./NetworksPanel";
 
@@ -58,9 +58,9 @@ describe("NetworksPanel", () => {
     await user().click(screen.getByLabelText("Default for this account and region"));
     await user().click(screen.getByRole("button", { name: "Save network" }));
     expect(api.createNetwork).toHaveBeenCalledWith({
-      name: "Payments VPC", account_id: "222222222222", region: "us-east-2", vpc_id: "vpc-0abc12345",
-      cidr: "10.20.0.0/16", private_subnet_ids: ["subnet-0aaa1111", "subnet-0bbb2222"],
-      security_group_ids: ["sg-0ccc3333"], is_default: true });
+      name: "Payments VPC", account_id: "222222222222", region: "us-east-2", network_ref: "vpc-0abc12345",
+      cidr: "10.20.0.0/16", subnet_refs: ["subnet-0aaa1111", "subnet-0bbb2222"],
+      firewall_refs: ["sg-0ccc3333"], is_default: true });
   });
 
   it("shows the added network", async () => {
@@ -77,7 +77,7 @@ describe("NetworksPanel", () => {
     await fillForm({ Name: "Renamed VPC" });
     await user().click(screen.getByRole("button", { name: "Save network" }));
     expect(api.updateNetwork).toHaveBeenCalledWith("net-prod-use1", expect.objectContaining({
-      name: "Renamed VPC", private_subnet_ids: ["subnet-0a1111", "subnet-0b2222"], is_default: true }));
+      name: "Renamed VPC", subnet_refs: ["subnet-0a1111", "subnet-0b2222"], is_default: true }));
   });
 
   it("shows the edited network", async () => {
@@ -124,5 +124,13 @@ describe("NetworksPanel", () => {
   it("shows loading errors", async () => {
     renderWithApi(<NetworksPanel />, fakeApi({ networks: vi.fn().mockRejectedValue(new Error("down")) }));
     expect(await screen.findByRole("alert")).toHaveTextContent("down");
+  });
+
+  it("names accounts, networks and firewall groups in the cloud's own words", async () => {
+    renderWithApi(<NetworksPanel />, fakeApi({ providers: vi.fn().mockResolvedValue(OTHER_CLOUD) }));
+    await userEvent.click(await screen.findByRole("button", { name: "Add network" }));
+    expect([await screen.findByLabelText("Subscription ID"), screen.getByLabelText("VNet ID"),
+      screen.getByLabelText("Network security group IDs"),
+      screen.getByText("Attach compute to the organization VNet by default")]).toHaveLength(4);
   });
 });

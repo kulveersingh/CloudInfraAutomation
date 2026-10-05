@@ -33,6 +33,9 @@ class ExampleProvider(CloudProvider):
     def landing_zone(self):
         return AwsProvider().landing_zone()
 
+    def network_problems(self, network):
+        return []
+
 
 # ---- registry ----
 
@@ -59,9 +62,9 @@ def test_new_providers_register_without_changing_the_core():
 
 def test_aws_vocabulary():
     assert AwsProvider().vocabulary() == Vocabulary(
-        isolation_unit="account", hierarchy_node="OU", iac_document="CloudFormation template", deploy_unit="stack",
-        preventive_policy="SCP", private_network="VPC", landing_zone_service="Control Tower",
-        control_catalog="Control Tower controls")
+        cloud="AWS", isolation_unit="account", hierarchy_node="OU", iac_document="CloudFormation template",
+        deploy_unit="stack", preventive_policy="SCP", private_network="VPC", firewall_group="security group",
+        landing_zone_service="Control Tower", control_catalog="Control Tower controls")
 
 
 def test_aws_default_regions():
