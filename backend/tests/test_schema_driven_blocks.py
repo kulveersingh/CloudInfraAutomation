@@ -132,7 +132,7 @@ def test_create_refuses_templates_with_lint_findings(seeded):
 # ---- API ----
 
 def test_cloudformation_catalog_search(client):
-    types = [entry["type"] for entry in client.get("/v1/catalog/cloudformation", params={"search": "sns"}).json()]
+    types = [entry["type"] for entry in client.get("/v1/catalog/aws/types", params={"search": "sns"}).json()]
     assert "AWS::SNS::Topic" in types
 
 

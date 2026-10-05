@@ -71,10 +71,10 @@ describe("PlatformApi", () => {
     expect(fetcher.mock.calls[0][0]).toBe("/v1/catalog");
   });
 
-  it("searches CloudFormation types with an encoded query", async () => {
+  it("searches a provider's resource types with an encoded query", async () => {
     const fetcher = respond([]);
     await new PlatformApi("", fetcher).searchCloudFormation("sns topic");
-    expect(fetcher.mock.calls[0][0]).toBe("/v1/catalog/cloudformation?search=sns%20topic");
+    expect(fetcher.mock.calls[0][0]).toBe("/v1/catalog/aws/types?search=sns%20topic");
   });
 
   it("reads cost centers", async () => {
