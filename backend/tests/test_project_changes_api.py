@@ -83,8 +83,8 @@ def test_preview_says_whether_removed_services_are_retained(client, provisioned)
     request["resources"] = [{"id": "archive", "type": "sqs.queue"}]
     summary = preview(client, provisioned, request).json()["summary"]
     assert (summary["removed_services"], summary["added_services"]) == (
-        [{"id": "uploads", "type": "s3.bucket", "retained": True},
-         {"id": "processor", "type": "lambda.function", "retained": False}], ["archive"])
+        [{"id": "uploads", "type": "s3.bucket", "retained": True, "removal": "retained"},
+         {"id": "processor", "type": "lambda.function", "retained": False, "removal": "deleted"}], ["archive"])
 
 
 def test_preview_lists_changed_services_and_added_environments(client, provisioned):
