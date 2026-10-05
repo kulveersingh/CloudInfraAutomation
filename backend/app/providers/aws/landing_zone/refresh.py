@@ -1,6 +1,6 @@
 """Refreshes the control catalog snapshot from the AWS Control Catalog API (read-only):
 
-    uv run --with boto3 python -m app.landing_zone.catalog.refresh
+    uv run --with boto3 python -m app.providers.aws.landing_zone.refresh
 
 Updates names and severities (ListControls), records each control's framework mappings (ListControlMappings) and
 resolves the CloudFormation-hooks prerequisite that proactive controls need, by its CT.CLOUDFORMATION.PR.1 alias.
@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from app.landing_zone.catalog.controls import DEFAULT_PATH, CatalogControl, ControlCatalogSnapshot, renamed
+from app.providers.aws.landing_zone.controls import control_identifier
 
 HOOKS_ALIAS = "CT.CLOUDFORMATION.PR.1"
 SOURCE = "AWS Control Catalog: ListControls and ListControlMappings"
@@ -24,9 +25,9 @@ class ControlCatalogRefresher:
 
     def refresh(self, snapshot: ControlCatalogSnapshot, path: Path) -> None:
         catalog = {summary["Arn"]: summary for summary in self._pages(self._client.list_controls, "Controls")}
-        frameworks = self._frameworks([control.arn for control in snapshot.controls.values()])
-        controls = {control.id: renamed(control, catalog[control.arn], frameworks[control.arn])
-                    for control in snapshot.controls.values() if control.arn in catalog}
+        frameworks = self._frameworks([control_identifier(control.id) for control in snapshot.controls.values()])
+        controls = {control.id: renamed(control, catalog[control_identifier(control.id)], frameworks[control_identifier(control.id)])
+                    for control in snapshot.controls.values() if control_identifier(control.id) in catalog}
         snapshot.refreshed(controls, self._hooks_prerequisite(catalog), self._today, SOURCE).write(path)
 
     def _frameworks(self, arns: list[str]) -> dict[str, set[str]]:

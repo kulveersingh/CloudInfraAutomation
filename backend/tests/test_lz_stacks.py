@@ -5,9 +5,9 @@ import yaml
 from cfnlint.api import ManualArgs, lint
 
 from app.landing_zone.catalog.templates import TemplateRegistry
-from app.landing_zone.cloudformation.bundle import STACK_FILES, LandingZoneBundle, StackSizeRule
-from app.landing_zone.cloudformation.guardrails import GuardrailPlan, ScpQuotaRule
 from app.landing_zone.designer import LandingZoneDesigner
+from app.providers.aws.landing_zone.cloudformation.bundle import STACK_FILES, LandingZoneBundle, StackSizeRule
+from app.providers.aws.landing_zone.cloudformation.guardrails import GuardrailPlan, ScpQuotaRule
 from tests.lz_factories import CATALOG, account_op, add_account, add_ou, answers, edited
 
 FLOW = {"source": "dev", "destination": "test", "protocol": "tcp", "port": 5432, "reason": "Data refresh"}

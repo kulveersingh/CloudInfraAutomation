@@ -3,6 +3,7 @@ import pytest
 from app.landing_zone.catalog.controls import CatalogError, ControlCatalogSnapshot
 from app.landing_zone.catalog.packs import PackRegistry
 from app.landing_zone.catalog.templates import TemplateRegistry
+from app.providers.aws.landing_zone.controls import control_identifier
 
 ROOT_USER = "5kvme4m5d2b4d7if2fs5yg2ui"
 REGION_DENY = "ka8e3pkqefnjsxuyc26ji580"
@@ -17,7 +18,7 @@ def write(path, text: str):
 # ---- control catalog snapshot ----
 
 def test_controls_use_global_identifiers():
-    assert ControlCatalogSnapshot.default().get(ROOT_USER).arn == f"arn:aws:controlcatalog:::control/{ROOT_USER}"
+    assert control_identifier(ControlCatalogSnapshot.default().get(ROOT_USER).id) == f"arn:aws:controlcatalog:::control/{ROOT_USER}"
 
 
 def test_snapshot_records_behavior_severity_and_implementation():

@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, ClassVar
 from app.errors import NotFoundError
 
 if TYPE_CHECKING:
+    from app.landing_zone.toolkit import LandingZoneToolkit
     from app.releases.risk import ResourceClassifier
     from app.synth.toolkit import ProjectToolkit
     from app.teardown.inventory import TeardownToolkit
@@ -47,6 +48,10 @@ class CloudProvider(ABC):
     @abstractmethod
     def teardown(self) -> "TeardownToolkit":
         """Data stores, backup notes and the locked vault, for teardowns (§21.9)."""
+
+    @abstractmethod
+    def landing_zone(self) -> "LandingZoneToolkit":
+        """Repository, renderer, limits and advice for this cloud's landing zone (§20)."""
 
     @abstractmethod
     def resources(self) -> "ResourceClassifier":

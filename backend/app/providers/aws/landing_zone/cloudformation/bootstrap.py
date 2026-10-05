@@ -1,6 +1,6 @@
 import yaml
 
-from app.landing_zone.cloudformation.base import FORMAT_VERSION, StackContext, StackRenderer
+from app.providers.aws.landing_zone.cloudformation.base import FORMAT_VERSION, StackContext, StackRenderer
 from app.providers.aws.project.render import NoAliasDumper
 
 GITHUB_OIDC_URL = "https://token.actions.githubusercontent.com"

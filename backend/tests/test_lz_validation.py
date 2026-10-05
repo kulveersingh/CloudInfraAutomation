@@ -1,6 +1,7 @@
 from app.landing_zone.design import AccountPlan, LandingZoneDesign, OuNode
 from app.landing_zone.designer import LandingZoneDesigner
 from app.landing_zone.validation import DesignValidator
+from app.providers.aws.landing_zone.limits import MaximumDepth
 from tests.lz_factories import CATALOG, answers
 
 
@@ -55,7 +56,7 @@ def test_depth_is_limited_to_five_levels():
         child = OuNode(key=f"deep{level}", name=f"Deep {level}", kind="parent")
         parent.children.append(child)
         parent = child
-    assert problems(structure) == ["OU 'Deep 4' is 6 levels deep; AWS Organizations allows 5."]
+    assert MaximumDepth().problems(structure, CATALOG) == ["OU 'Deep 4' is 6 levels deep; AWS Organizations allows 5."]
 
 
 def test_account_names_are_unique():

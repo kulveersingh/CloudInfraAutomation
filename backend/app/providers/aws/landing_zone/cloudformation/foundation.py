@@ -1,5 +1,5 @@
-from app.landing_zone.cloudformation.base import StackContext, StackRenderer, export
 from app.landing_zone.designer import AccountNamer
+from app.providers.aws.landing_zone.cloudformation.base import StackContext, StackRenderer, export
 
 LANDING_ZONE_VERSION = "3.3"
 ACCESS_LOG_RETENTION_DAYS = 3650

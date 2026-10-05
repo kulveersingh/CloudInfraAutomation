@@ -1,9 +1,9 @@
 import ipaddress
 
-from app.landing_zone.cloudformation.base import StackContext, StackRenderer
-from app.landing_zone.cloudformation.references import pascal
 from app.landing_zone.design import LandingZoneDesign
 from app.landing_zone.ipam import IpamPlanner
+from app.providers.aws.landing_zone.cloudformation.base import StackContext, StackRenderer
+from app.providers.aws.landing_zone.cloudformation.references import pascal
 
 VPC_PREFIX = 16
 SHARED_SLOT = "shared"

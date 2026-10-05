@@ -11,20 +11,20 @@ from app.landing_zone.catalog.controls import CatalogError, ControlCatalogSnapsh
 from app.landing_zone.catalog.packs import PROFILE_PACKS, PackRegistry
 from app.landing_zone.catalog.resolver import EnabledControl, PackResolver
 from app.landing_zone.catalog.templates import IndustryTemplate, TemplateRegistry
-from app.landing_zone.cloudformation.bundle import LandingZoneBundle, StackSizeRule
-from app.landing_zone.cloudformation.guardrails import GuardrailPlan, ScpQuotaRule
 from app.landing_zone.design import AccountPlan, LandingZoneDesign, OrgCatalog, OuNode
 from app.landing_zone.designer import LandingZoneDesigner
 from app.landing_zone.diagram import OuDiagramRenderer
 from app.landing_zone.edits import EditPermissions, TreeEdit, TreeEditor
 from app.landing_zone.executor import LandingZoneExecutor, LandingZoneOutputs
-from app.landing_zone.readback import GENERATOR, INPUT_FILE, KIND, REPOSITORY_NAME, LandingZoneSubject
+from app.landing_zone.readback import GENERATOR, INPUT_FILE, KIND, LandingZoneSubject
 from app.landing_zone.repository import LandingZoneRepository
 from app.landing_zone.request import LandingZoneRequest
 from app.landing_zone.states import DesignStatus
+from app.landing_zone.toolkit import LandingZoneToolkit
 from app.landing_zone.validation import DesignAdvisor, DesignValidator
 from app.networks.models import NetworkInput
 from app.networks.service import NetworkService
+from app.providers.base import DEFAULT_PROVIDER, ProviderRegistry, unknown_provider
 from app.readback.manifest import ManifestSealer, ManifestSigner
 from app.readback.subjects import ownership_properties
 from app.registry.service import RegistryService, require
@@ -64,6 +64,7 @@ class LandingZoneService:
         self._sealer = ManifestSealer(signer)
         self._policy = LandingZonePolicy()
         self._designer = LandingZoneDesigner.default()
+        self._providers = ProviderRegistry.default()
 
     @classmethod
     def for_session(cls, session: Session, github: GitHubPort, executor: LandingZoneExecutor, owner: str,
@@ -73,11 +74,12 @@ class LandingZoneService:
 
     def propose(self, request: LandingZoneRequest, actor: Actor) -> dict:
         self._policy.require_admin(actor)
-        design = self._design(request.answers, request.edits)
-        return {**self._explain(design), "files": LandingZoneBundle.default().render(design, self._catalog())}
+        design = self._design(request.answers, request.edits, request.provider)
+        return {**self._explain(design), "files": self._toolkit(design.provider).bundle.render(design, self._catalog())}
 
     def create(self, request: LandingZoneRequest, actor: Actor) -> dict:
         self._policy.require_admin(actor)
+        self._toolkit(request.provider)
         record = models.LandingZoneDesignRecord(version=self._repository.next_version(), provider=request.provider,
                                                 answers=request.answers.model_dump(mode="json"),
                                                 edits=TreeEditor.dump(request.edits),
@@ -144,7 +146,8 @@ class LandingZoneService:
         outputs = self._executor.apply(design)
         self._register_networks(design, outputs)
         record.status, record.decided_by, record.decision_comment = DesignStatus.APPLIED, actor.name, comment
-        record.repository, record.accounts = f"{self._owner}/{REPOSITORY_NAME}", outputs.accounts
+        repository = self._toolkit(record.provider).repository_name
+        record.repository, record.accounts = f"{self._owner}/{repository}", outputs.accounts
         self._repository.commit()
         return self._describe(record)
 
@@ -162,22 +165,31 @@ class LandingZoneService:
         return OrgCatalog(portfolios=[portfolio["id"] for portfolio in portfolios],
                           products=[product["id"] for portfolio in portfolios for product in portfolio["products"]])
 
-    def _design(self, answers: LandingZoneAnswers, edits: list[TreeEdit]) -> LandingZoneDesign:
+    def _toolkit(self, provider: str) -> LandingZoneToolkit:
+        if not self._providers.has(provider):
+            raise ValidationFailedError(unknown_provider(provider))
+        return self._providers.get(provider).landing_zone()
+
+    def _design(self, answers: LandingZoneAnswers, edits: list[TreeEdit],
+                provider: str = DEFAULT_PROVIDER) -> LandingZoneDesign:
         design = self._designer.design(answers, self._catalog())
         design.edit_problems = TreeEditor().apply(design, edits)
-        design.edits = list(edits)
+        design.edits, design.provider = list(edits), provider
         return design
 
     def _render(self, request: LandingZoneRequest) -> dict[str, str]:
-        return LandingZoneBundle.default().render(self._design(request.answers, request.edits), self._catalog())
+        design = self._design(request.answers, request.edits, request.provider)
+        return self._toolkit(design.provider).bundle.render(design, self._catalog())
 
     def _design_of(self, record: models.LandingZoneDesignRecord) -> LandingZoneDesign:
-        return self._design(LandingZoneAnswers.model_validate(record.answers), TreeEditor.parse(record.edits))
+        return self._design(LandingZoneAnswers.model_validate(record.answers), TreeEditor.parse(record.edits),
+                            record.provider)
 
     def _problems(self, design: LandingZoneDesign) -> list[str]:
+        catalog = self._catalog()
+        checks = self._toolkit(design.provider).checks
         return [*design.edit_problems, *DesignValidator.default().problems(design),
-                *ScpQuotaRule().problems(GuardrailPlan.for_design(design)),
-                *StackSizeRule().problems(design, self._catalog())]
+                *[problem for check in checks for problem in check.problems(design, catalog)]]
 
     def _template_summary(self, template: IndustryTemplate) -> dict:
         answers = LandingZoneAnswers.model_validate({**PREVIEW_ORGANIZATION, **template.answers})
@@ -197,7 +209,8 @@ class LandingZoneService:
         renderer = OuDiagramRenderer()
         controls = PackResolver.default().resolve(design).controls
         return {"ous": [_ou_json(ou, controls) for ou in design.root_ous], "problems": self._problems(design),
-                "warnings": DesignAdvisor.default().warnings(design),
+                "warnings": DesignAdvisor([*DesignAdvisor.default().rules,
+                                           *self._toolkit(design.provider).advice]).warnings(design),
                 "diagram": {"svg": renderer.svg(design), "mermaid": renderer.mermaid(design)}}
 
     def _record(self, design_id: uuid.UUID) -> models.LandingZoneDesignRecord:
@@ -210,12 +223,13 @@ class LandingZoneService:
         return record
 
     def _commit(self, design: LandingZoneDesign, record: models.LandingZoneDesignRecord, actor: Actor) -> str:
-        design_id = str(record.id)
-        self._github.create_repository(self._owner, REPOSITORY_NAME, marker=REPOSITORY_MARKER)
-        self._github.set_repository_properties(self._owner, REPOSITORY_NAME, ownership_properties(KIND, design_id))
+        design_id, toolkit = str(record.id), self._toolkit(record.provider)
+        repository = toolkit.repository_name
+        self._github.create_repository(self._owner, repository, marker=REPOSITORY_MARKER)
+        self._github.set_repository_properties(self._owner, repository, ownership_properties(KIND, design_id))
         files = self._sealer.seal(kind=KIND, id=design_id, revision=record.version, generator=GENERATOR,
-                                  input=INPUT_FILE, files=LandingZoneBundle.default().render(design, self._catalog()))
-        return self._github.commit_files(self._owner, REPOSITORY_NAME, files,
+                                  input=INPUT_FILE, files=toolkit.bundle.render(design, self._catalog()))
+        return self._github.commit_files(self._owner, repository, files,
                                          f"Landing zone design v{record.version} approved by {actor.name}")
 
     def _register_networks(self, design: LandingZoneDesign, outputs: LandingZoneOutputs) -> None:

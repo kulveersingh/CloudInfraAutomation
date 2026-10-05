@@ -1,6 +1,7 @@
-from app.landing_zone.cloudformation.base import StackContext, StackRenderer, export
-from app.landing_zone.cloudformation.references import OU_ID_PATTERN, ou_logical_id, pascal
 from app.landing_zone.design import OuNode
+from app.providers.aws.landing_zone.cloudformation.base import StackContext, StackRenderer, export
+from app.providers.aws.landing_zone.cloudformation.references import OU_ID_PATTERN, ou_logical_id, pascal
+from app.providers.aws.landing_zone.controls import control_identifier
 
 ARN_PATTERN = r"^arn:aws[0-9a-zA-Z_\-:\/]+$"
 CONTROL_BATCH = 10
@@ -52,7 +53,7 @@ class StructureStack(StackRenderer):
                 depends = [] if ou.created_by_control_tower else [f"Baseline{ou_logical_id(ou)}"]
                 if len(names) >= CONTROL_BATCH:
                     depends.append(names[-CONTROL_BATCH])
-                properties = {"ControlIdentifier": enabled.control.arn, "TargetIdentifier": context.references.arn(ou)}
+                properties = {"ControlIdentifier": control_identifier(enabled.control.id), "TargetIdentifier": context.references.arn(ou)}
                 if enabled.parameters:
                     properties["Parameters"] = [{"Key": key, "Value": value} for key, value in enabled.parameters.items()]
                 body = {"Type": "AWS::ControlTower::EnabledControl", "Properties": properties}

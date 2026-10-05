@@ -1,3 +1,4 @@
+from app.landing_zone.toolkit import LandingZoneToolkit
 from app.providers.base import CloudProvider, Vocabulary
 from app.releases.risk import ResourceClassifier
 from app.synth.toolkit import ProjectToolkit
@@ -30,3 +31,8 @@ class AwsProvider(CloudProvider):
         from app.providers.aws.releases import CloudFormationResourceClassifier
 
         return CloudFormationResourceClassifier()
+
+    def landing_zone(self) -> LandingZoneToolkit:
+        from app.providers.aws.landing_zone.toolkit import aws_landing_zone
+
+        return aws_landing_zone()

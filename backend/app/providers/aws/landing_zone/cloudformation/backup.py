@@ -1,4 +1,4 @@
-from app.landing_zone.cloudformation.base import StackContext, StackRenderer
+from app.providers.aws.landing_zone.cloudformation.base import StackContext, StackRenderer
 
 POLICY_VERSION = "2012-10-17"
 RETENTION_DAYS = 60

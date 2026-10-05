@@ -4,10 +4,7 @@ from collections import Counter
 from app.landing_zone.catalog.resolver import PackResolver
 from app.landing_zone.design import LandingZoneDesign, OuNode
 
-MAX_OU_DEPTH = 5
 # Accounts per OU that Control Tower can register, by number of governed Regions (§20.12.1 F5).
-REGISTRATION_LIMITS = [(15, 1000), (21, 600)]
-REGISTRATION_LIMIT_BEYOND = 680
 STRICT_RESIDENCY = "strict-residency"
 
 
@@ -47,12 +44,6 @@ class UniqueOuNames(DesignRule):
         return [f"OU name '{name}' is used more than once." for name, count in counts.items() if count > 1]
 
 
-class MaximumDepth(DesignRule):
-    def problems(self, design):
-        return [f"OU '{ou.name}' is {depth} levels deep; AWS Organizations allows {MAX_OU_DEPTH}."
-                for ou, depth in _depths(design.root_ous, 1) if depth > MAX_OU_DEPTH]
-
-
 class UniqueAccountNames(DesignRule):
     def problems(self, design):
         counts = Counter(account.name for account in design.walk_accounts())
@@ -74,7 +65,7 @@ class DesignValidator:
 
     @classmethod
     def default(cls) -> "DesignValidator":
-        return cls([EnvironmentOusAreSeparate(), SingleSecurityOu(), UniqueOuNames(), MaximumDepth(), UniqueAccountNames(),
+        return cls([EnvironmentOusAreSeparate(), SingleSecurityOu(), UniqueOuNames(), UniqueAccountNames(),
                     AccountsStayInTheirDomain()])
 
     def problems(self, design: LandingZoneDesign) -> list[str]:
@@ -84,9 +75,6 @@ class DesignValidator:
 def _descendants(ou: OuNode) -> list[OuNode]:
     return [node for child in ou.children for node in (child, *_descendants(child))]
 
-
-def _depths(nodes: list[OuNode], depth: int) -> list[tuple[OuNode, int]]:
-    return [pair for node in nodes for pair in ((node, depth), *_depths(node.children, depth + 1))]
 
 
 class DesignWarning(ABC):
@@ -112,21 +100,13 @@ class StrictResidencyBlocksReplication(DesignWarning):
                  "replicate S3 buckets.")]
 
 
-class OuSizeWithinRegistrationLimit(DesignWarning):
-    def warnings(self, design):
-        regions = len(design.answers.governed_regions)
-        limit = next((size for most, size in REGISTRATION_LIMITS if regions <= most), REGISTRATION_LIMIT_BEYOND)
-        return [f"OU '{ou.name}' plans {len(ou.accounts)} accounts; AWS Control Tower registers OUs of up to {limit} "
-                f"with {regions} governed Regions." for ou in design.walk() if len(ou.accounts) > limit]
-
-
 class DesignAdvisor:
     def __init__(self, rules: list[DesignWarning]):
-        self._rules = rules
+        self.rules = rules
 
     @classmethod
     def default(cls) -> "DesignAdvisor":
-        return cls([ControlPackWarnings(), StrictResidencyBlocksReplication(), OuSizeWithinRegistrationLimit()])
+        return cls([ControlPackWarnings(), StrictResidencyBlocksReplication()])
 
     def warnings(self, design: LandingZoneDesign) -> list[str]:
-        return [warning for rule in self._rules for warning in rule.warnings(design)]
+        return [warning for rule in self.rules for warning in rule.warnings(design)]

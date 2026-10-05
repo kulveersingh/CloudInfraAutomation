@@ -2,8 +2,8 @@ import math
 from dataclasses import dataclass, field
 
 from app.landing_zone.catalog.resolver import EnabledControl, PackResolver
-from app.landing_zone.cloudformation.references import OuReferences
 from app.landing_zone.design import LandingZoneDesign, OrgCatalog, OuNode
+from app.providers.aws.landing_zone.cloudformation.references import OuReferences
 
 SCP = "SERVICE_CONTROL_POLICY"
 RCP = "RESOURCE_CONTROL_POLICY"

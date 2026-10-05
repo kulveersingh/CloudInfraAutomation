@@ -1,7 +1,7 @@
 import re
 
 from app.landing_zone.designer import LandingZoneDesigner
-from app.landing_zone.executor import LocalLandingZoneExecutor
+from app.providers.aws.landing_zone.local_executor import LocalLandingZoneExecutor
 from tests.lz_factories import CATALOG, account_op, add_ou, answers, edited
 
 

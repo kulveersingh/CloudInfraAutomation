@@ -1,7 +1,7 @@
 import yaml
 
 from app.landing_zone.catalog.controls import ControlCatalogSnapshot
-from app.landing_zone.catalog.refresh import ControlCatalogRefresher
+from app.providers.aws.landing_zone.refresh import ControlCatalogRefresher
 
 ROOT_USER = "5kvme4m5d2b4d7if2fs5yg2ui"
 ARN = f"arn:aws:controlcatalog:::control/{ROOT_USER}"

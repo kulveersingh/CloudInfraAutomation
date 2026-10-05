@@ -1,7 +1,7 @@
-from app.landing_zone.cloudformation.base import StackContext, StackRenderer, export
-from app.landing_zone.cloudformation.references import OU_ID_PATTERN, pascal
 from app.landing_zone.design import AccountPlan, OuNode
 from app.landing_zone.designer import network_host_suffix
+from app.providers.aws.landing_zone.cloudformation.base import StackContext, StackRenderer, export
+from app.providers.aws.landing_zone.cloudformation.references import OU_ID_PATTERN, pascal
 
 ACCOUNT_FACTORY = "AWS Control Tower Account Factory"
 FOUNDATION_ACCOUNTS = ("log-archive", "audit")

@@ -2,7 +2,8 @@ from app.adapters.local_aws import LocalAws
 from app.adapters.local_github import LocalGitHub
 from app.adapters.ports import CloudPorts, GitHubPort, ProviderPort
 from app.config import Settings
-from app.landing_zone.executor import LandingZoneExecutor, LocalLandingZoneExecutor
+from app.landing_zone.executor import LandingZoneExecutor
+from app.providers.aws.landing_zone.local_executor import LocalLandingZoneExecutor
 from app.releases.executor import LocalReleaseExecutor, ReleaseExecutor
 
 

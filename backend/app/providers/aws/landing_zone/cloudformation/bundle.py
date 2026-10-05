@@ -3,18 +3,18 @@ from abc import ABC, abstractmethod
 
 import yaml
 
-from app.landing_zone.cloudformation.accounts import AccountsStack
-from app.landing_zone.cloudformation.backup import BackupStack
-from app.landing_zone.cloudformation.base import StackContext, StackRenderer
-from app.landing_zone.cloudformation.bootstrap import BootstrapStack
-from app.landing_zone.cloudformation.foundation import FoundationStack
-from app.landing_zone.cloudformation.network import NetworkStack
-from app.landing_zone.cloudformation.references import pascal
-from app.landing_zone.cloudformation.structure import StructureStack
 from app.landing_zone.design import LandingZoneDesign, OrgCatalog, OuNode
 from app.landing_zone.designer import network_host_suffix
 from app.landing_zone.diagram import OuDiagramRenderer
 from app.landing_zone.edits import TreeEditor
+from app.providers.aws.landing_zone.cloudformation.accounts import AccountsStack
+from app.providers.aws.landing_zone.cloudformation.backup import BackupStack
+from app.providers.aws.landing_zone.cloudformation.base import StackContext, StackRenderer
+from app.providers.aws.landing_zone.cloudformation.bootstrap import BootstrapStack
+from app.providers.aws.landing_zone.cloudformation.foundation import FoundationStack
+from app.providers.aws.landing_zone.cloudformation.network import NetworkStack
+from app.providers.aws.landing_zone.cloudformation.references import pascal
+from app.providers.aws.landing_zone.cloudformation.structure import StructureStack
 from app.providers.aws.project.render import NoAliasDumper
 
 STACKS: list[StackRenderer] = [FoundationStack(), StructureStack(), AccountsStack(), NetworkStack(), BackupStack(),

@@ -1,9 +1,9 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
-from app.landing_zone.cloudformation.guardrails import GuardrailPlan
-from app.landing_zone.cloudformation.references import OuReferences
 from app.landing_zone.design import LandingZoneDesign, OrgCatalog
+from app.providers.aws.landing_zone.cloudformation.guardrails import GuardrailPlan
+from app.providers.aws.landing_zone.cloudformation.references import OuReferences
 
 FORMAT_VERSION = "2010-09-09"
 

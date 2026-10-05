@@ -7,9 +7,8 @@ from pathlib import Path
 import yaml
 
 DEFAULT_PATH = Path(__file__).with_name("controls.yaml")
-CONTROL_ARN = "arn:aws:controlcatalog:::control/{}"
 HEADER = ("# Control Catalog snapshot: the controls the packs use. Refresh with\n"
-          "#   uv run --with boto3 python -m app.landing_zone.catalog.refresh\n"
+          "#   uv run --with boto3 python -m app.providers.aws.landing_zone.refresh\n"
           "# which also fills each control's framework mappings (ListControlMappings) and the id of the\n"
           "# CloudFormation-hooks prerequisite (CT.CLOUDFORMATION.PR.1) that proactive controls need.\n")
 
@@ -27,11 +26,6 @@ class CatalogControl:
     implementation: str
     frameworks: tuple[str, ...] = ()
     parameters: tuple[str, ...] = ()
-
-    @property
-    def arn(self) -> str:
-        """The global identifier Control Tower requires; regional AWS-GR_ identifiers are no longer supported."""
-        return CONTROL_ARN.format(self.id)
 
     @property
     def is_scp(self) -> bool:
