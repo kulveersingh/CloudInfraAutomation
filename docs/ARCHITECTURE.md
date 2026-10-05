@@ -3416,8 +3416,11 @@ Two teardown flows: **remove an environment** from a project, and **decommission
    - a release in progress in that environment;
    - the project's last environment (use decommission instead);
    - later, active sharing agreements (§4.11).
-3. **Approval (decision TD1):** a reviewer approves non-production environments. STAGE and PROD need a platform admin. Nobody approves their own request.
-4. **Teardown job.** It runs **forward-only with checkpoints**: deletions cannot be undone, so a failed step stops the job as `failed_needs_attention`. **Retry** resumes from the failed step, and every step is idempotent. The steps:
+3. **Approval per environment (decision TD1):** every environment's deletion has its own approval item.
+   - A reviewer approves a non-production environment; STAGE and PROD need a platform admin.
+   - Nobody approves their own request.
+   - Nothing in an environment is touched (not even backups) until that environment is approved.
+4. **Teardown job, one per approved environment.** It runs **forward-only with checkpoints**: deletions cannot be undone, so a failed step stops the job as `failed_needs_attention`. **Retry** resumes from the failed step, and every step is idempotent. The steps:
    1. Back up every data store, copy to the locked vault, verify (§21.9.1).
    2. Lift the production stack policy for this deletion only (recorded).
    3. Delete the application stack in each region, secondary region first.
@@ -3436,12 +3439,23 @@ Two teardown flows: **remove an environment** from a project, and **decommission
 
 #### 21.9.3 Decommission a project
 
-The same job runs for **every** environment (production last), then:
+A decommission request lists **every** environment of the project, and **each environment is approved separately** (TD1), with typed confirmation on the request.
+
+**Order:**
+- An approved non-production environment is torn down at once (its own job and revision, as in §21.9.2).
+- STAGE and PROD wait until every non-production environment in the request is torn down. PROD goes last.
+
+**When every environment is torn down:**
 - Commit the final revision with the teardown record and a README notice.
 - **Archive** the repository (read-only) and set its custom property `cloudinfra-state=decommissioned`.
 - Mark the project `decommissioned`.
 
-The platform never deletes the repository: it is the design record a restore starts from. Approval is always by a platform admin, with typed confirmation.
+**When an environment is rejected:**
+- That environment stays, and the remaining environments of the request are not torn down.
+- Environments already torn down stay torn down (their backups and revisions exist).
+- The request ends `partially_completed` and the project stays `active` with the environments that are left.
+
+The platform never deletes the repository: it is the design record a restore starts from.
 
 #### 21.9.4 Teardown record
 
@@ -3450,7 +3464,8 @@ Stored in the database (`teardowns`) **and** committed to the repository as `tea
 - the revision and request **before** the teardown, and its commit;
 - per environment and region: account and stack names;
 - per data store: service id, CloudFormation type, physical name, source ARN, **central recovery point ARN**, vault, completion time and `locked_until` (completion + 60 days);
-- requested and approved by, state, timestamps.
+- per environment: its approval (approver, decision, comment, time) and state (`pending_approval`, `approved`, `rejected`, `backing_up`, `deleting`, `completed`, `failed_needs_attention`);
+- requested by, overall state (`in_progress`, `completed`, `partially_completed`, `rejected`), timestamps.
 
 #### 21.9.5 Restore
 
@@ -3470,11 +3485,11 @@ Restore needs only the record and the recovery points, which stay for 60 days at
 |---|---|
 | `AwsPort` | `stack_resources`, `start_backup`, `start_copy`, `backup_status`, `vault_lock`, `set_stack_policy`, `delete_stack`, `empty_and_delete` (per data store type), `start_restore`, `import_stack`. `LocalAws` keeps stacks, vaults and recovery points in its JSON state, and **enforces the lock**: deleting a recovery point fails before 60 days, and always fails for any role except the super-user role (to test the policy). |
 | `GitHubPort` | `delete_environment`, `archive_repository`, `unarchive_repository`; `commit_files` can delete paths. |
-| Database | `teardowns` (the record above) and `teardown_recovery_points`; `projects.status` gains `decommissioned`; `jobs.kind` gains `teardown` and `restore`. |
+| Database | `teardowns` (the record above), `teardown_environments` (one approval and state per environment) and `teardown_recovery_points`; `projects.status` gains `decommissioned`; `jobs.kind` gains `teardown` and `restore`. |
 | Services | `TeardownService` (preview, request, approve/reject, retry, restore), `TeardownBlocker`s, `BackupTarget`s, the teardown and restore planners on the existing worker. |
 | Landing zone | `lz-backup` stack; super-user role; SCP and vault policy as in §21.9.1; the bootstrap StackSet's local vault. |
-| API | `POST /v1/projects/{name}/teardowns:preview`, `POST …/teardowns`, `GET …/teardowns`, `GET …/teardowns/{id}`, `POST …/teardowns/{id}:approve`, `:reject`, `:retry`, `:restore`. |
-| UI | **Tear down environment** and **Decommission** on the Projects page, with the preview and typed confirmation; an approvals list; a teardown detail page with job steps, backups and their `locked_until` dates, and **Restore**. |
+| API | `POST /v1/projects/{name}/teardowns:preview`, `POST …/teardowns`, `GET …/teardowns`, `GET …/teardowns/{id}`, `POST …/teardowns/{id}/environments/{env}:approve`, `:reject` and `:retry` (per environment), `POST …/teardowns/{id}:restore`. |
+| UI | **Tear down environment** and **Decommission** on the Projects page, with the preview and typed confirmation; an approvals list with one item per environment; a teardown detail page with job steps, backups and their `locked_until` dates, and **Restore**. |
 
 #### 21.9.7 Testing (TDD, 100% coverage)
 
@@ -3483,10 +3498,12 @@ Restore needs only the record and the recovery points, which stay for 60 days at
   - an open change;
   - a release in progress;
   - the last environment.
-- **Approvals:**
-  - reviewer for non-prod, platform admin for STAGE/PROD and decommission;
+- **Approvals per environment:**
+  - one approval item per environment, also in a decommission;
+  - reviewer for non-prod, platform admin for STAGE/PROD;
   - no self-approval;
-  - typed confirmation.
+  - typed confirmation;
+  - nothing in an environment runs before its own approval.
 - **Job:**
   - backups and copies complete before any delete;
   - an unlocked vault, or a failed backup or copy, stops with nothing deleted;
@@ -3499,7 +3516,11 @@ Restore needs only the record and the recovery points, which stay for 60 days at
   - deleting a recovery point before 60 days fails for everyone;
   - after 60 days it fails for the platform and succeeds only for the super-user role;
   - the platform has no code path that deletes one.
-- **Decommission:** every environment torn down, production last; repository archived and marked; project `decommissioned`.
+- **Decommission:**
+  - each environment waits for its own approval;
+  - STAGE and PROD wait for the non-production environments, PROD last;
+  - when all are done: repository archived and marked, project `decommissioned`;
+  - one rejection leaves the rest, and the request ends `partially_completed`.
 - **Restore:**
   - restore jobs to the original names;
   - IMPORT then deploy;
@@ -3511,7 +3532,7 @@ Restore needs only the record and the recovery points, which stay for 60 days at
 
 | # | Decision | Recommendation |
 |---|---|---|
-| TD1 | Approvals | Reviewer for non-prod environments; platform admin for STAGE/PROD and decommission; never self-approval; typed project name |
+| TD1 | Approvals | **Decided: one approval per environment, also within a decommission.** Reviewer for non-prod environments; platform admin for STAGE/PROD; never self-approval; typed project name |
 | TD2 | Data stores kept by retain policies | **Delete them after their backups are verified in the locked vault** (otherwise teardown leaves billed, unmanaged buckets and tables) |
 | TD3 | Backup retention | **Decided: 60 days minimum for every environment**; Vault Lock compliance mode; no automatic deletion; manual deletion by super users only |
 | TD4 | How the repository is updated | **Platform commits revision *n+1* directly to main** after approval (like the landing zone, §20.7), because the infrastructure is already gone; no pull request |
