@@ -26,6 +26,15 @@ describe("PlatformApi", () => {
     ["projectChange", ["invoice-ingest", "chg-1"], "GET", "/v1/projects/invoice-ingest/changes/chg-1"],
     ["mergeChange", ["invoice-ingest", "chg-1"], "POST", "/v1/projects/invoice-ingest/changes/chg-1:merge"],
     ["closeChange", ["invoice-ingest", "chg-1"], "POST", "/v1/projects/invoice-ingest/changes/chg-1:close"],
+    ["previewTeardown", ["invoice-ingest", { scope: "environment", environments: ["dev"] }], "POST",
+      "/v1/projects/invoice-ingest/teardowns:preview"],
+    ["requestTeardown", ["invoice-ingest", { scope: "project", environments: [], confirmation: "invoice-ingest" }], "POST",
+      "/v1/projects/invoice-ingest/teardowns"],
+    ["teardowns", [], "GET", "/v1/teardowns"],
+    ["decideTeardownEnvironment", ["invoice-ingest", "td-1", "dev", "approve", "ok"], "POST",
+      "/v1/projects/invoice-ingest/teardowns/td-1/environments/dev:approve"],
+    ["restoreTeardown", ["invoice-ingest", "td-1", "approve-restore", "ok"], "POST",
+      "/v1/projects/invoice-ingest/teardowns/td-1:approve-restore"],
   ] as const)("%s calls the change API", async (method, args, verb, path) => {
     const fetcher = respond({});
     await (new PlatformApi("", fetcher)[method] as (...values: unknown[]) => Promise<unknown>)(...args);

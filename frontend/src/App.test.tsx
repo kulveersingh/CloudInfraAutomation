@@ -42,6 +42,18 @@ describe("App", () => {
     expect(await screen.findByRole("heading", { name: "Change invoice-ingest" })).toBeInTheDocument();
   });
 
+  it("opens a teardown request for a project", async () => {
+    renderWithApi(<App />);
+    await userEvent.click(await screen.findByRole("button", { name: "Decommission invoice-ingest" }));
+    expect(await screen.findByRole("heading", { name: "Decommission invoice-ingest" })).toBeInTheDocument();
+  });
+
+  it("navigates to teardowns", async () => {
+    renderWithApi(<App />);
+    await userEvent.click(screen.getByRole("button", { name: "Teardowns" }));
+    expect(await screen.findByRole("heading", { name: "Teardowns" })).toBeInTheDocument();
+  });
+
   it("navigates to the release console", async () => {
     renderWithApi(<App />);
     await userEvent.click(screen.getByRole("button", { name: "Release console" }));

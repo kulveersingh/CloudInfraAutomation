@@ -1,7 +1,7 @@
 import { vi } from "vitest";
 import type {
   AccountInfo, CatalogControlInfo, CatalogEntry, ControlPackCatalog, CostCenterSettings, IndustryTemplate, TemplateSummary, EnvironmentInfo, JobStatus, LandingZoneDesign, LandingZoneDesignDetail,
-  LandingZoneProposal, LandingZoneReadBack, NetworkInfo, ProjectChange, ProjectChangePreview, ProjectReadBack, ProjectRequest, NetworkOption, OuInfo, PipelineStage, PlatformApiPort, Portfolio, PreviewResult,
+  LandingZoneProposal, LandingZoneReadBack, NetworkInfo, ProjectChange, Teardown, TeardownPreview, ProjectChangePreview, ProjectReadBack, ProjectRequest, NetworkOption, OuInfo, PipelineStage, PlatformApiPort, Portfolio, PreviewResult,
   ProjectSummary, RegionInfo, Release,
 } from "../api/types";
 import { LandingZoneDraft } from "../landingZone/LandingZoneDraft";
@@ -74,8 +74,31 @@ export const PREVIEW: PreviewResult = {
 
 export const PROJECTS: ProjectSummary[] = [
   { name: "invoice-ingest", portfolio_id: "pf-payments", product_id: "pr-invoicing", resilience_mode: "dr",
-    status: "active", revision: 1, open_change: null },
+    status: "active", revision: 1, open_change: null, environments: ["dev", "prod"] },
 ];
+
+export const TEARDOWN_PREVIEW: TeardownPreview = {
+  scope: "environment", backup_account: "999999999999", retention_days: 60, blockers: [],
+  environments: [{
+    environment: "dev", account_id: "222222222222", regions: ["us-east-1"], approver_role: "reviewer",
+    stacks: ["invoice-ingest", "cloudinfra-bootstrap-invoice-ingest"],
+    data_stores: [{ service_id: "uploads", resource_type: "AWS::S3::Bucket", physical_name: "invoice-ingest--uploads",
+      region: "us-east-1", retained: true }, { service_id: "ledger", resource_type: "AWS::RDS::DBCluster",
+      physical_name: "ledger-db", region: "us-east-1", retained: false }],
+    not_backed_up: ["processor (lambda.function): rebuilt from the template and the application repository",
+      "CloudWatch Logs: not supported by AWS Backup"],
+  }],
+};
+
+export function teardown(overrides: Partial<Teardown> = {}): Teardown {
+  return {
+    id: "td-1", project_name: "invoice-ingest", scope: "environment", state: "in_progress", requested_by: "jordan",
+    base_revision: 1, base_commit: "abcdef1234567890abcdef1234567890abcdef12", created_at: "2026-10-04T10:00:00",
+    environments: [{ environment: "dev", state: "pending_approval", approver_role: "reviewer", decided_by: null,
+      decision_comment: null, revision: null, error: null, job_id: null, recovery_points: [] }],
+    restore: null, ...overrides,
+  };
+}
 
 export const PROJECT_REQUEST: ProjectRequest = {
   project_name: "invoice-ingest",
@@ -275,6 +298,11 @@ export function fakeApi(overrides: Partial<PlatformApiPort> = {}): PlatformApiPo
     projects: vi.fn().mockResolvedValue(PROJECTS),
     job: vi.fn().mockResolvedValue(job("succeeded")),
     projectReadBack: vi.fn().mockResolvedValue(PROJECT_READ_BACK),
+    previewTeardown: vi.fn().mockResolvedValue(TEARDOWN_PREVIEW),
+    requestTeardown: vi.fn().mockResolvedValue(teardown()),
+    teardowns: vi.fn().mockResolvedValue([teardown()]),
+    decideTeardownEnvironment: vi.fn().mockResolvedValue(teardown()),
+    restoreTeardown: vi.fn().mockResolvedValue(teardown()),
     previewChange: vi.fn().mockResolvedValue(CHANGE_PREVIEW),
     createChange: vi.fn().mockResolvedValue(projectChange()),
     projectChange: vi.fn().mockResolvedValue(projectChange({ state: "open",

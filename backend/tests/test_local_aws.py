@@ -43,3 +43,22 @@ def test_delete_bootstrap(local_aws):
 
 def test_delete_missing_bootstrap_is_harmless(local_aws):
     assert local_aws.delete_bootstrap_stack(bootstrap_request()) is None
+
+
+def test_stack_operations_are_recorded(local_aws):
+    local_aws.allow_stack_deletion("222222222222", "us-east-1", "demo")
+    local_aws.delete_stack("222222222222", "us-east-1", "demo")
+    local_aws.delete_data_store("222222222222", "us-east-1", "AWS::S3::Bucket", "demo--uploads")
+    local_aws.import_stack("222222222222", "us-east-1", "demo", ["UploadsBucket"])
+    assert [operation["operation"] for operation in local_aws.operations()] == [
+        "allow_stack_deletion", "delete_stack", "delete_data_store", "import_stack"]
+
+
+def test_operations_name_their_target(local_aws):
+    local_aws.delete_data_store("222222222222", "us-east-1", "AWS::DynamoDB::Table", "demo--orders")
+    assert local_aws.operations() == [{"operation": "delete_data_store", "account": "222222222222",
+                                       "region": "us-east-1", "target": "AWS::DynamoDB::Table demo--orders"}]
+
+
+def test_no_operations_yet(local_aws):
+    assert local_aws.operations() == []

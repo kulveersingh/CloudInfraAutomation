@@ -3,7 +3,7 @@ import subprocess
 import pytest
 
 from app.adapters.local_github import LocalGitHub
-from app.adapters.ports import MergeConflictError, RepositoryConflictError
+from app.adapters.ports import MergeConflictError, RepositoryArchivedError, RepositoryConflictError
 
 
 def git(local_github: LocalGitHub, *args: str) -> str:
@@ -223,3 +223,40 @@ def test_merging_one_pull_request_leaves_the_others_open(local_github):
     local_github.open_pull_request("acme", "demo-infra", "two", "Two", "Body")
     local_github.merge_pull_request("acme", "demo-infra", 2)
     assert local_github.pull_request("acme", "demo-infra", 1)["state"] == "open"
+
+
+# ---- teardown support ----
+
+def test_commit_can_delete_paths(local_github):
+    with_main(local_github)
+    local_github.commit_files("acme", "demo-infra", {"c.txt": "3"}, "change", deleted=["b.txt"])
+    assert local_github.read_files("acme", "demo-infra").files == {"a.txt": "1", "c.txt": "3"}
+
+
+def test_delete_environment(local_github):
+    with_main(local_github)
+    local_github.set_environment("acme", "demo-infra", "dev", {"A": "1"})
+    local_github.delete_environment("acme", "demo-infra", "dev")
+    with pytest.raises(KeyError):
+        local_github.environment("acme", "demo-infra", "dev")
+
+
+def test_deleting_a_missing_environment_does_nothing(local_github):
+    with_main(local_github)
+    local_github.delete_environment("acme", "demo-infra", "dev")
+
+
+def test_archived_repositories_refuse_commits(local_github):
+    with_main(local_github)
+    local_github.archive_repository("acme", "demo-infra")
+    with pytest.raises(RepositoryArchivedError):
+        local_github.commit_files("acme", "demo-infra", {"a.txt": "x"}, "change")
+
+
+def test_unarchived_repositories_accept_commits_again(local_github):
+    with_main(local_github)
+    local_github.archive_repository("acme", "demo-infra")
+    local_github.unarchive_repository("acme", "demo-infra")
+    local_github.commit_files("acme", "demo-infra", {"a.txt": "x"}, "change")
+    assert (local_github.read_files("acme", "demo-infra").files["a.txt"],
+            local_github.is_archived("acme", "demo-infra")) == ("x", False)

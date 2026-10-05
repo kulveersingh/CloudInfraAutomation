@@ -8,23 +8,23 @@ import { ProjectsPage } from "./ProjectsPage";
 
 describe("ProjectsPage", () => {
   it("lists projects", async () => {
-    renderWithApi(<ProjectsPage onNewProject={() => {}} onChangeProject={() => {}} />);
+    renderWithApi(<ProjectsPage onNewProject={() => {}} onChangeProject={() => {}} onTeardown={() => {}} />);
     expect(await screen.findByText("invoice-ingest")).toBeInTheDocument();
   });
 
   it("shows the resilience mode", async () => {
-    renderWithApi(<ProjectsPage onNewProject={() => {}} onChangeProject={() => {}} />);
+    renderWithApi(<ProjectsPage onNewProject={() => {}} onChangeProject={() => {}} onTeardown={() => {}} />);
     expect(await screen.findByText("DR · active/standby")).toBeInTheDocument();
   });
 
   it("shows an empty state", async () => {
-    renderWithApi(<ProjectsPage onNewProject={() => {}} onChangeProject={() => {}} />, fakeApi({ projects: vi.fn().mockResolvedValue([]) }));
+    renderWithApi(<ProjectsPage onNewProject={() => {}} onChangeProject={() => {}} onTeardown={() => {}} />, fakeApi({ projects: vi.fn().mockResolvedValue([]) }));
     expect(await screen.findByText(/No projects yet/)).toBeInTheDocument();
   });
 
   it("shows loading errors", async () => {
     const api = fakeApi({ projects: vi.fn().mockRejectedValue(new Error("API down")) });
-    renderWithApi(<ProjectsPage onNewProject={() => {}} onChangeProject={() => {}} />, api);
+    renderWithApi(<ProjectsPage onNewProject={() => {}} onChangeProject={() => {}} onTeardown={() => {}} />, api);
     expect(await screen.findByRole("alert")).toHaveTextContent("API down");
   });
 
@@ -36,32 +36,47 @@ describe("ProjectsPage", () => {
 
     it("offers Change infrastructure for active projects", async () => {
       const onChange = vi.fn();
-      renderWithApi(<ProjectsPage onNewProject={() => {}} onChangeProject={onChange} />);
+      renderWithApi(<ProjectsPage onNewProject={() => {}} onChangeProject={onChange} onTeardown={() => {}} />);
       await userEvent.click(await screen.findByRole("button", { name: "Change infrastructure for invoice-ingest" }));
       expect(onChange).toHaveBeenCalledWith("invoice-ingest");
     });
 
+    it.each([["Tear down an environment of invoice-ingest", "environment"], ["Decommission invoice-ingest", "project"]] as const)(
+      "%s starts a teardown", async (label, scope) => {
+        const onTeardown = vi.fn();
+        renderWithApi(<ProjectsPage onNewProject={() => {}} onChangeProject={() => {}} onTeardown={onTeardown} />);
+        await userEvent.click(await screen.findByRole("button", { name: label }));
+        expect(onTeardown).toHaveBeenCalledWith("invoice-ingest", scope);
+      });
+
+    it("does not offer teardown for decommissioned projects", async () => {
+      renderWithApi(<ProjectsPage onNewProject={() => {}} onChangeProject={() => {}} onTeardown={() => {}} />,
+        withProjects([{ ...PROJECTS[0], status: "decommissioned" }]));
+      await screen.findByText("invoice-ingest");
+      expect(screen.queryByRole("button", { name: /Decommission/ })).toBeNull();
+    });
+
     it("does not offer changes while a project is provisioning", async () => {
-      renderWithApi(<ProjectsPage onNewProject={() => {}} onChangeProject={() => {}} />,
+      renderWithApi(<ProjectsPage onNewProject={() => {}} onChangeProject={() => {}} onTeardown={() => {}} />,
         withProjects([{ ...PROJECTS[0], status: "provisioning" }]));
       await screen.findByText("invoice-ingest");
       expect(screen.queryByRole("button", { name: /Change infrastructure/ })).toBeNull();
     });
 
     it("shows the revision", async () => {
-      renderWithApi(<ProjectsPage onNewProject={() => {}} onChangeProject={() => {}} />);
+      renderWithApi(<ProjectsPage onNewProject={() => {}} onChangeProject={() => {}} onTeardown={() => {}} />);
       expect(await screen.findByText("r1")).toBeInTheDocument();
     });
 
     it("links the open change's pull request instead of offering another change", async () => {
-      renderWithApi(<ProjectsPage onNewProject={() => {}} onChangeProject={() => {}} />, withProjects());
+      renderWithApi(<ProjectsPage onNewProject={() => {}} onChangeProject={() => {}} onTeardown={() => {}} />, withProjects());
       const link = await screen.findByRole("link", { name: "Revision 2 · pull request #1" });
       expect([link.getAttribute("href"), screen.queryByRole("button", { name: /Change infrastructure/ })]).toEqual(
         ["https://github.com/acme-platform/invoice-ingest-infra/pull/1", null]);
     });
 
     it("shows a queued change without a link", async () => {
-      renderWithApi(<ProjectsPage onNewProject={() => {}} onChangeProject={() => {}} />,
+      renderWithApi(<ProjectsPage onNewProject={() => {}} onChangeProject={() => {}} onTeardown={() => {}} />,
         withProjects([{ ...OPEN, open_change: { ...OPEN_CHANGE, state: "queued", pull_request: null } }]));
       expect(await screen.findByText("Revision 2 · queued")).toBeInTheDocument();
     });
@@ -69,7 +84,7 @@ describe("ProjectsPage", () => {
     it.each([["Simulate merge", "mergeChange"], ["Close", "closeChange"]] as const)(
       "%s records the outcome and reloads", async (label, method) => {
         const api = withProjects();
-        renderWithApi(<ProjectsPage onNewProject={() => {}} onChangeProject={() => {}} />, api);
+        renderWithApi(<ProjectsPage onNewProject={() => {}} onChangeProject={() => {}} onTeardown={() => {}} />, api);
         await userEvent.click(await screen.findByRole("button", { name: `${label} revision 2 of invoice-ingest` }));
         expect([vi.mocked(api[method]).mock.calls[0], vi.mocked(api.projects).mock.calls.length]).toEqual(
           [["invoice-ingest", "chg-1"], 2]);
@@ -78,7 +93,7 @@ describe("ProjectsPage", () => {
     it("shows merge errors", async () => {
       const api = fakeApi({ projects: vi.fn().mockResolvedValue([OPEN]),
         mergeChange: vi.fn().mockRejectedValue(new Error("main moved")) });
-      renderWithApi(<ProjectsPage onNewProject={() => {}} onChangeProject={() => {}} />, api);
+      renderWithApi(<ProjectsPage onNewProject={() => {}} onChangeProject={() => {}} onTeardown={() => {}} />, api);
       await userEvent.click(await screen.findByRole("button", { name: "Simulate merge revision 2 of invoice-ingest" }));
       expect(await screen.findByRole("alert")).toHaveTextContent("main moved");
     });
@@ -86,7 +101,7 @@ describe("ProjectsPage", () => {
 
   it("starts a new project", async () => {
     const onNewProject = vi.fn();
-    renderWithApi(<ProjectsPage onNewProject={onNewProject} onChangeProject={() => {}} />);
+    renderWithApi(<ProjectsPage onNewProject={onNewProject} onChangeProject={() => {}} onTeardown={() => {}} />);
     await userEvent.click(screen.getByRole("button", { name: "New project" }));
     expect(onNewProject).toHaveBeenCalled();
   });
