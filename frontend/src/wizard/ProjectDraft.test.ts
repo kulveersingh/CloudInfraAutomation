@@ -73,6 +73,33 @@ describe("ProjectDraft", () => {
     expect(draft.values.resources[0].settings).toEqual({});
   });
 
+  it("loads a project read back from its repository", () => {
+    const request = ready().withResource("lambda.function").withResourceSetting("function", "memory_mb", 512)
+      .withResource("AWS::SNS::Topic").withResourceProperties("topic", { DisplayName: "A" })
+      .withConnection({ kind: "iam.access", source: "function", target: "bucket", access: "read" }).toRequest();
+    expect(ProjectDraft.fromRequest(request).toRequest()).toEqual(request);
+  });
+
+  it("reads settings and CloudFormation properties apart", () => {
+    const request = ready().toRequest();
+    const loaded = ProjectDraft.fromRequest({ ...request, resources: [
+      { id: "topic", type: "AWS::SNS::Topic", config: { properties: { DisplayName: "A" } } },
+      { id: "function", type: "lambda.function", config: { memory_mb: 512 } }, { id: "bucket", type: "s3.bucket" }] });
+    expect(loaded.values.resources).toEqual([
+      { id: "topic", type: "AWS::SNS::Topic", properties: { DisplayName: "A" }, settings: {} },
+      { id: "function", type: "lambda.function", properties: {}, settings: { memory_mb: 512 } },
+      { id: "bucket", type: "s3.bucket", properties: {}, settings: {} }]);
+  });
+
+  it("keeps the default secondary region for single-region projects", () => {
+    expect(ProjectDraft.fromRequest(ready().toRequest()).values.secondaryRegion).toBe("us-east-2");
+  });
+
+  it("loads the secondary region of a DR project", () => {
+    const request = ready().withMode("dr").withSecondary("us-west-2").toRequest();
+    expect(ProjectDraft.fromRequest(request).values.secondaryRegion).toBe("us-west-2");
+  });
+
   it("removes a connection by position", () => {
     const draft = ready().withConnection({ kind: "iam.access", source: "a", target: "b", access: "read" })
       .withoutConnection(0);

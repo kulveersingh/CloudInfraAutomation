@@ -36,6 +36,12 @@ describe("App", () => {
     expect(await screen.findByRole("heading", { name: "New project" })).toBeInTheDocument();
   });
 
+  it("opens Change infrastructure for a project", async () => {
+    renderWithApi(<App />);
+    await userEvent.click(await screen.findByRole("button", { name: "Change infrastructure for invoice-ingest" }));
+    expect(await screen.findByRole("heading", { name: "Change invoice-ingest" })).toBeInTheDocument();
+  });
+
   it("navigates to the release console", async () => {
     renderWithApi(<App />);
     await userEvent.click(screen.getByRole("button", { name: "Release console" }));

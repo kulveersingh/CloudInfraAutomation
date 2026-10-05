@@ -17,6 +17,27 @@ describe("PlatformApi", () => {
     expect(fetcher).toHaveBeenCalledWith("/v1/org-registry", expect.objectContaining({ method: "GET" }));
   });
 
+  it.each([
+    ["projectReadBack", ["invoice-ingest"], "GET", "/v1/projects/invoice-ingest/repository:read-back"],
+    ["previewChange", ["invoice-ingest", { request: REQUEST, base_commit: "abc" }], "POST",
+      "/v1/projects/invoice-ingest/changes:preview"],
+    ["createChange", ["invoice-ingest", { request: REQUEST, base_commit: "abc", confirm_removals: true }], "POST",
+      "/v1/projects/invoice-ingest/changes"],
+    ["projectChange", ["invoice-ingest", "chg-1"], "GET", "/v1/projects/invoice-ingest/changes/chg-1"],
+    ["mergeChange", ["invoice-ingest", "chg-1"], "POST", "/v1/projects/invoice-ingest/changes/chg-1:merge"],
+    ["closeChange", ["invoice-ingest", "chg-1"], "POST", "/v1/projects/invoice-ingest/changes/chg-1:close"],
+  ] as const)("%s calls the change API", async (method, args, verb, path) => {
+    const fetcher = respond({});
+    await (new PlatformApi("", fetcher)[method] as (...values: unknown[]) => Promise<unknown>)(...args);
+    expect(fetcher).toHaveBeenCalledWith(path, expect.objectContaining({ method: verb }));
+  });
+
+  it("sends the change request body", async () => {
+    const fetcher = respond({});
+    await new PlatformApi("", fetcher).createChange("invoice-ingest", { request: REQUEST, base_commit: "abc", confirm_removals: false });
+    expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({ request: REQUEST, base_commit: "abc", confirm_removals: false });
+  });
+
   it("returns parsed JSON", async () => {
     expect(await new PlatformApi("", respond([{ id: "dev" }])).environments()).toEqual([{ id: "dev" }]);
   });

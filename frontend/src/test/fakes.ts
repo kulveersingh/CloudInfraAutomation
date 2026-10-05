@@ -1,7 +1,7 @@
 import { vi } from "vitest";
 import type {
   AccountInfo, CatalogControlInfo, CatalogEntry, ControlPackCatalog, CostCenterSettings, IndustryTemplate, TemplateSummary, EnvironmentInfo, JobStatus, LandingZoneDesign, LandingZoneDesignDetail,
-  LandingZoneProposal, LandingZoneReadBack, NetworkInfo, NetworkOption, OuInfo, PipelineStage, PlatformApiPort, Portfolio, PreviewResult,
+  LandingZoneProposal, LandingZoneReadBack, NetworkInfo, ProjectChange, ProjectChangePreview, ProjectReadBack, ProjectRequest, NetworkOption, OuInfo, PipelineStage, PlatformApiPort, Portfolio, PreviewResult,
   ProjectSummary, RegionInfo, Release,
 } from "../api/types";
 import { LandingZoneDraft } from "../landingZone/LandingZoneDraft";
@@ -74,8 +74,39 @@ export const PREVIEW: PreviewResult = {
 
 export const PROJECTS: ProjectSummary[] = [
   { name: "invoice-ingest", portfolio_id: "pf-payments", product_id: "pr-invoicing", resilience_mode: "dr",
-    status: "active" },
+    status: "active", revision: 1, open_change: null },
 ];
+
+export const PROJECT_REQUEST: ProjectRequest = {
+  project_name: "invoice-ingest",
+  ownership: { portfolio_id: "pf-payments", product_id: "pr-invoicing", data_classification: "confidential" },
+  resilience: { mode: "single", primary_region: "us-east-1", secondary_region: null },
+  environments: ["dev"],
+  resources: [{ id: "uploads", type: "s3.bucket" },
+    { id: "processor", type: "lambda.function", config: { memory_mb: 512 } }],
+  connections: [{ kind: "event.notify", source: "uploads", target: "processor", prefix: "incoming/" }],
+  network: { attach_compute: true, selections: {} },
+};
+
+export const PROJECT_READ_BACK: ProjectReadBack = {
+  verified: true, commit_sha: "abcdef1234567890abcdef1234567890abcdef12", findings: [],
+  design: { kind: "project", id: "invoice-ingest", revision: 1 }, request: PROJECT_REQUEST,
+};
+
+export const CHANGE_PREVIEW: ProjectChangePreview = {
+  files: { "template.yaml": "Resources: {}\n" }, tags: {}, targets: {}, lint: [],
+  summary: { added_services: ["bucket"], removed_services: [], changed_services: ["processor"], added_environments: [],
+    changed_files: ["infra.json", "template.yaml"] },
+};
+
+export function projectChange(overrides: Partial<ProjectChange> = {}): ProjectChange {
+  return {
+    id: "chg-1", project_name: "invoice-ingest", revision: 2, state: "queued",
+    base_commit: "abcdef1234567890abcdef1234567890abcdef12", branch: "cloudinfra/change-2", pull_request: null,
+    summary: CHANGE_PREVIEW.summary, created_by: "sam", merge_commit: null, job_id: "job-1",
+    created_at: "2026-10-04T10:00:00", ...overrides,
+  };
+}
 
 export function release(overrides: Partial<Release> = {}): Release {
   return {
@@ -243,6 +274,13 @@ export function fakeApi(overrides: Partial<PlatformApiPort> = {}): PlatformApiPo
     createProject: vi.fn().mockResolvedValue({ job_id: "job-1" }),
     projects: vi.fn().mockResolvedValue(PROJECTS),
     job: vi.fn().mockResolvedValue(job("succeeded")),
+    projectReadBack: vi.fn().mockResolvedValue(PROJECT_READ_BACK),
+    previewChange: vi.fn().mockResolvedValue(CHANGE_PREVIEW),
+    createChange: vi.fn().mockResolvedValue(projectChange()),
+    projectChange: vi.fn().mockResolvedValue(projectChange({ state: "open",
+      pull_request: { number: 1, url: "https://github.com/acme-platform/invoice-ingest-infra/pull/1" } })),
+    mergeChange: vi.fn().mockResolvedValue(projectChange({ state: "merged", merge_commit: "f".repeat(40) })),
+    closeChange: vi.fn().mockResolvedValue(projectChange({ state: "closed" })),
     setActor: vi.fn(),
     landingZoneTemplates: vi.fn().mockResolvedValue(TEMPLATES),
     landingZoneTemplate: vi.fn().mockResolvedValue(SAAS_TEMPLATE),

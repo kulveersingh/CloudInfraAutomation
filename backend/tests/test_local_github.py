@@ -3,7 +3,7 @@ import subprocess
 import pytest
 
 from app.adapters.local_github import LocalGitHub
-from app.adapters.ports import RepositoryConflictError
+from app.adapters.ports import MergeConflictError, RepositoryConflictError
 
 
 def git(local_github: LocalGitHub, *args: str) -> str:
@@ -118,3 +118,92 @@ def test_repository_properties_are_stored(local_github):
 def test_new_repository_has_no_properties(local_github):
     local_github.create_repository("acme", "demo-infra", marker="req-1")
     assert local_github.repository_properties("acme", "demo-infra") == {}
+
+
+# ---- branches and pull requests ----
+
+def with_main(local_github) -> str:
+    local_github.create_repository("acme", "demo-infra", marker="req-1")
+    return local_github.commit_files("acme", "demo-infra", {"a.txt": "1", "b.txt": "2"}, "Initial")
+
+
+def test_commit_to_a_new_branch_starts_from_main(local_github):
+    main = with_main(local_github)
+    local_github.commit_files("acme", "demo-infra", {"a.txt": "changed"}, "change", branch="feature")
+    assert (local_github.read_files("acme", "demo-infra", branch="feature").files,
+            local_github.read_files("acme", "demo-infra").commit_sha) == ({"a.txt": "changed", "b.txt": "2"}, main)
+
+
+def test_reading_an_unknown_branch_is_empty(local_github):
+    with_main(local_github)
+    assert local_github.read_files("acme", "demo-infra", branch="nope").commit_sha is None
+
+
+def test_delete_branch(local_github):
+    with_main(local_github)
+    local_github.commit_files("acme", "demo-infra", {"a.txt": "changed"}, "change", branch="feature")
+    local_github.delete_branch("acme", "demo-infra", "feature")
+    assert local_github.read_files("acme", "demo-infra", branch="feature").files == {}
+
+
+def test_open_pull_request_numbers_them(local_github):
+    with_main(local_github)
+    local_github.commit_files("acme", "demo-infra", {"a.txt": "x"}, "change", branch="one")
+    first = local_github.open_pull_request("acme", "demo-infra", "one", "First", "Body")
+    second = local_github.open_pull_request("acme", "demo-infra", "one", "Second", "Body")
+    assert ((first.number, first.url), second.number) == (
+        (1, "https://github.com/acme/demo-infra/pull/1"), 2)
+
+
+def test_pull_request_details_are_kept(local_github):
+    with_main(local_github)
+    local_github.commit_files("acme", "demo-infra", {"a.txt": "x"}, "change", branch="one")
+    local_github.open_pull_request("acme", "demo-infra", "one", "Title", "Body text")
+    assert local_github.pull_request("acme", "demo-infra", 1) == {
+        "number": 1, "branch": "one", "title": "Title", "body": "Body text", "state": "open", "merge_commit": None}
+
+
+def test_merge_fast_forwards_main_and_deletes_the_branch(local_github):
+    with_main(local_github)
+    head = local_github.commit_files("acme", "demo-infra", {"a.txt": "x"}, "change", branch="one")
+    local_github.open_pull_request("acme", "demo-infra", "one", "Title", "Body")
+    merged = local_github.merge_pull_request("acme", "demo-infra", 1)
+    assert (merged, local_github.read_files("acme", "demo-infra").files["a.txt"],
+            local_github.pull_request("acme", "demo-infra", 1)["state"],
+            local_github.pull_request("acme", "demo-infra", 1)["merge_commit"],
+            local_github.read_files("acme", "demo-infra", branch="one").commit_sha) == (head, "x", "merged", head, None)
+
+
+def test_merge_refuses_when_main_moved(local_github):
+    with_main(local_github)
+    local_github.commit_files("acme", "demo-infra", {"a.txt": "x"}, "change", branch="one")
+    local_github.open_pull_request("acme", "demo-infra", "one", "Title", "Body")
+    local_github.commit_files("acme", "demo-infra", {"c.txt": "3"}, "someone else")
+    with pytest.raises(MergeConflictError):
+        local_github.merge_pull_request("acme", "demo-infra", 1)
+
+
+def test_close_pull_request_keeps_main_and_deletes_the_branch(local_github):
+    main = with_main(local_github)
+    local_github.commit_files("acme", "demo-infra", {"a.txt": "x"}, "change", branch="one")
+    local_github.open_pull_request("acme", "demo-infra", "one", "Title", "Body")
+    local_github.close_pull_request("acme", "demo-infra", 1)
+    assert (local_github.pull_request("acme", "demo-infra", 1)["state"],
+            local_github.read_files("acme", "demo-infra").commit_sha,
+            local_github.read_files("acme", "demo-infra", branch="one").commit_sha) == ("closed", main, None)
+
+
+@pytest.mark.parametrize("action", ["merge_pull_request", "close_pull_request"])
+def test_only_open_pull_requests_can_be_merged_or_closed(local_github, action):
+    with_main(local_github)
+    local_github.commit_files("acme", "demo-infra", {"a.txt": "x"}, "change", branch="one")
+    local_github.open_pull_request("acme", "demo-infra", "one", "Title", "Body")
+    local_github.close_pull_request("acme", "demo-infra", 1)
+    with pytest.raises(MergeConflictError, match="closed"):
+        getattr(local_github, action)("acme", "demo-infra", 1)
+
+
+def test_unknown_pull_request(local_github):
+    with_main(local_github)
+    with pytest.raises(KeyError):
+        local_github.pull_request("acme", "demo-infra", 7)
