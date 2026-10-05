@@ -5,6 +5,7 @@ from app.providers.base import CloudProvider, Vocabulary
 class GcpProvider(CloudProvider):
     id = "gcp"
     name = "Google Cloud"
+    document_file = "main.tf.json"
 
     def vocabulary(self):
         return Vocabulary(cloud="Google Cloud", isolation_unit="project", hierarchy_node="folder",

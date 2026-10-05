@@ -1,15 +1,16 @@
 import { useState } from "react";
 import { useApi } from "../../../api/ApiContext";
-import type { CatalogEntry, CloudFormationType } from "../../../api/types";
+import type { CatalogEntry, ResourceTypeInfo } from "../../../api/types";
 import { ErrorAlert } from "../../../components/Notices";
+import { useVocabulary } from "../../../providers/VocabularyContext";
 import { parseJsonObject } from "../../../wizard/json";
 import type { DraftResource } from "../../../wizard/ProjectDraft";
 import { SettingsEditor } from "./SettingsEditor";
 import type { StepProps } from "./StepProps";
 
-const CLOUDFORMATION_PREFIX = "AWS::";
-
 export function ServicesStep({ draft, onChange, reference }: StepProps) {
+  const { provider } = draft.values;
+  const catalog = reference.catalogs[provider];
   return (
     <>
       <h2>Services</h2>
@@ -17,7 +18,7 @@ export function ServicesStep({ draft, onChange, reference }: StepProps) {
         <div className="stack">
           <span className="label">Curated services</span>
           <div className="cat">
-            {reference.catalog.map((entry) => (
+            {catalog.map((entry) => (
               <div key={entry.type} className="svc">
                 <b>{entry.name}</b>
                 <span className="hint">{entry.category} · multi-region: {entry.multi_region}</span>
@@ -27,23 +28,25 @@ export function ServicesStep({ draft, onChange, reference }: StepProps) {
               </div>
             ))}
           </div>
-          <CloudFormationSearch onAdd={(type) => onChange(draft.withResource(type))} />
+          <ResourceTypeSearch provider={provider} onAdd={(type) => onChange(draft.withResource(type))} />
         </div>
-        <SelectedResources draft={draft} onChange={onChange} catalog={reference.catalog} />
+        <SelectedResources draft={draft} onChange={onChange} catalog={catalog} />
       </div>
     </>
   );
 }
 
-function CloudFormationSearch({ onAdd }: { onAdd: (type: string) => void }) {
+/** Tier 2: any resource type the cloud publishes, with its properties written by hand. */
+function ResourceTypeSearch({ provider, onAdd }: { provider: string; onAdd: (type: string) => void }) {
   const api = useApi();
+  const words = useVocabulary(provider);
   const [text, setText] = useState("");
-  const [results, setResults] = useState<CloudFormationType[]>([]);
+  const [results, setResults] = useState<ResourceTypeInfo[]>([]);
   const [error, setError] = useState<string>();
 
   const search = async () => {
     try {
-      setResults(await api.searchCloudFormation(text));
+      setResults(await api.searchTypes(provider, text));
       setError(undefined);
     } catch (failure) {
       setError((failure as Error).message);
@@ -52,9 +55,9 @@ function CloudFormationSearch({ onAdd }: { onAdd: (type: string) => void }) {
 
   return (
     <div className="stack">
-      <label htmlFor="cfn-search" className="label">Search all CloudFormation types</label>
+      <label htmlFor="type-search" className="label">Search all {words.cloud} resource types</label>
       <div className="row">
-        <input id="cfn-search" value={text} placeholder="e.g. sns, rds, eventbridge" onChange={(event) => setText(event.target.value)} />
+        <input id="type-search" value={text} placeholder="Part of a type name" onChange={(event) => setText(event.target.value)} />
         <button className="btn" onClick={search}>Search</button>
       </div>
       <ErrorAlert message={error} />
@@ -91,7 +94,7 @@ function SelectedResources({ draft, onChange, catalog }: Pick<StepProps, "draft"
             </div>
             <SettingsEditor resource={resource} settings={settingsOf(resource.type)}
                             onSetting={(name, value) => onChange(draft.withResourceSetting(resource.id, name, value))} />
-            {resource.type.startsWith(CLOUDFORMATION_PREFIX) && (
+            {!catalog.some((entry) => entry.type === resource.type) && (
               <PropertiesEditor resource={resource} onProperties={(properties) => onChange(draft.withResourceProperties(resource.id, properties))} />
             )}
           </div>

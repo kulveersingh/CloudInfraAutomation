@@ -3,7 +3,8 @@ import { useApi } from "../api/ApiContext";
 import type { CloudProviderInfo, Vocabulary } from "../api/types";
 import { useLoad } from "../hooks/useLoad";
 
-const DEFAULT_PROVIDER = "aws";
+export const DEFAULT_PROVIDER = "aws";
+const AWS_DOCUMENT_FILE = "template.yaml";
 
 /** AWS's words, shown until the providers have loaded (AWS is the platform's default cloud). */
 const AWS_VOCABULARY: Vocabulary = {
@@ -21,9 +22,18 @@ export function VocabularyProvider({ children }: { children: ReactNode }) {
   return <ProvidersContext.Provider value={providers.data ?? []}>{children}</ProvidersContext.Provider>;
 }
 
+/** The clouds the platform supports, AWS first; empty until they have loaded. */
+export function useProviders(): CloudProviderInfo[] {
+  return useContext(ProvidersContext);
+}
+
 export function useVocabulary(provider: string = DEFAULT_PROVIDER): Vocabulary {
-  const providers = useContext(ProvidersContext);
-  return providers.find((item) => item.id === provider)?.vocabulary ?? AWS_VOCABULARY;
+  return useProviders().find((item) => item.id === provider)?.vocabulary ?? AWS_VOCABULARY;
+}
+
+/** The main IaC file of a cloud's repositories (AWS's until the providers have loaded). */
+export function useDocumentFile(provider: string = DEFAULT_PROVIDER): string {
+  return useProviders().find((item) => item.id === provider)?.document_file ?? AWS_DOCUMENT_FILE;
 }
 
 export const capitalized = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);

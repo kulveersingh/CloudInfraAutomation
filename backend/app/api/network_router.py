@@ -3,6 +3,7 @@ from pydantic import BaseModel
 
 from app.api.routers import Services
 from app.networks.models import NetworkInput
+from app.providers.base import DEFAULT_PROVIDER
 
 
 class NetworkSettings(BaseModel):
@@ -19,8 +20,9 @@ class NetworkRouter:
         self.router.add_api_route("/admin/network-settings", self.update_settings, methods=["PUT"])
         self.router.add_api_route("/networks/options", self.options, methods=["GET"])
 
-    def networks(self, services: Services, account_id: str | None = None, region: str | None = None) -> list[dict]:
-        return services.networks.networks(account_id, region)
+    def networks(self, services: Services, account_id: str | None = None, region: str | None = None,
+                 provider: str | None = None) -> list[dict]:
+        return services.networks.networks(account_id, region, provider)
 
     def create(self, network: NetworkInput, services: Services) -> dict:
         return services.networks.create(network)
@@ -34,5 +36,5 @@ class NetworkRouter:
     def update_settings(self, settings: NetworkSettings, services: Services) -> dict:
         return services.networks.update_settings(settings.attach_compute_by_default)
 
-    def options(self, portfolio_id: str, services: Services) -> list[dict]:
-        return services.networks.options(portfolio_id)
+    def options(self, portfolio_id: str, services: Services, provider: str = DEFAULT_PROVIDER) -> list[dict]:
+        return services.networks.options(portfolio_id, provider)

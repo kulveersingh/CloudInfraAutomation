@@ -143,6 +143,7 @@ describe("ProjectDraft", () => {
 
   it("builds a single-region request", () => {
     expect(ready().toRequest()).toEqual({
+      provider: "aws",
       project_name: "demo-app",
       ownership: { portfolio_id: "pf-payments", product_id: "pr-invoicing", data_classification: "internal" },
       resilience: { mode: "single", primary_region: "us-east-1", secondary_region: null },
@@ -192,6 +193,11 @@ describe("ProjectDraft", () => {
       const { provider, primaryRegion, secondaryRegion, resources, connections, networkSelections, name } = draft.values;
       expect([provider, primaryRegion, secondaryRegion, resources, connections, networkSelections, name]).toEqual(
         ["gcp", "us-east1", "us-east4", [], [], {}, "demo-app"]);
+    });
+
+    it("choosing the same cloud again keeps the draft", () => {
+      const draft = ready();
+      expect(draft.withProvider({ ...GCP_PROVIDER, id: "aws" })).toBe(draft);
     });
 
     it("sends the cloud with the request", () => {

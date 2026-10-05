@@ -117,7 +117,7 @@ describe("ChangeProjectPage", () => {
     await previewChange();
     await user().click(await screen.findByLabelText("I understand the deleted resources and their data are removed"));
     await user().click(screen.getByRole("button", { name: "Open change request" }));
-    expect(vi.mocked(api.createChange).mock.calls[0][1]).toEqual({ request: PROJECT_REQUEST,
+    expect(vi.mocked(api.createChange).mock.calls[0][1]).toEqual({ request: { provider: "aws", ...PROJECT_REQUEST },
       base_commit: PROJECT_READ_BACK.commit_sha, confirm_removals: true });
   });
 

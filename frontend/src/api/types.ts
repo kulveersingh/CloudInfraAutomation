@@ -31,6 +31,7 @@ export interface EnvironmentInfo {
 }
 
 export interface RegionInfo {
+  provider: string;
   id: string;
   name: string;
   enabled: boolean;
@@ -57,7 +58,8 @@ export interface CatalogEntry {
   settings: ServiceSetting[];
 }
 
-export interface CloudFormationType {
+/** A raw resource type a cloud publishes (Tier 2): a CloudFormation type, or a google_* Terraform type. */
+export interface ResourceTypeInfo {
   type: string;
   service: string;
   required: string[];
@@ -105,6 +107,7 @@ export interface ConnectionRequest {
 }
 
 export interface ProjectRequest {
+  provider?: string;
   project_name: string;
   ownership: { portfolio_id: string; product_id: string; data_classification: Classification };
   resilience: { mode: ResilienceMode; primary_region: string; secondary_region: string | null };
@@ -116,7 +119,7 @@ export interface ProjectRequest {
 
 export interface NetworkInfo {
   id: string;
-  provider?: string;
+  provider: string;
   name: string;
   account_id: string;
   region: string;
@@ -147,6 +150,8 @@ export interface PreviewResult {
   targets: Record<string, { account_id: string; regions: string[];
     networks: Record<string, { network_id: string; network_ref: string; subnet_refs: string[] }> }>;
   lint: string[];
+  /** What the generated code cannot do on this cloud, so the team must (e.g. filter events by prefix). */
+  notes?: string[];
 }
 
 export interface PullRequestLink {
@@ -175,10 +180,11 @@ export interface Vocabulary {
   control_catalog: string;
 }
 
-/** A cloud behind the platform (§22): its words for the neutral concepts and default region pair. */
+/** A cloud behind the platform (§22): its words for the neutral concepts, default region pair and main IaC file. */
 export interface CloudProviderInfo {
   id: string;
   name: string;
+  document_file: string;
   vocabulary: Vocabulary;
   default_regions: { primary: string; secondary: string };
 }
@@ -569,12 +575,12 @@ export interface PlatformApiPort {
   submitLandingZoneDesign(designId: string): Promise<LandingZoneDesign>;
   approveLandingZoneDesign(designId: string, comment: string): Promise<LandingZoneDesign>;
   rejectLandingZoneDesign(designId: string, comment: string): Promise<LandingZoneDesign>;
-  networks(): Promise<NetworkInfo[]>;
+  networks(provider: string): Promise<NetworkInfo[]>;
   createNetwork(network: NetworkInput): Promise<NetworkInfo>;
   updateNetwork(networkId: string, network: NetworkInput): Promise<NetworkInfo>;
   networkSettings(): Promise<NetworkSettings>;
   updateNetworkSettings(settings: NetworkSettings): Promise<NetworkSettings>;
-  networkOptions(portfolioId: string): Promise<NetworkOption[]>;
+  networkOptions(portfolioId: string, provider: string): Promise<NetworkOption[]>;
   setActor(identity: Identity): void;
   pipeline(projectName: string): Promise<PipelineStage[]>;
   inbox(): Promise<Release[]>;
@@ -584,10 +590,10 @@ export interface PlatformApiPort {
   approveOverride(releaseId: string, comment: string): Promise<Release>;
   orgRegistry(): Promise<Portfolio[]>;
   environments(): Promise<EnvironmentInfo[]>;
-  regions(): Promise<RegionInfo[]>;
-  setRegionEnabled(regionId: string, enabled: boolean): Promise<RegionInfo>;
-  catalog(): Promise<CatalogEntry[]>;
-  searchCloudFormation(text: string): Promise<CloudFormationType[]>;
+  regions(provider?: string): Promise<RegionInfo[]>;
+  setRegionEnabled(provider: string, regionId: string, enabled: boolean): Promise<RegionInfo>;
+  catalog(provider: string): Promise<CatalogEntry[]>;
+  searchTypes(provider: string, text: string): Promise<ResourceTypeInfo[]>;
   costCenters(): Promise<CostCenterSettings>;
   updateCostCenters(change: CostCenterChange): Promise<CostCenterSettings>;
   preview(request: ProjectRequest): Promise<PreviewResult>;

@@ -21,7 +21,7 @@ export function NewProjectPage({ newKey = () => crypto.randomUUID(), pollMs = 20
       <header className="head">
         <div>
           <h1>New project</h1>
-          <p className="sub">Pick who owns it, how resilient it must be and which AWS services it needs.</p>
+          <p className="sub">Pick who owns it, how resilient it must be and which cloud and services it needs.</p>
         </div>
       </header>
       <ErrorAlert message={reference.error} />

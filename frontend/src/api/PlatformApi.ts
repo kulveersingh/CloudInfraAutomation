@@ -1,12 +1,13 @@
 import type {
   ChangeRequestBody, CloudProviderInfo, EnvironmentDecision, ProjectChange, ProjectChangePreview, ProjectReadBack, RestoreAction, Teardown,
   TeardownPreview, TeardownRequestBody,
-  CatalogEntry, CloudFormationType, CostCenterChange, CostCenterSettings, EnvironmentInfo, Identity, JobStatus,
+  CatalogEntry, CostCenterChange, CostCenterSettings, EnvironmentInfo, Identity, JobStatus,
   ControlPackCatalog, IndustryTemplate, LandingZoneDesign, LandingZoneDesignDetail, LandingZoneProposal, LandingZoneReadBack,
   LandingZoneRequest,
   TemplateSummary, NetworkInfo, NetworkInput,
   NetworkOption, NetworkSettings, PipelineStage, PlatformApiPort, Portfolio, PreviewResult, ProjectRequest, ProjectSummary,
   RegionInfo, Release,
+  ResourceTypeInfo,
 } from "./types";
 
 type Fetcher = (input: string, init: RequestInit) => Promise<Response>;
@@ -71,7 +72,7 @@ export class PlatformApi implements PlatformApiPort {
     return this.decideLandingZone(designId, "reject", comment);
   }
 
-  networks() { return this.send<NetworkInfo[]>("GET", "/v1/admin/networks"); }
+  networks(provider: string) { return this.send<NetworkInfo[]>("GET", `/v1/admin/networks?provider=${provider}`); }
 
   createNetwork(network: NetworkInput) { return this.send<NetworkInfo>("POST", "/v1/admin/networks", network); }
 
@@ -85,8 +86,9 @@ export class PlatformApi implements PlatformApiPort {
     return this.send<NetworkSettings>("PUT", "/v1/admin/network-settings", settings);
   }
 
-  networkOptions(portfolioId: string) {
-    return this.send<NetworkOption[]>("GET", `/v1/networks/options?portfolio_id=${encodeURIComponent(portfolioId)}`);
+  networkOptions(portfolioId: string, provider: string) {
+    return this.send<NetworkOption[]>("GET",
+      `/v1/networks/options?portfolio_id=${encodeURIComponent(portfolioId)}&provider=${provider}`);
   }
 
   pipeline(projectName: string) { return this.send<PipelineStage[]>("GET", `/v1/projects/${projectName}/pipeline`); }
@@ -108,16 +110,19 @@ export class PlatformApi implements PlatformApiPort {
 
   environments() { return this.send<EnvironmentInfo[]>("GET", "/v1/environments"); }
 
-  regions() { return this.send<RegionInfo[]>("GET", "/v1/admin/regions"); }
-
-  setRegionEnabled(regionId: string, enabled: boolean) {
-    return this.send<RegionInfo>("PUT", `/v1/admin/regions/${regionId}`, { enabled });
+  /** Every cloud's regions, or one cloud's. */
+  regions(provider?: string) {
+    return this.send<RegionInfo[]>("GET", provider ? `/v1/admin/regions?provider=${provider}` : "/v1/admin/regions");
   }
 
-  catalog() { return this.send<CatalogEntry[]>("GET", "/v1/catalog"); }
+  setRegionEnabled(provider: string, regionId: string, enabled: boolean) {
+    return this.send<RegionInfo>("PUT", `/v1/admin/regions/${regionId}?provider=${provider}`, { enabled });
+  }
 
-  searchCloudFormation(text: string) {
-    return this.send<CloudFormationType[]>("GET", `/v1/catalog/aws/types?search=${encodeURIComponent(text)}`);
+  catalog(provider: string) { return this.send<CatalogEntry[]>("GET", `/v1/catalog?provider=${provider}`); }
+
+  searchTypes(provider: string, text: string) {
+    return this.send<ResourceTypeInfo[]>("GET", `/v1/catalog/${provider}/types?search=${encodeURIComponent(text)}`);
   }
 
   costCenters() { return this.send<CostCenterSettings>("GET", "/v1/admin/cost-centers"); }

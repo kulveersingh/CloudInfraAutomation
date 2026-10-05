@@ -11,12 +11,12 @@ interface NetworkStepProps {
 }
 
 export function NetworkStep({ draft, onChange }: NetworkStepProps) {
-  const { portfolioId, attachCompute } = draft.values;
-  const words = useVocabulary();
+  const { portfolioId, attachCompute, provider } = draft.values;
+  const words = useVocabulary(provider);
   return (
     <>
       <h2>Network</h2>
-      <p className="sub">Compute (for example Lambda) runs in private subnets of the organization {words.private_network} and can reach other
+      <p className="sub">Compute (functions) runs in private subnets of the organization {words.private_network} and can reach other
         services in the organization's private range without opening ports one by one.</p>
       <label className="row">
         <input type="checkbox" checked={attachCompute} onChange={(event) => onChange(draft.withAttachCompute(event.target.checked))} />
@@ -33,7 +33,7 @@ export function NetworkStep({ draft, onChange }: NetworkStepProps) {
 
 function NetworkChoices({ draft, onChange }: NetworkStepProps) {
   const api = useApi();
-  const options = useLoad(() => api.networkOptions(draft.values.portfolioId));
+  const options = useLoad(() => api.networkOptions(draft.values.portfolioId, draft.values.provider));
   const targets = draft.values.environments.flatMap(
     (environment) => draft.regionsFor(environment).map((region) => ({ environment, region })));
 

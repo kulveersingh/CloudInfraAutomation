@@ -58,6 +58,7 @@ describe("NetworksPanel", () => {
     await user().click(screen.getByLabelText("Default for this account and region"));
     await user().click(screen.getByRole("button", { name: "Save network" }));
     expect(api.createNetwork).toHaveBeenCalledWith({
+      provider: "aws",
       name: "Payments VPC", account_id: "222222222222", region: "us-east-2", network_ref: "vpc-0abc12345",
       cidr: "10.20.0.0/16", subnet_refs: ["subnet-0aaa1111", "subnet-0bbb2222"],
       firewall_refs: ["sg-0ccc3333"], is_default: true });

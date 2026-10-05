@@ -1,14 +1,16 @@
 import { useState } from "react";
 import { useApi } from "../../api/ApiContext";
-import type { NetworkInfo, NetworkInput, Vocabulary } from "../../api/types";
+import type { CloudProviderInfo, NetworkInfo, NetworkInput, Vocabulary } from "../../api/types";
+import { CloudPicker } from "../../components/CloudPicker";
 import { ErrorAlert } from "../../components/Notices";
 import { useLoad } from "../../hooks/useLoad";
-import { capitalized, useVocabulary } from "../../providers/VocabularyContext";
+import { capitalized, DEFAULT_PROVIDER, useProviders, useVocabulary } from "../../providers/VocabularyContext";
 
-const EMPTY: NetworkInput = {
-  name: "", account_id: "", region: "us-east-1", network_ref: "", cidr: "", subnet_refs: [], firewall_refs: [],
-  is_default: false,
-};
+/** A new network of a cloud, starting in its default primary region. */
+function empty(provider: CloudProviderInfo): NetworkInput {
+  return { provider: provider.id, name: "", account_id: "", region: provider.default_regions.primary, network_ref: "",
+    cidr: "", subnet_refs: [], firewall_refs: [], is_default: false };
+}
 
 type TextKey = "name" | "account_id" | "region" | "network_ref" | "cidr";
 type ListKey = "subnet_refs" | "firewall_refs";
@@ -34,11 +36,22 @@ function toInput({ id: _id, ...input }: NetworkInfo): NetworkInput {
 
 const splitIds = (text: string) => text.split(",").map((part) => part.trim()).filter(Boolean);
 
-/** Organization networks per account and region; the default one is pre-selected in the project wizard. */
+/** Organization networks per cloud, account and region; the default one is pre-selected in the project wizard. */
 export function NetworksPanel() {
+  const providers = useProviders();
+  const [cloud, setCloud] = useState(DEFAULT_PROVIDER);
+  return (
+    <div className="stack">
+      <CloudPicker providers={providers} value={cloud} onChange={(provider) => setCloud(provider.id)} />
+      <CloudNetworks key={cloud} provider={providers.find((item) => item.id === cloud)} cloud={cloud} />
+    </div>
+  );
+}
+
+function CloudNetworks({ provider, cloud }: { provider: CloudProviderInfo | undefined; cloud: string }) {
   const api = useApi();
-  const words = useVocabulary();
-  const loaded = useLoad(() => Promise.all([api.networks(), api.networkSettings()]));
+  const words = useVocabulary(cloud);
+  const loaded = useLoad(() => Promise.all([api.networks(cloud), api.networkSettings()]));
   const [saved, setSaved] = useState<NetworkInfo[]>();
   const [attach, setAttach] = useState<boolean>();
   const [editing, setEditing] = useState<Editing>();
@@ -67,7 +80,7 @@ export function NetworksPanel() {
   });
 
   return (
-    <div className="stack">
+    <>
       <ErrorAlert message={loaded.error ?? error} />
       {networks && (
         <>
@@ -100,12 +113,12 @@ export function NetworksPanel() {
           {editing
             ? <NetworkForm words={words} editing={editing} onChange={setEditing} onSave={() => saveNetwork(networks, editing)}
                            onCancel={() => setEditing(undefined)} />
-            : <div><button className="btn" onClick={() => setEditing({ input: EMPTY })}>Add network</button></div>}
+            : provider && <div><button className="btn" onClick={() => setEditing({ input: empty(provider) })}>Add network</button></div>}
         </>
       )}
       <p className="hint">The default network for each account and region is pre-selected in the project wizard.
         Projects can choose another network or keep compute out of the {words.private_network}.</p>
-    </div>
+    </>
   );
 }
 

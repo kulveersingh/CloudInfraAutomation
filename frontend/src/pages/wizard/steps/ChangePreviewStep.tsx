@@ -50,7 +50,7 @@ export function ChangePreviewStep({ draft, base, onOpened }: ChangePreviewStepPr
         <button className="btn" disabled={problems.length > 0} onClick={preview}>Preview change</button>
         <button className="btn pri" disabled={!result || (deletes && !confirmed)} onClick={open}>Open change request</button>
       </div>
-      {result && <PreviewDetails result={result} />}
+      {result && <PreviewDetails result={result} provider={draft.values.provider} />}
     </>
   );
 }

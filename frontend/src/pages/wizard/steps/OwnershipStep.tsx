@@ -1,4 +1,5 @@
 import type { Classification, Portfolio } from "../../../api/types";
+import { CloudPicker } from "../../../components/CloudPicker";
 import type { StepProps } from "./StepProps";
 
 const CLASSIFICATIONS: Classification[] = ["public", "internal", "confidential", "restricted"];
@@ -11,6 +12,11 @@ export function OwnershipStep({ draft, onChange, reference, change }: StepProps)
   return (
     <>
       <h2>Ownership</h2>
+      <div className="grid3">
+        <CloudPicker providers={reference.providers} value={draft.values.provider} disabled={locked}
+                     onChange={(provider) => onChange(draft.withProvider(provider))} />
+      </div>
+      {!locked && <p className="hint">Changing the cloud clears the services, connections and networks chosen so far.</p>}
       <div className="grid3">
         <div className="field">
           <label htmlFor="portfolio">Portfolio</label>

@@ -42,6 +42,7 @@ class CloudProvider(ABC):
 
     id: ClassVar[str]
     name: ClassVar[str]
+    document_file: ClassVar[str]  # the generated repository's main IaC file, shown in previews
 
     @abstractmethod
     def vocabulary(self) -> Vocabulary:
@@ -76,7 +77,8 @@ class CloudProvider(ABC):
 
     def describe(self) -> dict:
         primary, secondary = self.default_regions()
-        return {"id": self.id, "name": self.name, "vocabulary": asdict(self.vocabulary()),
+        return {"id": self.id, "name": self.name, "document_file": self.document_file,
+                "vocabulary": asdict(self.vocabulary()),
                 "default_regions": {"primary": primary, "secondary": secondary}}
 
 

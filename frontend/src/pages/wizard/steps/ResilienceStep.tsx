@@ -1,5 +1,5 @@
 import type { ResilienceMode } from "../../../api/types";
-import type { StepProps } from "./StepProps";
+import { chosenCloud, type StepProps } from "./StepProps";
 
 const MODES: Array<{ mode: ResilienceMode; label: string; description: string }> = [
   { mode: "single", label: "Single region", description: "One region; recovery redeploys from code and backups." },
@@ -9,8 +9,9 @@ const MODES: Array<{ mode: ResilienceMode; label: string; description: string }>
 
 export function ResilienceStep({ draft, onChange, reference, change }: StepProps) {
   const locked = change !== undefined;
-  const { mode, primaryRegion, secondaryRegion } = draft.values;
-  const regions = reference.regions.filter((region) => region.enabled);
+  const { mode, primaryRegion, secondaryRegion, provider } = draft.values;
+  const regions = reference.regions.filter((region) => region.provider === provider && region.enabled);
+  const defaults = chosenCloud(reference, provider)?.default_regions;
   return (
     <>
       <h2>Resilience</h2>
@@ -36,7 +37,7 @@ export function ResilienceStep({ draft, onChange, reference, change }: StepProps
                   onChange={(event) => onChange(draft.withSecondary(event.target.value))}>
             {regions.map((region) => <option key={region.id} value={region.id}>{region.id} · {region.name}</option>)}
           </select>
-          <span className="hint">Any pair of enabled regions; default us-east-1 / us-east-2</span>
+          <span className="hint">Any pair of enabled regions{defaults && `; default ${defaults.primary} / ${defaults.secondary}`}</span>
         </div>
       </div>
     </>

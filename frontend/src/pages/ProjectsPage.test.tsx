@@ -18,6 +18,12 @@ describe("ProjectsPage", () => {
     expect([await screen.findByText("Amazon Web Services"), screen.getByText("Google Cloud")]).toHaveLength(2);
   });
 
+  it("shows the cloud id of a cloud the platform does not list", async () => {
+    renderWithApi(<ProjectsPage onNewProject={() => {}} onChangeProject={() => {}} onTeardown={() => {}} />,
+      fakeApi({ projects: vi.fn().mockResolvedValue([{ ...PROJECTS[0], provider: "azure" }]) }));
+    expect(await screen.findByText("azure")).toBeInTheDocument();
+  });
+
   it("shows the resilience mode", async () => {
     renderWithApi(<ProjectsPage onNewProject={() => {}} onChangeProject={() => {}} onTeardown={() => {}} />);
     expect(await screen.findByText("DR · active/standby")).toBeInTheDocument();

@@ -384,7 +384,10 @@ export function fakeApi(overrides: Partial<PlatformApiPort> = {}): PlatformApiPo
     updateNetwork: vi.fn().mockImplementation(async (id, input) => ({ id, ...input })),
     networkSettings: vi.fn().mockResolvedValue({ attach_compute_by_default: true }),
     updateNetworkSettings: vi.fn().mockImplementation(async (settings) => settings),
-    networkOptions: vi.fn().mockResolvedValue(NETWORK_OPTIONS),
+    networkOptions: vi.fn().mockImplementation(async (_portfolio: string, provider: string) => (provider === "gcp"
+      ? [{ environment: "dev", region: "us-east1", account_id: GCP_NETWORK.account_id, networks: [GCP_NETWORK],
+        default_network_id: GCP_NETWORK.id }]
+      : NETWORK_OPTIONS)),
     pipeline: vi.fn().mockResolvedValue(pipeline()),
     inbox: vi.fn().mockResolvedValue([release()]),
     simulateRelease: vi.fn().mockResolvedValue(release({ id: "rel-2" })),

@@ -33,9 +33,11 @@ const STEPS: Array<{ label: string; render: (context: WizardContext) => ReactNod
 ];
 
 export async function loadReferenceData(api: PlatformApiPort): Promise<ReferenceData> {
-  const [portfolios, environments, regions, catalog, networkSettings] = await Promise.all([
-    api.orgRegistry(), api.environments(), api.regions(), api.catalog(), api.networkSettings()]);
-  return { portfolios, environments, regions, catalog, networkSettings };
+  const [providers, portfolios, environments, regions, networkSettings] = await Promise.all([
+    api.providers(), api.orgRegistry(), api.environments(), api.regions(), api.networkSettings()]);
+  const catalogs = await Promise.all(providers.map((provider) => api.catalog(provider.id)));
+  return { providers, portfolios, environments, regions, networkSettings,
+    catalogs: Object.fromEntries(providers.map((provider, index) => [provider.id, catalogs[index]])) };
 }
 
 export function ProjectWizard({ reference, initial, mode }: { reference: ReferenceData; initial: ProjectDraft; mode: WizardMode }) {

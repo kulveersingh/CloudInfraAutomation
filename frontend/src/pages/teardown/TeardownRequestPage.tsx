@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useApi } from "../../api/ApiContext";
-import type { DataStoreInfo, TeardownPreview, TeardownScope } from "../../api/types";
+import type { DataStoreInfo, TeardownPreview, TeardownScope, Vocabulary } from "../../api/types";
 import { ErrorAlert } from "../../components/Notices";
 import { useLoad } from "../../hooks/useLoad";
+import { capitalized, useVocabulary } from "../../providers/VocabularyContext";
 
 const ROLE_LABELS = { "reviewer": "a reviewer", "platform-admin": "a platform admin" };
 
@@ -17,6 +18,7 @@ export function TeardownRequestPage({ projectName, scope }: TeardownRequestPageP
   const api = useApi();
   const projects = useLoad(() => api.projects());
   const project = projects.data?.find((item) => item.name === projectName);
+  const words = useVocabulary(project?.provider);
   const [chosen, setChosen] = useState<string>();
   const [preview, setPreview] = useState<TeardownPreview>();
   const [confirmation, setConfirmation] = useState("");
@@ -64,7 +66,7 @@ export function TeardownRequestPage({ projectName, scope }: TeardownRequestPageP
               </label>
             )}
             <div className="row"><button className="btn" onClick={showPreview}>Preview teardown</button></div>
-            {preview && <PreviewView preview={preview} />}
+            {preview && <PreviewView preview={preview} words={words} />}
             <label className="field">
               <span>Type {projectName} to confirm</span>
               <input aria-label={`Type ${projectName} to confirm`} value={confirmation}
@@ -77,20 +79,20 @@ export function TeardownRequestPage({ projectName, scope }: TeardownRequestPageP
   );
 }
 
-function PreviewView({ preview }: { preview: TeardownPreview }) {
+function PreviewView({ preview, words }: { preview: TeardownPreview; words: Vocabulary }) {
   return (
     <div className="stack">
       {preview.blockers.length > 0 && (
         <div className="notice warn"><b>Cannot tear down yet:</b><ul>{preview.blockers.map((item) => <li key={item}>{item}</li>)}</ul></div>
       )}
-      <p className="notice">Backups go to the locked vault in account {preview.backup_account} and cannot be deleted for
+      <p className="notice">Backups go to the locked vault in {words.isolation_unit} {preview.backup_account} and cannot be deleted for
         {" "}{preview.retention_days} days; after that only super users can delete them, manually.</p>
       {preview.environments.map((item) => (
         <div key={item.environment} className="stack">
-          <h3>{item.environment} · account {item.account_id} · {item.regions.join(", ")}</h3>
+          <h3>{item.environment} · {words.isolation_unit} {item.account_id} · {item.regions.join(", ")}</h3>
           <span className="hint">Needs approval from {ROLE_LABELS[item.approver_role]}</span>
-          <span className="mono">Stacks: {item.stacks.join(", ")}</span>
-          <ul>{item.data_stores.map((store) => <li key={`${store.region}-${store.service_id}`}>{describe(store)}</li>)}</ul>
+          <span className="mono">{capitalized(words.deploy_unit)}s: {item.stacks.join(", ")}</span>
+          <ul>{item.data_stores.map((store) => <li key={`${store.region}-${store.service_id}`}>{describe(store, words)}</li>)}</ul>
           <ul className="muted">{item.not_backed_up.map((line) => <li key={line}>{line}</li>)}</ul>
         </div>
       ))}
@@ -98,7 +100,7 @@ function PreviewView({ preview }: { preview: TeardownPreview }) {
   );
 }
 
-function describe(store: DataStoreInfo): string {
-  const after = store.retained ? "backed up, then deleted" : "backed up, then deleted with the stack";
+function describe(store: DataStoreInfo, words: Vocabulary): string {
+  const after = store.retained ? "backed up, then deleted" : `backed up, then deleted with the ${words.deploy_unit}`;
   return `${store.service_id} (${store.resource_type}) in ${store.region}: ${after}`;
 }

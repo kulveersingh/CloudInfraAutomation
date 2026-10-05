@@ -1,5 +1,5 @@
 import type {
-  Classification, ConnectionRequest, ProjectRequest, ResilienceMode, ResourceRequest, SettingValue,
+  Classification, CloudProviderInfo, ConnectionRequest, ProjectRequest, ResilienceMode, ResourceRequest, SettingValue,
 } from "../api/types";
 
 const NAME_PATTERN = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
@@ -16,6 +16,7 @@ export interface DraftResource {
 }
 
 export interface DraftValues {
+  provider: string;
   name: string;
   portfolioId: string;
   productId: string;
@@ -36,7 +37,7 @@ export class ProjectDraft {
 
   static initial(): ProjectDraft {
     return new ProjectDraft({
-      name: "", portfolioId: "", productId: "", classification: "internal", mode: "single",
+      provider: "aws", name: "", portfolioId: "", productId: "", classification: "internal", mode: "single",
       primaryRegion: "us-east-1", secondaryRegion: "us-east-2", environments: [], resources: [], connections: [],
       attachCompute: true, networkSelections: {},
     });
@@ -47,11 +48,20 @@ export class ProjectDraft {
     const initial = ProjectDraft.initial().values;
     const { ownership, resilience, network } = request;
     return new ProjectDraft({
-      ...initial, name: request.project_name, portfolioId: ownership.portfolio_id, productId: ownership.product_id,
+      ...initial, provider: request.provider ?? initial.provider, name: request.project_name, portfolioId: ownership.portfolio_id, productId: ownership.product_id,
       classification: ownership.data_classification, mode: resilience.mode, primaryRegion: resilience.primary_region,
       secondaryRegion: resilience.secondary_region ?? initial.secondaryRegion, environments: [...request.environments],
       resources: request.resources.map(fromResourceRequest), connections: [...request.connections],
       attachCompute: network.attach_compute, networkSelections: { ...network.selections },
+    });
+  }
+
+  /** Another cloud: its default regions, and none of the services, connections or networks chosen for the old one. */
+  withProvider(provider: CloudProviderInfo) {
+    if (provider.id === this.values.provider) return this;
+    return this.with({
+      provider: provider.id, primaryRegion: provider.default_regions.primary,
+      secondaryRegion: provider.default_regions.secondary, resources: [], connections: [], networkSelections: {},
     });
   }
 
@@ -139,6 +149,7 @@ export class ProjectDraft {
   toRequest(): ProjectRequest {
     const values = this.values;
     return {
+      provider: values.provider,
       project_name: values.name,
       ownership: {
         portfolio_id: values.portfolioId, product_id: values.productId, data_classification: values.classification,
@@ -160,7 +171,7 @@ export class ProjectDraft {
   }
 
   private nextResourceId(type: string): string {
-    const base = type.split(/::|\./).slice(-1)[0].toLowerCase().replace(/[^a-z]/g, "").slice(0, ID_LENGTH);
+    const base = type.split(/::|[._]/).slice(-1)[0].toLowerCase().replace(/[^a-z]/g, "").slice(0, ID_LENGTH);
     const taken = new Set(this.values.resources.map((resource) => resource.id));
     let candidate = base;
     for (let suffix = 2; taken.has(candidate); suffix += 1) {

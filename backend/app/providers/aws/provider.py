@@ -8,6 +8,7 @@ from app.teardown.inventory import TeardownToolkit
 class AwsProvider(CloudProvider):
     id = "aws"
     name = "Amazon Web Services"
+    document_file = "template.yaml"
 
     def vocabulary(self):
         return Vocabulary(cloud="AWS", isolation_unit="account", hierarchy_node="OU",

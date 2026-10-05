@@ -28,8 +28,9 @@ class NetworkService:
 
     # ---- admin ----
 
-    def networks(self, account_id: str | None = None, region: str | None = None) -> list[dict]:
-        return [self.describe(network) for network in self._networks.all(account_id, region)]
+    def networks(self, account_id: str | None = None, region: str | None = None,
+                 provider: str | None = None) -> list[dict]:
+        return [self.describe(network) for network in self._networks.all(account_id, region, provider)]
 
     def create(self, network_input: NetworkInput) -> dict:
         network = models.Network(id=f"net-{secrets.token_hex(NETWORK_ID_BYTES)}")
@@ -64,11 +65,11 @@ class NetworkService:
 
     # ---- wizard ----
 
-    def options(self, portfolio_id: str) -> list[dict]:
-        regions = [region.id for region in self._registry.regions(DEFAULT_PROVIDER) if region.enabled]
+    def options(self, portfolio_id: str, provider: str = DEFAULT_PROVIDER) -> list[dict]:
+        regions = [region.id for region in self._registry.regions(provider) if region.enabled]
         return [self._option(environment.id, region, account)
                 for environment in self._registry.environments()
-                if (account := self._registry.account_for(DEFAULT_PROVIDER, portfolio_id, environment.id)) is not None
+                if (account := self._registry.account_for(provider, portfolio_id, environment.id)) is not None
                 for region in regions]
 
     # ---- provisioning ----

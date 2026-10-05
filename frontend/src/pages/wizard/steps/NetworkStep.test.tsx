@@ -19,7 +19,7 @@ describe("NetworkStep", () => {
   it("loads the options for the chosen portfolio", async () => {
     const { api } = renderStep();
     await screen.findByLabelText("Network for prod in us-east-1");
-    expect(api.networkOptions).toHaveBeenCalledWith("pf-payments");
+    expect(api.networkOptions).toHaveBeenCalledWith("pf-payments", "aws");
   });
 
   it("offers one dropdown per environment and region the project deploys to", async () => {

@@ -8,9 +8,11 @@ class NetworkRepository:
     def __init__(self, session: Session):
         self._session = session
 
-    def all(self, account_id: str | None = None, region: str | None = None) -> list[models.Network]:
+    def all(self, account_id: str | None = None, region: str | None = None,
+            provider: str | None = None) -> list[models.Network]:
         query = select(models.Network).order_by(models.Network.account_id, models.Network.region, models.Network.name)
-        filters = [(models.Network.account_id, account_id), (models.Network.region, region)]
+        filters = [(models.Network.account_id, account_id), (models.Network.region, region),
+                   (models.Network.provider, provider)]
         for column, value in filters:
             if value is not None:
                 query = query.where(column == value)

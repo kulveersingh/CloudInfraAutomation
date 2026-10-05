@@ -1,12 +1,22 @@
-import type { CatalogEntry, EnvironmentInfo, NetworkSettings, Portfolio, RegionInfo } from "../../../api/types";
+import type {
+  CatalogEntry, CloudProviderInfo, EnvironmentInfo, NetworkSettings, Portfolio, RegionInfo,
+} from "../../../api/types";
 import type { ProjectDraft } from "../../../wizard/ProjectDraft";
 
 export interface ReferenceData {
+  providers: CloudProviderInfo[];
   portfolios: Portfolio[];
   environments: EnvironmentInfo[];
+  /** Every cloud's regions; each step shows the chosen cloud's. */
   regions: RegionInfo[];
-  catalog: CatalogEntry[];
+  /** Each cloud's curated services, by cloud id. */
+  catalogs: Record<string, CatalogEntry[]>;
   networkSettings: NetworkSettings;
+}
+
+/** The chosen cloud's provider entry (AWS until the clouds have loaded). */
+export function chosenCloud(reference: ReferenceData, provider: string): CloudProviderInfo | undefined {
+  return reference.providers.find((item) => item.id === provider);
 }
 
 /** The project being changed (§21.8): what it was read back at, and what may not change. */

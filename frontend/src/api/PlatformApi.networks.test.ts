@@ -11,8 +11,8 @@ const INPUT = { name: "Org VPC" } as NetworkInput;
 describe("PlatformApi networks", () => {
   it("lists networks", async () => {
     const fetcher = respond([]);
-    await new PlatformApi("", fetcher).networks();
-    expect(fetcher.mock.calls[0][0]).toBe("/v1/admin/networks");
+    await new PlatformApi("", fetcher).networks("aws");
+    expect(fetcher.mock.calls[0][0]).toBe("/v1/admin/networks?provider=aws");
   });
 
   it("creates a network", async () => {
@@ -41,7 +41,7 @@ describe("PlatformApi networks", () => {
 
   it("reads wizard network options for a portfolio", async () => {
     const fetcher = respond([]);
-    await new PlatformApi("", fetcher).networkOptions("pf-payments");
-    expect(fetcher.mock.calls[0][0]).toBe("/v1/networks/options?portfolio_id=pf-payments");
+    await new PlatformApi("", fetcher).networkOptions("pf-payments", "aws");
+    expect(fetcher.mock.calls[0][0]).toBe("/v1/networks/options?portfolio_id=pf-payments&provider=aws");
   });
 });

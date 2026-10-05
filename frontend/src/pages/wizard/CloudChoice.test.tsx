@@ -62,6 +62,7 @@ describe("choosing the cloud", () => {
 
   it("switching the cloud clears the services chosen for the other one", async () => {
     renderWizard();
+    await screen.findByLabelText("Cloud");
     await goTo("Services");
     await user().click(await screen.findByRole("button", { name: "Add S3 bucket" }));
     await goTo("Ownership");
