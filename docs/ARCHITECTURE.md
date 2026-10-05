@@ -1,10 +1,11 @@
 # CloudInfraAutomation — Architecture
 
-**Status:** v2.19, approved; implementation in progress. No code is written until this design is approved.
+**Status:** v2.20, approved; implementation in progress. No code is written until this design is approved.
 **Date:** 2026-10-04
 **Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9). Every solution is **DR-capable**: it can run in one region, as DR (primary active, secondary standby) or as an HA pair (both active), with **any region pair chosen in the UI** (default us-east-1 / us-east-2) (§10).
 
 **Changes in v2:** added the org registry and tagging strategy (§4); permissions based on tags (§4.5–4.8); multi-account, five-environment model (§5); promotion pipeline (§8). Payload, provisioning, security and scaling sections are updated to match.
+**Changes in v2.20:** Change infrastructure for projects (§21.8): edit a read-back project in the wizard; the platform opens a pull request with the regenerated, signed files and records the new revision when it is merged.
 **Changes in v2.19:** service settings (§6.4.1): each curated block declares its settings, which are validated, used as defaults and shown as fields in the Services step.
 **Changes in v2.18:** read-back (§21): generated repositories carry a signed manifest, so the platform can verify a repo is its own, detect hand edits and load the design back into the UI for editing.
 **Changes in v2.17:** implementation started. The control plane runs on ECS Fargate with Aurora PostgreSQL (§2.2a), and the same containers run locally on Docker Desktop.
@@ -3312,8 +3313,73 @@ A `RepositoryReader` runs an ordered chain of checks (one class each, Open/Close
 | RB2 | Source of truth when the database and the repository disagree | **The repository's signed input**, provided it verifies; the database only confirms the platform wrote it. |
 | RB3 | Ownership marker | Signed manifest + database record (proof); custom properties on org repos, topics elsewhere (discovery only). |
 | RB4 | Later: keep hand edits (Copier-style three-way update over parsed templates, conflicts in the PR) | Phase 2 |
-| RB5 | Later: project "Change infrastructure" in the UI (`ProjectDraft.fromRequest`, update endpoint, PR per §9.8) | Phase 2. This phase delivers the verified project read-back API. |
-| RB6 | Later: optimistic lock (a design records the commit it was read from; approve fails if HEAD moved) | Phase 2 |
+| RB5 | Project "Change infrastructure" in the UI (`ProjectDraft.fromRequest`, change request, PR per §9.8) | Designed in §21.8 |
+| RB6 | Optimistic lock (a change records the commit it was read from and fails if HEAD moved) | Projects: included in §21.8 (C5). Landing zone designs: Phase 2 |
 | RB7 | Repositories generated before the manifest existed | Rejected by read-back; approving any new landing zone design stamps the repo. |
+
+### 21.8 Change infrastructure for projects (RB5)
+
+A developer changes a provisioned project in the UI. The platform reads the project back (§21.3), lets the developer edit it in the same wizard, and opens a **pull request** on the infrastructure repository with the regenerated files and a new signed manifest. People review and merge the PR in GitHub (§9.8, Appendix A.7); the platform records the new revision when it learns of the merge.
+
+#### What can change (decision C1)
+
+| Field | v1 | Why |
+|---|---|---|
+| Services, their settings, connections | **Editable** | The core of §9.8: add a table, grant access, raise memory |
+| Network attach and VPC choice per environment/region | **Editable** | GitHub environment variables are reconfigured by the change job |
+| Environments | **Add only** | New environments are bootstrapped by the change job. Removing one needs a teardown flow (stack deletion, data retention) |
+| Project name, portfolio, product | **Locked** | They are the repository, the tags and every IAM boundary (§4) |
+| Data classification | **Locked** | Changes encryption and tag conditions; needs its own reviewed flow |
+| Resilience mode and regions | **Locked** | Needs a data-replication and failover plan (§10) |
+
+The server enforces these rules (`ChangeRule` classes, Open/Closed); the UI only mirrors them by disabling locked fields.
+
+#### Removing services (decision C3)
+
+Removing a service deletes its CloudFormation resources on the next deploy unless a retain policy keeps them (S3 and DynamoDB already use `RetainExceptOnCreate`/`Retain`, §6.4). The change preview lists every removed service with **retained** or **deleted**, and creating the change requires `confirm_removals: true` when anything is deleted.
+
+#### Flow
+
+1. **Projects page → Change infrastructure.** The UI calls `GET /v1/projects/{name}/repository:read-back`. If it is not verified, the findings are shown (§21.4) and nothing else happens.
+2. The wizard opens with `ProjectDraft.fromRequest(request)`, locked fields disabled, and a banner "Changing *name* (revision *n*, commit *abc1234*)".
+3. **Preview:** `POST /v1/projects/{name}/changes:preview` with `{request, base_commit}` returns the usual preview plus `changed_files` (paths whose content differs from the repository's main branch), `removed_services` (`{id, type, retained}`) and `added_environments`.
+4. **Open change request:** `POST /v1/projects/{name}/changes` with `{request, base_commit, confirm_removals}`.
+   - Validates the request (§6.6), the `ChangeRule`s, and that something actually changed.
+   - **Optimistic lock (RB6, included):** `base_commit` must equal the repository's main HEAD and the project's recorded commit, otherwise 409 "The repository changed since you loaded it".
+   - **One open change per project** (decision C4): 409 while another is open.
+   - Records a `project_changes` row (`revision = project.revision + 1`, state `queued`) and queues a **change job** on the existing worker.
+5. **Change job (saga, §13):** bootstrap new environments and regions → reconfigure GitHub environment variables → commit the regenerated, sealed files to branch `cloudinfra/change-{revision}` → open the PR "Change infrastructure: revision *n*" whose body lists the changed services, files and removals. State becomes `open` with the PR number and URL. Undo deletes the branch.
+6. **Merge (decision C2):** reviewers merge the PR in GitHub (CODEOWNERS and branch rules apply). The `pull_request` webhook (`closed`, merged) marks the change `merged` and updates the project: `request`, `revision`, `commit_sha` (the merge commit). Closing without merging marks it `closed`. Locally, `POST /v1/projects/{name}/changes/{id}:merge` and `:close` stand in for GitHub (like the release simulator, §8).
+7. After the merge, read-back returns the new revision; the manifest on main says revision *n*, so `RecordCheck` passes.
+
+#### Platform changes
+
+| Area | Change |
+|---|---|
+| Database | `projects.revision` (default 1). New `project_changes`: id, project_name, revision, request, base_commit, branch, pull_request_number, pull_request_url, state (`queued`, `open`, `merged`, `closed`, `failed`), created_by, merge_commit, timestamps. `jobs.kind` (`provision` or `change`) and `jobs.change_id`. |
+| `GitHubPort` | `commit_files(…, branch=…)`, `delete_branch`, `open_pull_request(owner, name, branch, title, body) → PullRequest(number, url)`, `merge_pull_request(…) → sha` and `close_pull_request` (local stand-ins; the real client receives webhooks instead). `LocalGitHub` keeps pull requests in its settings file and merges by fast-forward. |
+| Provisioning | `ChangePlanner` builds the change saga from the same step classes (bootstrap, configure environments) plus `CommitBranchStep` and `OpenPullRequestStep`. Sealing uses the change's revision. |
+| Read-back | `ProjectSubject.revision` reads `projects.revision`. |
+| API | `POST …/changes:preview`, `POST …/changes`, `GET …/changes`, `GET …/changes/{id}`, `POST …/changes/{id}:merge` and `:close` (local only), `POST /v1/github/webhooks` handles `pull_request` for the real adapter later. |
+| UI | Projects page: **Change infrastructure** per provisioned project, and the open change's PR link and state. Wizard in change mode: locked fields disabled, removal list and confirmation on Preview, **Open change request** instead of Create, then the job's progress and the PR link. |
+
+#### Testing (TDD, 100% coverage)
+
+- **ChangeRules:** each locked field rejected; environments add-only; no-op change rejected.
+- **Preview:** changed files, removed services with retained/deleted, added environments.
+- **Create:** stale `base_commit` → 409; second open change → 409; deletions without confirmation → 422; queued job and change row.
+- **Change job:** branch commit with a manifest at the new revision; PR opened; new environment bootstrapped and configured; failure undoes the branch.
+- **Merge/close:** project request, revision and commit updated on merge; unchanged on close; read-back verified at the new revision afterwards.
+- **UI:** Change infrastructure loads the project, locks fields, shows removals and requires confirmation, opens the change and links the PR; refused read-back shows findings.
+
+#### Decisions
+
+| # | Decision | Recommendation |
+|---|---|---|
+| C1 | Editable fields in v1 | As in the table above: services, settings, connections, network, add environments |
+| C2 | Who merges | **People, in GitHub.** The platform never merges its own PR; it learns of the merge by webhook (locally: a simulate button) |
+| C3 | Removing services | **Allowed** with the retained/deleted list and explicit confirmation when anything is deleted |
+| C4 | Concurrent changes | **One open change per project**; close it to start another |
+| C5 | RB6 optimistic lock | **Included here**: base commit must match main HEAD |
 
 **Found while researching (separate fixes):** curated blocks silently ignored unknown `config` keys, and the UI had no fields for their settings; both are fixed by §6.4.1. (The UI sends `config.properties` only for schema-driven resources, which read it, so no settings were being dropped.) §6.1 says "sorted keys" but templates keep insertion order; only `infra.json` is sorted.
