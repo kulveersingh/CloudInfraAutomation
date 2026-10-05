@@ -2,9 +2,10 @@ import gzip
 import json
 
 import pytest
+
+from app.providers.gcp.project.document import DuplicateResourceError, TerraformDocument
 from app.providers.gcp.project.lint import gcp_linter
 from app.providers.gcp.project.schema import GoogleProviderSchema
-
 from app.providers.gcp.provider import GcpProvider
 from app.synth.request import ProjectRequest
 from app.synth.validation import RequestValidationError
@@ -205,9 +206,18 @@ def test_firestore_access_is_conditioned_on_the_database():
 
 def test_queue_write_publishes_and_read_subscribes():
     document = grants({"id": "jobs", "type": "messaging.queue"}, "readwrite")
-    assert ([member["role"] for member in members(document, "google_pubsub_topic_iam_member")],
-            [member["role"] for member in members(document, "google_pubsub_subscription_iam_member")]) == (
-        ["roles/pubsub.publisher"], ["roles/pubsub.subscriber"])
+    assert ([member["role"] for member in members(document, "google_pubsub_topic_iam_member")
+             if member["member"] == PROCESSOR_SA],
+            [member["role"] for member in members(document, "google_pubsub_subscription_iam_member")
+             if member["member"] == PROCESSOR_SA]) == (["roles/pubsub.publisher"], ["roles/pubsub.subscriber"])
+
+
+def test_pubsub_may_move_undeliverable_messages_to_the_dead_letter_topic():
+    document = synthesize(gcp_request(resources=[{"id": "jobs", "type": "messaging.queue"}]))
+    agent = "serviceAccount:service-${data.google_project.this.number}@gcp-sa-pubsub.iam.gserviceaccount.com"
+    assert ((resource(document, "google_pubsub_topic_iam_member", "jobs-dead-agent")["member"],
+             resource(document, "google_pubsub_subscription_iam_member", "jobs-agent")["role"]) == (
+        agent, "roles/pubsub.subscriber"))
 
 
 def test_access_puts_the_target_name_in_the_environment():
@@ -309,8 +319,9 @@ def test_raw_google_types_are_searchable():
 
 
 def test_raw_types_list_their_required_arguments():
-    [entry] = toolkit().types.search("google_pubsub_topic_iam_binding")
-    assert (entry["service"], entry["required"]) == ("pubsub", ["members", "role", "topic"])
+    entry = next(item for item in toolkit().types.search("google_compute_address")
+                 if item["type"] == "google_compute_address")
+    assert (entry["service"], entry["required"]) == ("compute", ["name"])
 
 
 def test_raw_type_passes_its_properties_through():
@@ -360,3 +371,118 @@ def test_snapshot_is_written_from_terraform_output(tmp_path):
     assert json.loads(gzip.decompress(path.read_bytes()))["resources"]["google_x"] == {
         "arguments": ["name"], "required": ["name"],
         "blocks": {"spec": {"arguments": ["size"], "required": [], "min_items": 1}}}
+
+
+# ---- request rules ----
+
+def test_dual_region_storage_in_one_continent_is_fine():
+    assert validate(gcp_request(resilience=DR)) == []
+
+
+def test_regions_on_two_continents_are_fine_without_replicated_storage():
+    payload = gcp_request(resources=[{"id": "processor", "type": "compute.function"}],
+                          resilience={"mode": "dr", "primary_region": "us-east1", "secondary_region": "europe-west1"})
+    assert validate(payload) == []
+
+
+def test_replicated_storage_exists_only_in_some_continents():
+    payload = gcp_request(resources=[{"id": "uploads", "type": "storage.bucket"}, {"id": "orders", "type": "database.table"}],
+                          resilience={"mode": "dr", "primary_region": "australia-southeast1",
+                                      "secondary_region": "australia-southeast2"})
+    assert validate(payload) == [
+        "Cloud Storage bucket 'uploads' cannot span regions in australia; it can in asia, europe, us.",
+        "Firestore database 'orders' cannot span regions in australia; it can in europe, us."]
+
+
+def test_a_function_takes_one_event_trigger():
+    payload = gcp_request(resources=[{"id": "a", "type": "storage.bucket"}, {"id": "b", "type": "storage.bucket"},
+                                     {"id": "processor", "type": "compute.function"}],
+                          connections=[{"kind": "event.notify", "source": source, "target": "processor"}
+                                       for source in ("a", "b")])
+    assert validate(payload) == ["'processor' has 2 event triggers; a Cloud Run function takes one."]
+
+
+def test_the_contract_id_is_reserved():
+    payload = gcp_request(resources=[{"id": "contract", "type": "messaging.queue"}])
+    assert validate(payload) == ["'contract' is reserved for the platform; choose another id."]
+
+
+def test_access_needs_a_level():
+    payload = gcp_request(resources=[{"id": "processor", "type": "compute.function"}, {"id": "jobs", "type": "messaging.queue"}],
+                          connections=[{"kind": "iam.access", "source": "processor", "target": "jobs"}])
+    assert validate(payload) == ["iam.access from 'processor' to 'jobs' needs an access level."]
+
+
+def test_only_workloads_are_granted_access():
+    payload = gcp_request(resources=[{"id": "a", "type": "storage.bucket"}, {"id": "jobs", "type": "messaging.queue"}],
+                          connections=[{"kind": "access.grant", "source": "a", "target": "jobs", "access": "read"}])
+    assert validate(payload) == ["access.grant cannot connect storage.bucket to messaging.queue."]
+
+
+# ---- more bindings ----
+
+def test_queue_write_only_publishes():
+    document = grants({"id": "jobs", "type": "messaging.queue"}, "write")
+    assert [member["member"] for member in members(document, "google_pubsub_subscription_iam_member")] == [
+        "serviceAccount:service-${data.google_project.this.number}@gcp-sa-pubsub.iam.gserviceaccount.com"]
+
+
+def test_dr_queue_references_its_primary_only_topic():
+    document = synthesize(gcp_request(resources=[{"id": "jobs", "type": "messaging.queue"}], resilience=DR))
+    assert resource(document, "google_pubsub_subscription", "jobs")["topic"] == "${google_pubsub_topic.jobs[0].id}"
+
+
+def test_the_storage_agent_is_allowed_once_for_many_triggers():
+    payload = gcp_request(resources=[{"id": "a", "type": "storage.bucket"}, {"id": "b", "type": "storage.bucket"},
+                                     {"id": "f", "type": "compute.function"}, {"id": "g", "type": "compute.function"}],
+                          connections=[{"kind": "event.notify", "source": "a", "target": "f", "suffix": ".csv"},
+                                       {"kind": "event.notify", "source": "b", "target": "g"}], resilience=DR)
+    document = synthesize(payload)
+    assert (resource(document, "google_project_iam_member", "gcs-events-publisher")["count"],
+            resource(document, "google_cloudfunctions2_function", "f")["dynamic"]["event_trigger"]["content"][
+                "trigger_region"],
+            toolkit().notes(ProjectRequest.model_validate(payload))) == (
+        "${local.is_primary ? 1 : 0}", "us",
+        ["a → f: Eventarc cannot filter by object suffix, so f must check CLOUDINFRA_EVENT_SUFFIX."])
+
+
+def test_dr_contract_is_published_once():
+    document = synthesize(gcp_request(resilience=DR))
+    assert resource(document, "google_secret_manager_secret_version", "contract")["secret"] == (
+        "${google_secret_manager_secret.contract[0].id}")
+
+
+def test_a_resource_is_defined_once():
+    document = TerraformDocument()
+    document.add_resource("google_pubsub_topic", "x", {"name": "x"})
+    with pytest.raises(DuplicateResourceError, match="google_pubsub_topic.x is defined twice."):
+        document.add_resource("google_pubsub_topic", "x", {"name": "x"})
+
+
+# ---- more raw types and lint ----
+
+@pytest.mark.parametrize("config, message", [
+    ({"properties": []}, "google_pubsub_schema 'schema' properties must be a JSON object."),
+    ({"properties": {"name": "s"}, "extra": 1}, "google_pubsub_schema 'schema' accepts only 'properties' in config, not 'extra'."),
+])
+def test_raw_type_config_is_checked(config, message):
+    payload = gcp_request(resources=[{"id": "schema", "type": "google_pubsub_schema", "config": config}])
+    assert validate(payload) == [message]
+
+
+def test_unknown_google_types_are_refused():
+    payload = gcp_request(resources=[{"id": "x", "type": "google_no_such_thing", "config": {"properties": {}}}])
+    assert validate(payload) == ["Unknown resource type 'google_no_such_thing' for 'x'."]
+
+
+def test_raw_type_has_an_id_output():
+    payload = gcp_request(resources=[{"id": "schema", "type": "google_pubsub_schema",
+                                      "config": {"properties": {"name": "orders"}}}])
+    assert synthesize(payload)["output"]["schema_id"] == {"value": "${google_pubsub_schema.schema.id}"}
+
+
+def test_schema_check_finds_unknown_types_and_dynamic_blocks():
+    document = {"resource": {"google_nope": {"x": {}}, "google_cloudfunctions2_function": {"y": {
+        "name": "f", "location": "l", "dynamic": {"event_triger": {"for_each": [], "content": {}}}}}}}
+    assert gcp_linter().lint(document) == [
+        "google_nope.x: unknown resource type.", "google_cloudfunctions2_function.y: unknown argument 'event_triger'."]

@@ -107,7 +107,7 @@ class RecursiveInvocationRule(RequestRule):
 
 class RequestValidator:
     def __init__(self, rules: list[RequestRule]):
-        self._rules = rules
+        self.rules = list(rules)
 
     @classmethod
     def default(cls, blocks: BlockRegistry, binders: BinderRegistry) -> "RequestValidator":
@@ -116,6 +116,6 @@ class RequestValidator:
                     RecursiveInvocationRule(binders)])
 
     def validate(self, request: ProjectRequest) -> None:
-        messages = [message for rule in self._rules for message in rule.messages(request)]
+        messages = [message for rule in self.rules for message in rule.messages(request)]
         if messages:
             raise RequestValidationError(messages)

@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from app.synth.binders.registry import BinderRegistry
 from app.synth.blocks.registry import BlockRegistry
@@ -28,6 +28,13 @@ class WorkflowVariables(ABC):
         """`context` is the provisioning context: accounts, topology, bootstrap outputs and networks."""
 
 
+class PreviewAdvisor:
+    """Notes shown with a preview: what the generated code cannot do on this cloud, so the team must. None by default."""
+
+    def notes(self, request) -> list[str]:
+        return []
+
+
 @dataclass(frozen=True)
 class ProjectToolkit:
     """What a provider gives the core to generate a project's repository (§22.3)."""
@@ -40,6 +47,10 @@ class ProjectToolkit:
     bundle: RepositoryBundle
     types: ResourceTypeCatalog
     variables: WorkflowVariables
+    advisor: PreviewAdvisor = field(default_factory=PreviewAdvisor)
+
+    def notes(self, request) -> list[str]:
+        return self.advisor.notes(request)
 
     def catalog(self) -> list[dict]:
         return ServiceCatalog(self.blocks).entries()

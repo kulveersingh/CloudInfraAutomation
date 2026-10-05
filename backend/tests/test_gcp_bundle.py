@@ -97,3 +97,8 @@ def test_network_variables():
                       {("prod", "us-east1"): network})
     assert (found["NETWORK"], found["SUBNETWORK"], found["NETWORK_TAGS"]) == (
         "projects/h/global/networks/v", "projects/h/regions/us-east1/subnetworks/s", '["t1","t2"]')
+
+
+def test_workflow_validates_with_the_terraform_version_infrastructure_manager_runs():
+    workflow = files(gcp_request())[".github/workflows/deploy.yml"]
+    assert ("terraform_version: 1.5.7" in workflow, "terraform validate" in workflow) == (True, True)

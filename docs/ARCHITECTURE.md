@@ -1,10 +1,11 @@
 # CloudInfraAutomation — Architecture
 
-**Status:** v2.23, approved; implementation in progress. No code is written until this design is approved.
+**Status:** v2.24, approved; implementation in progress. No code is written until this design is approved.
 **Date:** 2026-10-05
 **Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9). Every solution is **DR-capable**: it can run in one region, as DR (primary active, secondary standby) or as an HA pair (both active), with **any region pair chosen in the UI** (default us-east-1 / us-east-2) (§10).
 
 **Changes in v2:** added the org registry and tagging strategy (§4); permissions based on tags (§4.5–4.8); multi-account, five-environment model (§5); promotion pipeline (§8). Payload, provisioning, security and scaling sections are updated to match.
+**Changes in v2.24:** MC-2b implemented: Google Cloud Terraform JSON generation with curated services, exact-resource bindings, Eventarc triggers, lint against the provider schema, preview notes and the Infrastructure Manager workflow (§22.9.7 notes).
 **Changes in v2.23:** MC-2 design (§22.9): Google Cloud projects on Terraform JSON and Infrastructure Manager, Workload Identity Federation, exact-resource IAM, locked-bucket teardown backups, and a cloud picker.
 **Changes in v2.22:** multi-cloud (§22): a cloud-neutral core with AWS, Google Cloud and Azure provider plug-ins; native IaC per cloud; neutral service kinds, control packs and backup strategies; phased delivery.
 **Changes in v2.21:** teardown (§21.9): remove an environment or decommission a project, backup-first into a vault locked for 60 days (deleted only manually by super users), with a teardown record and restore.
@@ -3848,6 +3849,31 @@ Delete steps: delete the Infrastructure Manager deployment (secondary region fir
 | **MC-2c** | Bundle, workflow and variables, Workload Identity bootstrap, provisioning, read-back and change requests end to end on GCP. |
 | **MC-2d** | Release plan rows and classifier; teardown inventory, locked-bucket backups, Backup and DR vault stand-in, restore with import. |
 | **MC-2e** | UI: cloud picker, GCP regions, catalog, settings and words; teardown and networks screens for GCP. |
+
+**MC-2b implementation notes.**
+- **Package.** The code is in `app/providers/gcp/project/`. The four curated blocks implement small capabilities: `GrantTarget`, `Workload` and `EventSource`. `ResourceBindingBinder` (alias `iam.access`) and `EventarcBinder` wire them together. `RawResourceResolver` handles Tier-2 types and `TerraformJsonDialect` writes the document.
+- **Multi-region documents.** In DR/HA, resources that belong to the whole project are created only by the primary deployment (`count = local.is_primary ? 1 : 0`). These are service accounts, the dual-region bucket, multi-region Firestore, topics, bindings and the contract. References to them are indexed (`[0]`). Functions and their invoker binding are deployed in every region.
+- **Pub/Sub dead letters.** A queue also grants the Pub/Sub service agent the two bindings that dead-lettering needs: publish to the dead-letter topic and subscribe to the subscription.
+- **Request rules.** Google Cloud adds four rules:
+  - both regions on one continent (when storage spans them);
+  - dual-region buckets only in US/EU/Asia, and multi-region Firestore only in US/EU;
+  - one event trigger per function;
+  - the id `contract` is reserved.
+
+  `RequestValidator.rules` is now public so a provider can extend the defaults.
+- **Preview notes.** `ProjectToolkit` gains an optional `PreviewAdvisor`, and `notes` is added to the preview response. Google Cloud uses it to say which functions must filter event prefixes or suffixes themselves.
+- **Lint.** Lint flags:
+  - primitive roles;
+  - public members;
+  - buckets without enforced public access prevention;
+  - workload project roles without a condition;
+  - arguments that don't match the bundled provider schema (nested blocks and `dynamic` included).
+- **Repository bundle.** The bundle contains:
+  - `main.tf.json` and `variables.tf.json`;
+  - `config/<env>.tfvars`;
+  - a workflow that runs `terraform validate` on 1.5.7, signs in through Workload Identity Federation, then previews and applies one Infrastructure Manager deployment per region. Each region's inputs are appended to the environment's tfvars file, because gcloud takes either an inputs file or input values, not both.
+- **Bootstrap outputs.** `BootstrapOutputs` gains `federation`, the workload identity provider.
+- **Schema snapshot.** `python -m app.providers.gcp.project.refresh [version]` regenerates the snapshot.
 
 #### 22.9.8 Decisions
 

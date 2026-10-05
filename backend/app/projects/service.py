@@ -47,7 +47,8 @@ class ProjectService:
         cost_center = self._registry.resolve_cost_center(ownership.portfolio_id, ownership.product_id,
                                                          request.project_name)
         return {"files": toolkit.bundle.render(request, template), "tags": TagSet(request, cost_center).as_dict(),
-                "targets": self._targets(request), "lint": toolkit.linter.lint(template)}
+                "targets": self._targets(request), "lint": toolkit.linter.lint(template),
+                "notes": toolkit.notes(request)}
 
     def check(self, request: ProjectRequest) -> None:
         """Everything that must hold before the platform provisions or changes a project."""

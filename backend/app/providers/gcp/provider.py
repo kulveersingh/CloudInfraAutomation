@@ -22,7 +22,9 @@ class GcpProvider(CloudProvider):
         return gcp_network_problems(network)
 
     def project(self):
-        raise ValidationFailedError("Projects on Google Cloud are not available yet.")
+        from app.providers.gcp.project.toolkit import gcp_project
+
+        return gcp_project()
 
     def teardown(self):
         raise ValidationFailedError("Teardowns on Google Cloud are not available yet.")

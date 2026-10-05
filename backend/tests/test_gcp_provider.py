@@ -11,7 +11,7 @@ from app.networks.models import NetworkInput
 from app.providers.base import ProviderRegistry, Vocabulary
 from app.providers.gcp.provider import GcpProvider
 from app.seed import ReferenceData
-from tests.factories import request_dict
+from tests.gcp_helpers import gcp_request
 from tests.lz_factories import answers_dict
 
 ALEX = {"X-Actor": "alex", "X-Roles": "platform-admin"}
@@ -102,9 +102,10 @@ def test_bootstrap_creates_workload_identity_service_accounts(tmp_path):
     outputs = LocalGcp(tmp_path).ensure_bootstrap_stack(BootstrapRequest(
         account_id="cloudinfra-payments-dev", region="us-east1", project="demo", repository="acme/demo-infra",
         environment="dev"))
-    assert (outputs.deployer_identity, outputs.execution_identity) == (
+    assert (outputs.deployer_identity, outputs.execution_identity, outputs.federation) == (
         "cloudinfra-demo-deploy@cloudinfra-payments-dev.iam.gserviceaccount.com",
-        "cloudinfra-demo-im@cloudinfra-payments-dev.iam.gserviceaccount.com")
+        "cloudinfra-demo-im@cloudinfra-payments-dev.iam.gserviceaccount.com",
+        "projects/cloudinfra-payments-dev/locations/global/workloadIdentityPools/cloudinfra-github/providers/github")
 
 
 def test_bootstrap_records_the_workload_identity_subject(tmp_path):
@@ -122,7 +123,6 @@ def test_google_cloud_state_is_kept_apart_from_aws(tmp_path):
 # ---- what is not there yet ----
 
 @pytest.mark.parametrize("part, message", [
-    ("project", "Projects on Google Cloud are not available yet."),
     ("teardown", "Teardowns on Google Cloud are not available yet."),
     ("resources", "Releases on Google Cloud are not available yet."),
     ("landing_zone", "The Google Cloud landing zone is not available yet."),
@@ -132,9 +132,10 @@ def test_parts_still_to_come_say_so(part, message):
         getattr(GcpProvider(), part)()
 
 
-def test_google_cloud_project_preview_is_refused_clearly(client):
-    response = client.post("/v1/projects:preview", json=request_dict(provider="gcp"))
-    assert (response.status_code, response.json()["detail"]) == (422, "Projects on Google Cloud are not available yet.")
+def test_google_cloud_project_preview_shows_the_terraform_configuration_and_its_notes(client):
+    response = client.post("/v1/projects:preview", json=gcp_request())
+    body = response.json()
+    assert (response.status_code, "main.tf.json" in body["files"], body["lint"], len(body["notes"])) == (200, True, [], 1)
 
 
 def test_google_cloud_landing_zone_is_refused_clearly(client):
