@@ -104,8 +104,8 @@ def test_a_valid_azure_network():
     ("network_ref", "vnet-eastus2",
      "'vnet-eastus2' is not a VNet (/subscriptions/…/resourceGroups/…/providers/Microsoft.Network/virtualNetworks/…)."),
     ("subnet_refs", [f"{VNET}-other/subnets/functions"], f"'{VNET}-other/subnets/functions' is not a subnet of {VNET}."),
-    ("firewall_refs", ["nsg-apps"], "'nsg-apps' is not a network security group "
-                                    "(/subscriptions/…/providers/Microsoft.Network/networkSecurityGroups/…)."),
+    ("firewall_refs", ["nsg-apps"], ("'nsg-apps' is not a network security group "
+                                    "(/subscriptions/…/providers/Microsoft.Network/networkSecurityGroups/…).")),
 ])
 def test_azure_networks_explain_what_is_wrong(field, value, message):
     with pytest.raises(ValidationError, match=re.escape(message)):
@@ -153,8 +153,8 @@ def test_blob_backups_go_to_a_backup_vault_in_their_region(tmp_path):
     backup = local_azure(tmp_path).backup("9a1e2b3c-0000-4000-8000-000000000001")
     point = backup.back_up(BackupSource(SUBSCRIPTION, "eastus2", "Microsoft.Storage/storageAccounts", "stuploads"))
     assert (point.vault, point.ref.startswith(f"{point.vault}/backupInstances/")) == (
-        "/subscriptions/9a1e2b3c-0000-4000-8000-000000000001/resourceGroups/rg-cloudinfra-backup/providers/"
-        "Microsoft.DataProtection/backupVaults/bv-teardown-eastus2", True)
+        ("/subscriptions/9a1e2b3c-0000-4000-8000-000000000001/resourceGroups/rg-cloudinfra-backup/providers/"
+        "Microsoft.DataProtection/backupVaults/bv-teardown-eastus2"), True)
 
 
 def test_cosmos_exports_go_to_the_locked_container(tmp_path):
