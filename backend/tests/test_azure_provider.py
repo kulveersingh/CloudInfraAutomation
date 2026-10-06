@@ -9,7 +9,6 @@ from pydantic import ValidationError
 
 from app.adapters.factory import AdapterFactory
 from app.adapters.ports import BackupSource, BootstrapRequest
-from app.errors import ValidationFailedError
 from app.networks.models import NetworkInput
 from app.providers.base import ProviderRegistry, Vocabulary
 from app.seed import ReferenceData
@@ -185,9 +184,9 @@ def test_other_clouds_have_no_pairs_and_a_landing_zone(cloud):
     assert (described["region_pairs"], described["landing_zone"]) == ({}, True)
 
 
-def test_the_landing_zone_is_still_to_come():
-    with pytest.raises(ValidationFailedError, match="The Azure landing zone is not available yet."):
-        provider().landing_zone()
+def test_the_landing_zone_is_not_offered_until_it_can_be_applied():
+    assert (provider().landing_zone().repository_name, provider().describe()["landing_zone"]) == (
+        "landing-zone-azure-infra", False)
 
 
 def test_an_azure_project_previews_its_templates(client):
