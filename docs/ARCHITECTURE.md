@@ -1,10 +1,11 @@
 # CloudInfraAutomation — Architecture
 
-**Status:** v2.41, approved; implementation in progress. No code is written until this design is approved. No code is written until this design is approved.
+**Status:** v2.42, approved; implementation in progress. No code is written until this design is approved. No code is written until this design is approved.
 **Date:** 2026-10-05
 **Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9). Every solution is **DR-capable**: it can run in one region, as DR (primary active, secondary standby) or as an HA pair (both active), with **any region pair chosen in the UI** (default us-east-1 / us-east-2) (§10).
 
 **Changes in v2:** added the org registry and tagging strategy (§4); permissions based on tags (§4.5–4.8); multi-account, five-environment model (§5); promotion pipeline (§8). Payload, provisioning, security and scaling sections are updated to match.
+**Changes in v2.42:** MC-5b: the Azure landing-zone stacks (management groups and custom policies, subscription aliases, policy and role assignments, central logs and Defender, hubs and spokes with Azure Firewall and private DNS, the locked vault), seed script, workflow and README; subscriptions are vended before policies are assigned, so later stacks can target them (refines §22.12.5) (§22.12 notes).
 **Changes in v2.41:** MC-5 design approved; MC-5a: the Azure landing-zone design with provider answers, subscription naming, management groups and subscriptions, an Azure Policy control snapshot built from Azure/azure-policy with a mapping for every pack, checks, advice and template regions (§22.12 notes).
 **Changes in v2.40:** MC-5 design (§22.12): the Azure landing zone as management groups under the organization's own, subscription vending against an EA or MCA billing scope, Azure Policy pack mappings (all inherited, audit policies always deployed), hub-and-spoke with Azure Firewall and central private DNS, a backup subscription with locked vaults and Resource Guard, deployment stacks at management-group scope; proposed for approval.
 **Changes in v2.39:** MC-4e: Azure in the project wizard with its regions, services and words; the region-pair hint, a secondary that follows the primary's pair, and warnings for storage outside the pair; landing-zone clouds limited to those that have one; cloud-neutral wording; MC-4 complete (§22.11 notes).
@@ -4617,6 +4618,40 @@ Two packs that assign the same definition to one management group are merged int
   - The merged-parameter check is not needed yet: `AllowedRegions` has a single source, the governed regions.
 - **Advice.** Defender plans' cost; local egress skipping the firewall; strict residency against paired storage; the Identity subscription only for AD DS; subscription creation limits on the billing account above 20 subscriptions.
 - **Templates.** Public sector `eastus2`/`centralus`, EU sovereignty `westeurope`/`northeurope`: both are pairs. Every template proposes on Azure without problems.
+
+**MC-5b implementation notes.**
+- **Stack order.** The design table put `lz-structure` before `lz-subscriptions`. ARM cannot target a subscription whose id it only learns from `reference()`, so stacks that deploy into vended subscriptions take their ids as a parameter.
+  - The workflow resolves them with `az account alias list` right after `lz-subscriptions` and writes `parameters/subscriptions.json`. Every later stack reads it as `subscriptionIds`.
+  - The order is therefore `lz-foundation` (management groups and the platform's policy definitions), `lz-subscriptions`, `lz-structure`, `lz-management`, `lz-network`, `lz-vault`.
+  - On the very first apply, subscriptions exist for a moment before their policies are assigned. Afterwards a new subscription lands in a management group whose assignments already govern it.
+  - The design table's separate "seven stacks" count included the seed; there are six stacks.
+- **Templates.** Each stack is a management-group template.
+  - Tenant-level resources (management groups, subscription aliases) use `scope: "/"`.
+  - Everything else is a nested deployment that evaluates its own expressions (`expressionEvaluationOptions: inner`) and gets what it needs as parameters.
+  - A resource group is reached through a subscription-scope deployment that creates the group and deploys into it, because a management-group template cannot target a resource group directly.
+  - Nested deployment names stay within 64 characters (a hash replaces the tail).
+- **Policy.**
+  - The 8 custom definitions (`custom_policies.py`) are written as Azure Policy reads them. Their expressions are escaped (`[[`) so ARM does not evaluate them.
+  - Assignments are one per control per management group, named `ci-` plus 12 hex characters, because names at management-group scope are at most 24 characters.
+  - The snapshot now records, per control, whether the definition takes `effect` (two built-ins fix it to `deny`), fixed values (key rotation within 90 days), and the definition's name for a pack parameter (`AllowedRegions` → `listOfAllowedLocations`).
+  - Initiatives are not used: assignments per definition stay within the 200-per-scope check and read back one to one.
+  - **Policy Staging** gets every control the design enforces anywhere, with `DoNotEnforce`, so a change can be evaluated there before promotion (R5).
+- **Refined customs.** "No private endpoint to a resource in another environment" is enforced as "only to resources in the same subscription", since a policy rule can read its own subscription but not the environment. The PCI control denies public IP addresses outright.
+- **Roles.** Platform admins get Reader and security admins Security Admin on `{org}`. Network admins get Network Contributor on the Infrastructure management group. Backup super users get Backup Contributor on the vault's resource group. No broad roles.
+- **Management.** The workspace's retention is capped at 730 days, Azure's limit. Log storage uses account-level version immutability, locked for the log retention. Every subscription sends its Activity Log to the workspace through a subscription diagnostic setting rather than a remediating policy, so it is deterministic. Defender plans (CSPM, servers, storage, SQL, Cosmos DB) apply only with `defender: standard`. Sentinel goes in the Security Tooling subscription. Security contacts are left out: Azure's API for role-only contacts is in preview.
+- **Network.**
+  - Each hub is a `/22` from the IPAM hub pool, with `AzureFirewallSubnet` (`/26`, the firewall at its fourth address) and, for VPN or ExpressRoute, `GatewaySubnet`.
+  - Firewall policy rules allow traffic within each environment's ranges, declared flows (with their reason), and web egress when central. Premium with inspection adds IDPS in Deny mode.
+  - Spokes split each environment's pool among its workload subscriptions: functions subnet (delegated to `Microsoft.App/environments`) and endpoints subnet. Each spoke has an NSG and either a default route to its region's firewall (central egress) or a NAT gateway.
+  - Peerings run both ways, spoke to hub only. Gateway transit is left to a person once a gateway exists.
+  - Without a hub, spokes stand alone with NAT gateways, and the peering policy denies every peering.
+- **Private DNS (MC5-9).** Four zones (blob, Cosmos DB SQL, Service Bus, Key Vault) are linked to every hub. Built-in `DeployIfNotExists` policies add the records, each with a managed identity holding Network Contributor on `{org}`.
+- **Vault.** Per governed region, `bv-teardown-{region}` (immutability Locked, soft delete AlwaysOn) and a Resource Guard bound to it. A design without a Backup subscription gets an empty `lz-vault`; teardowns then use the `azure_backup_subscription` setting. The export account is `stteardown` + `uniqueString(subscription().id)`; `AzureBackupStyle` now computes the same name with the platform's `uniqueString`.
+- **Seed.** The script creates `{org}` under the tenant root (and says how to elevate access if that is refused, L4), an app registration and service principal, a federated credential for `repo:<owner>/<repo>:environment:landing-zone`, and Owner on `{org}`. For an EA enrollment account it assigns the SubscriptionCreator billing role; for MCA it says what a billing admin must grant (L1).
+- **Lint.** MC-4b's broad-role, storage-access, local-auth and schema rules run on every resource, nested ones included. The rule against role assignments above the resource group is for projects only.
+- **Verified with Bicep.** The default design and one with a VPN, a declared flow, a Premium firewall and Defender plans: every stack decompiles and builds with Bicep CLI 0.48.1 with no errors.
+  - The network and vault stacks build as modules (one per nested deployment). Inline, the decompiler merges nested templates into one file and reports duplicate names.
+  - The other stacks build inline. As modules, the decompiler crashes on identical nested templates.
 
 #### 22.12.9 Decisions and open questions
 

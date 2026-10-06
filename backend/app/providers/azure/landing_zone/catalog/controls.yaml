@@ -1,6 +1,8 @@
 # Azure control snapshot: the Azure Policy definitions the Azure pack mappings use (§22.12.4). Built-in
 # definitions are by their id, with the display names and effects of Azure/azure-policy (master, 2026-10-06);
-# `cloudinfra-` ones are the platform's own custom definitions. `effect` is what each is assigned with. Framework
+# `cloudinfra-` ones are the platform's own custom definitions. `effect` is what each is assigned with;
+# `effect_parameter: false` marks a definition whose effect is fixed, `fixed_parameters` values every assignment
+# gets, and `parameter_names` a pack parameter's name in the definition. Framework
 # mappings come with the refresh script; until it runs they show as intended alignment (unverified).
 source: ''
 mappings_refreshed: null
@@ -13,6 +15,7 @@ controls:
     severity: HIGH
     implementation: BUILT_IN_POLICY
     effect: Deny
+    effect_parameter: false
   404c3081-a854-4457-ae30-26a93ef643f9:
     name: Secure transfer to storage accounts should be enabled
     behavior: PREVENTIVE
@@ -133,6 +136,7 @@ controls:
     severity: MEDIUM
     implementation: BUILT_IN_POLICY
     effect: Deny
+    effect_parameter: false
   6d555dd1-86f2-4f1c-8ed7-5abae7c6cbab:
     name: Function apps should only be accessible over HTTPS
     behavior: PREVENTIVE
@@ -230,6 +234,8 @@ controls:
     severity: MEDIUM
     implementation: BUILT_IN_POLICY
     effect: Audit
+    fixed_parameters:
+      maximumDaysToRotate: 90
   bf045164-79ba-4215-8f95-f8048dc1780b:
     name: Geo-redundant storage should be enabled for Storage Accounts
     behavior: DETECTIVE
@@ -256,6 +262,8 @@ controls:
     effect: Deny
     parameters:
     - AllowedRegions
+    parameter_names:
+      AllowedRegions: listOfAllowedLocations
   e765b5de-1225-4ba3-bd56-1ac6695af988:
     name: Allowed locations for resource groups
     behavior: PREVENTIVE
@@ -264,42 +272,50 @@ controls:
     effect: Deny
     parameters:
     - AllowedRegions
+    parameter_names:
+      AllowedRegions: listOfAllowedLocations
   cloudinfra-deny-subnet-without-nsg:
     name: Subnets must have a network security group
     behavior: PREVENTIVE
     severity: HIGH
     implementation: CUSTOM_POLICY
     effect: Deny
+    effect_parameter: false
   cloudinfra-deny-subscription-role-assignments:
     name: Role assignments only at resource group or resource scope below the platform
     behavior: PREVENTIVE
     severity: HIGH
     implementation: CUSTOM_POLICY
     effect: Deny
+    effect_parameter: false
   cloudinfra-deny-peering-outside-hub:
     name: Virtual network peering only to the region's hub
     behavior: PREVENTIVE
     severity: HIGH
     implementation: CUSTOM_POLICY
     effect: Deny
+    effect_parameter: false
   cloudinfra-deny-cross-environment-private-endpoints:
-    name: Private endpoints only to resources in the same environment
+    name: Private endpoints only to resources in the same subscription
     behavior: PREVENTIVE
     severity: HIGH
     implementation: CUSTOM_POLICY
     effect: Deny
+    effect_parameter: false
   cloudinfra-deny-delete-log-stores:
     name: Do not delete the central Log Analytics workspace or log storage account
     behavior: PREVENTIVE
     severity: HIGH
     implementation: CUSTOM_POLICY
     effect: DenyAction
+    effect_parameter: false
   cloudinfra-deny-delete-data-stores:
     name: Do not delete storage accounts, Cosmos DB accounts, SQL servers or Backup vaults
     behavior: PREVENTIVE
     severity: HIGH
     implementation: CUSTOM_POLICY
     effect: DenyAction
+    effect_parameter: false
   cloudinfra-deny-geo-storage-outside-allowed-regions:
     name: Geo-redundant storage only when the pair is an allowed region
     behavior: PREVENTIVE
@@ -308,9 +324,13 @@ controls:
     effect: Deny
     parameters:
     - AllowedRegions
+    effect_parameter: false
+    parameter_names:
+      AllowedRegions: allowedRegions
   cloudinfra-deny-public-ip-addresses:
-    name: No public IP addresses on load balancers and application gateways
+    name: No public IP addresses
     behavior: PREVENTIVE
     severity: HIGH
     implementation: CUSTOM_POLICY
     effect: Deny
+    effect_parameter: false

@@ -3,6 +3,7 @@ import uuid
 from app.adapters.local_backup import BackupStyle
 from app.adapters.local_cloud import LocalCloud
 from app.adapters.ports import BootstrapOutputs, BootstrapRequest
+from app.providers.azure.expressions import unique_string
 from app.providers.azure.naming import resource_group_id
 
 BACKUP_GROUP = "/subscriptions/{subscription}/resourceGroups/rg-cloudinfra-backup/providers"
@@ -20,7 +21,7 @@ class AzureBackupStyle(BackupStyle):
     def vault(self, backup_account_id, region, resource_type):
         providers = BACKUP_GROUP.format(subscription=backup_account_id)
         if resource_type in EXPORTED_TYPES:
-            account = f"stteardown{uuid.uuid5(uuid.NAMESPACE_URL, backup_account_id).hex[:12]}"
+            account = f"stteardown{unique_string(f'/subscriptions/{backup_account_id}')}"  # as lz-vault names it
             return f"{providers}/Microsoft.Storage/storageAccounts/{account}/blobServices/default/containers/cloudinfra-teardown"
         return f"{providers}/Microsoft.DataProtection/backupVaults/bv-teardown-{region}"
 

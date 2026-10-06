@@ -57,8 +57,17 @@ def templates(template: dict) -> list[dict]:
                         for nested in templates(resource["properties"]["template"])]]
 
 
-def text(template: dict) -> str:
-    return json.dumps(template)
+def expressions(value, nested_template: bool = False) -> list[str]:
+    """ARM expressions this template evaluates: not nested deployments' templates, nor escaped ones ("[[")."""
+    if isinstance(value, str):
+        return [value] if value.startswith("[") and not value.startswith("[[") else []
+    if isinstance(value, list):
+        return [found for item in value for found in expressions(item)]
+    if isinstance(value, dict):
+        return [found for key, item in value.items()
+                if not (key == "template" and isinstance(item, dict) and "resources" in item)
+                for found in expressions(item)]
+    return []
 
 
 # ---- the repository ----
@@ -107,11 +116,7 @@ def test_every_template_depends_only_on_what_it_defines_and_declares_what_it_use
                                                  "reason": "Payments API"}], "on_premises": "vpn"})
     for template in templates(everything):
         defined = {resource["name"] for resource in template["resources"]}
-        used = set(re.findall(r"parameters\('(\w+)'\)", json.dumps(
-            {key: value for key, value in template.items() if key != "resources"} | {"resources": [
-                {key: value for key, value in resource.items() if key != "properties"}
-                | ({"properties": {k: v for k, v in resource["properties"].items() if k != "template"}}
-                   if "properties" in resource else {}) for resource in template["resources"]]})))
+        used = {name for value in expressions(template) for name in re.findall(r"parameters\('(\w+)'\)", value)}
         assert ([entry for resource in template["resources"] for entry in resource.get("dependsOn", [])
                  if entry not in defined], used - set(template.get("parameters", {}))) == ([], set())
 
@@ -211,9 +216,12 @@ def test_keys_must_rotate_within_ninety_days():
 def test_the_platforms_own_definitions_are_found_at_the_organization():
     document = stack("lz-structure", control_packs=["foundation", "network-hardening"])
     peering = assigned(document, "acme-prod", "cloudinfra-deny-peering-outside-hub")["properties"]
-    assert (peering["policyDefinitionId"], peering["parameters"]["hubSubscriptionId"]) == (
+    nested = named(document, "Microsoft.Resources/deployments", "policy-acme-prod")
+    assert (peering["policyDefinitionId"], peering["parameters"]["hubSubscriptionId"],
+            nested["properties"]["parameters"]["hubSubscriptionId"]) == (
         ("/providers/Microsoft.Management/managementGroups/acme/providers/Microsoft.Authorization/policyDefinitions/"
-         "cloudinfra-deny-peering-outside-hub"), {"value": "[parameters('subscriptionIds')['acme-connectivity']]"})
+         "cloudinfra-deny-peering-outside-hub"), {"value": "[parameters('hubSubscriptionId')]"},
+        {"value": "[parameters('subscriptionIds')['acme-connectivity']]"})
 
 
 def test_policy_staging_evaluates_every_control_without_enforcing():
@@ -411,3 +419,22 @@ def test_the_readme_lists_the_stacks_and_what_is_left_to_a_person():
     readme = files(network={"on_premises": "vpn"})["README.md"]
     assert ("1. `stacks/lz-foundation`" in readme, "6. `stacks/lz-vault`" in readme,
             "VPN gateway" in readme, "scripts/bootstrap-seed.sh" in readme) == (True, True, True, True)
+
+
+# ---- designs without some shared subscriptions ----
+
+def test_without_infrastructure_subscriptions_there_is_no_hub_vault_or_infrastructure_group():
+    rendered = files(infrastructure=["cicd"], network={"hub": False, "inspection": False})
+    structure = json.loads(rendered["stacks/lz-structure/main.json"])
+    network_admins = [item for item in of_type(structure, "Microsoft.Authorization/roleAssignments")
+                      if item["properties"]["principalId"] == GROUPS["network_admins"]]
+    assert (len(network_admins), json.loads(rendered["stacks/lz-vault/main.json"])["resources"],
+            of_type(json.loads(rendered["stacks/lz-network/main.json"]), "Microsoft.Network/azureFirewalls")) == (1, [], [])
+
+
+def test_long_deployment_names_keep_a_hash_within_sixty_four_characters():
+    from app.providers.azure.landing_zone.stacks.base import deployment_name
+
+    long, other = deployment_name("spoke", "x" * 70), deployment_name("spoke", "x" * 69 + "y")
+    assert (len(long), long == other, long.startswith("spoke-xxx")) == (64, False, True)
+
