@@ -1,10 +1,11 @@
 # CloudInfraAutomation — Architecture
 
-**Status:** v2.39, approved; implementation in progress. No code is written until this design is approved.
+**Status:** v2.40; MC-5 design (§22.12) proposed, awaiting approval; implementation of approved sections in progress. No code is written until this design is approved.
 **Date:** 2026-10-05
 **Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9). Every solution is **DR-capable**: it can run in one region, as DR (primary active, secondary standby) or as an HA pair (both active), with **any region pair chosen in the UI** (default us-east-1 / us-east-2) (§10).
 
 **Changes in v2:** added the org registry and tagging strategy (§4); permissions based on tags (§4.5–4.8); multi-account, five-environment model (§5); promotion pipeline (§8). Payload, provisioning, security and scaling sections are updated to match.
+**Changes in v2.40:** MC-5 design (§22.12): the Azure landing zone as management groups under the organization's own, subscription vending against an EA or MCA billing scope, Azure Policy pack mappings (all inherited, audit policies always deployed), hub-and-spoke with Azure Firewall and central private DNS, a backup subscription with locked vaults and Resource Guard, deployment stacks at management-group scope; proposed for approval.
 **Changes in v2.39:** MC-4e: Azure in the project wizard with its regions, services and words; the region-pair hint, a secondary that follows the primary's pair, and warnings for storage outside the pair; landing-zone clouds limited to those that have one; cloud-neutral wording; MC-4 complete (§22.11 notes).
 **Changes in v2.38:** MC-4d: Azure release rows from the templates and what-if, where any change to data is medium risk; teardown with names computed from ARM's `uniqueString`, blob backups and Cosmos DB exports into the locked vault, restore with adoption; the workflow recovers the soft-deleted contract vault; wider vault column (§22.11 notes).
 **Changes in v2.37:** MC-4c: Azure provisioning, read-back and Change infrastructure end to end; a third, shared stack (`deleteResources`) for identities, access, wiring and queues, so removing a connection or service revokes its access (refines MC4-2); templates depend only on their own resources and declare every parameter they use (§22.11 notes).
@@ -4453,3 +4454,163 @@ Deny settings exclude only the deploy identity and the platform's teardown ident
 | A3 | Service Bus multi-region | Premium in DR/HA. Verify whether geo-replication (data) or geo-disaster recovery (metadata only) fits; until then the README states that messages in flight are not replicated |
 | A4 | `org:` tag names on every resource type | Colons are allowed in Azure tag names, but some services restrict tag names; verify for the curated types, and fall back to `org_` names (a tag policy) if needed |
 | A5 | Private DNS for private endpoints | The landing zone's hub owns the private DNS zones (MC-5). Until then, attached projects create private endpoints and the README names the DNS zones to link. |
+
+### 22.12 MC-5 in detail: the Azure landing zone
+
+**Status: proposed; awaiting approval. No code is written until it is approved.**
+
+**Goal.** An admin designs an Azure landing zone with the same questionnaire, tree editor, industry templates and control packs as on AWS and Google Cloud (§20, §22.10). The platform then generates ARM templates applied as deployment stacks, gets them approved by a second admin, applies them, and fills the registries:
+- environment subscriptions become account bindings;
+- spoke VNet subnets become networks;
+- the backup subscription replaces the `azure_backup_subscription` setting (MC4-10).
+
+Everything runs locally against stand-ins, as before. The neutral split (answers, pack mappings, inheritance rule, unit namer, one landing zone per provider) was done in MC-3a, so MC-5 adds a provider and nothing to the core.
+
+#### 22.12.1 Research findings
+
+| # | Finding | Consequence |
+|---|---|---|
+| L1 | **Azure Landing Zones** (the Cloud Adoption Framework reference) is not a managed service like Control Tower. Microsoft publishes it as IaC (the ALZ Bicep and Terraform accelerators built on Azure Verified Modules, and a portal accelerator) that a privileged identity runs. | The platform generates its own ARM templates (MC4-1), applied as deployment stacks at management-group scope (MC5-1). ALZ is the reference for structure, roles and the default policy set, not a dependency. |
+| L2 | Hierarchy: **tenant root group → management groups** (up to six levels below the root, ids unique in the tenant, up to 90 characters) **→ subscriptions** (each in exactly one management group). New subscriptions are created as **`Microsoft.Subscription/aliases`** at tenant scope, against a **billing scope**: an EA enrollment account, or an MCA invoice section. That needs a billing role. Subscription ids are GUIDs; names are not globally unique. | Management groups take the place of OUs, subscriptions the place of accounts. No hash is needed in names (unlike MC3-7). The depth and id rules become checks. The admin gives the billing scope (MC5-2). |
+| L3 | **Azure Policy**: definitions grouped into **initiatives**, assigned to management groups, subscriptions or resource groups, and **inherited by every descendant**. Effects: `Deny`, `DenyAction` (blocks deletes), `Audit`, `AuditIfNotExists`, `DeployIfNotExists`, `Modify`. Assignments can be set to `enforcementMode: DoNotEnforce` (evaluate without enforcing). **Exemptions** can expire. Custom definitions live at a management group at or above where they are assigned. | Preventive controls are `Deny`/`DenyAction` policies; detective controls are `Audit`/`AuditIfNotExists`; both are inherited, so every control goes on the top-most targeted management group (`AllInherited`, as on Google Cloud). Policy Staging (R5) uses `DoNotEnforce`. |
+| L4 | **No proactive controls** in the CloudFormation-hooks sense: `Deny` is evaluated when the request reaches Resource Manager, which makes it preventive. `DeployIfNotExists`/`Modify` remediate rather than block. | Proactive controls in a pack show as "no equivalent on Azure" (MC5 "show, don't hide"). Remediating policies are used only for platform plumbing (diagnostic settings, private DNS records), never as a pack's control. |
+| L5 | **Microsoft Defender for Cloud** shows regulatory compliance (Microsoft cloud security benchmark, CIS, PCI DSS, NIST SP 800-53, ISO 27001) on top of policy initiatives. Its foundational CSPM is free; Defender plans (CSPM, servers, storage, databases…) are paid, per subscription. | Detective controls are audit policies and are **always deployed** (Azure Policy is free), unlike SCC Standard (MC3-5). Paid Defender plans are an answer (`defender`), part of security tooling. |
+| L6 | **RBAC** role assignments at a management group are inherited. Customers cannot write **deny assignments**; only deployment stacks (deny settings) and managed applications create them. Managed identities and their role assignments live in one subscription. | The landing zone's own stacks use `denyWriteAndDelete`. There is no IAM-deny equivalent to Q1; R2 relies on no route, policies and per-subscription identities (MC5-4). |
+| L7 | Networking: **hub-and-spoke** VNets with **Azure Firewall** in the hub, or **Virtual WAN** with routing intent. VNet peering is not transitive; user-defined routes send spoke traffic (0.0.0.0/0 and other spokes) to the firewall. **Private DNS zones** (`privatelink.*`) linked to the hub resolve private endpoints; ALZ creates their records with `DeployIfNotExists` policies. VPN and ExpressRoute gateways sit in the hub. | One hub per governed region in a Connectivity subscription; one spoke VNet per workload subscription per region, peered only to its region's hub (MC5-8, MC5-11). Firewall rules allow traffic within an environment and declared cross-environment flows only. Central private DNS closes A5 with no change to MC-4 projects (MC5-9). |
+| L8 | **Network Security Perimeter** groups PaaS resources behind one perimeter, like VPC Service Controls (G5), but covers fewer services. | Not used in v1; policies that deny public network access and cross-environment private endpoints stand in for it (MC5-4, L3 open question). |
+| L9 | **Locked backups**: Backup vault **immutability, locked** (irreversible), soft delete on, and **Resource Guard** for multi-user authorization of critical operations. Storage containers support **locked time-based immutability**. | The landing zone creates the backup subscription with a locked vault per governed region and the locked export container that MC-4d already backs up into (MC5-10). |
+| L10 | Tags are **not inherited** on Azure (a `Modify` policy can copy them down). | Environments are told apart by their management group, not by tags. Ownership tags on subscriptions are written by the subscriptions stack. |
+| L11 | The identity that applies the landing zone needs **Owner** on the organization's management group (policy assignments with managed identities and role assignments both need it) and a **billing role** to create subscriptions. Creating a management group under the tenant root may need an elevated Global Administrator once. | A one-time **seed bootstrap** by a tenant admin creates the organization's management group and an app registration with a federated credential for the repository, and grants those roles there only (MC5-2). The platform never holds tenant-root or Global Administrator rights. |
+
+#### 22.12.2 How each concept maps
+
+| Concept (§20) | AWS | Azure |
+|---|---|---|
+| Root | Management account, Organizations, Control Tower | Tenant root group, with the organization's management group `{org}` beneath it (the ALZ "intermediate root"), created by the seed |
+| Hierarchy node | OU | Management group (id `{org}-{slug}`) |
+| Isolation unit | Account (Account Factory) | Subscription (alias `{org}-{suffix}`), created against the billing scope, placed under its management group, tagged with the ownership tags |
+| Security (R3) | Security OU: Log Archive, Audit, Security Tooling | Security management group: `{org}-management` (central Log Analytics workspace; Activity Log and diagnostic settings sent there by policy; a storage account with locked immutability for log retention), `{org}-security` (Defender for Cloud settings and security contacts; Microsoft Sentinel if Security Tooling is chosen) |
+| Infrastructure | Network, Shared Services, Identity, Backup, Monitoring, CI/CD accounts | Infrastructure management group: `{org}-connectivity` (hubs, firewall, gateways, private DNS zones), `{org}-shared-services`, `{org}-identity` (optional, only for AD DS domain controllers; Entra ID itself needs none), `{org}-backup` (MC5-10), `{org}-monitoring`, `{org}-cicd` |
+| Environment OU (R1) | OU per environment | Management group per environment, with its workload subscriptions |
+| No access between environments (R2) | RCP + SCP + transit-gateway route tables | **No route** (spokes peer only to the hub; the firewall denies traffic between environments) + **policies** on each environment management group: no public network access on data services, no private endpoint to a resource outside the environment's subscriptions, no VNet peering except to the hub + identities and role assignments confined to their subscription (MC5-4) |
+| Policies on nodes only (R4) | SCPs on OUs | Policy assignments on management groups only, never on subscriptions or resource groups (the validator enforces it) |
+| Policy Staging (R5) | Policy Staging OU | Policy Staging management group; its assignments use `DoNotEnforce`, then are promoted |
+| Preventive control | SCP / RCP / declarative policy | Azure Policy `Deny` or `DenyAction` (built-in or custom definition) |
+| Detective control | Config rule / Security Hub control | Azure Policy `Audit` / `AuditIfNotExists`, reported by Defender for Cloud regulatory compliance |
+| Proactive control | CloudFormation hook | None (L4) |
+| Hub and spoke | Transit Gateway with route table per environment | Hub VNet per region with Azure Firewall; spoke VNets peered to it; route tables send everything through the firewall |
+| Egress | Central egress VPC + Network Firewall | **Central** (default): through the hub's Azure Firewall. **Local**: a NAT gateway per spoke (advice: no inspection) |
+| Inspection | AWS Network Firewall | Azure Firewall Standard; Premium (TLS inspection, IDPS) optional |
+| Cross-environment flow | Route through inspection + stateful rule | A firewall network rule in the hub's firewall policy: source environment range → destination on one port, with owner and expiry |
+| Addressing | VPC IPAM pools | The platform's `IpamPlanner` (neutral): one range per environment per region; each spoke takes a slice for its subscription |
+| On-premises | VPN / Direct Connect | VPN gateway / ExpressRoute gateway in each hub |
+| Sandbox | Sandbox OU, budget, expiry | Sandbox management group: subscriptions with a `Microsoft.Consumption/budgets` budget, an `expires-on` tag, and no peering (NAT gateway egress only) |
+| Locked backup vault | Backup account vault, Vault Lock | Backup subscription: locked immutable Backup vaults, a locked export container and Resource Guard (MC5-10) |
+| Deploy units | Stacks `lz-foundation` … | Deployment stacks at the `{org}` management group, in order (§22.12.5) |
+| Repository | `landing-zone-infra` | `landing-zone-azure-infra` |
+
+#### 22.12.3 Provider answers
+
+The neutral answers are unchanged. Azure's `provider_answers`, validated by `AzureLandingZoneAnswers`:
+
+| Answer | Format | Notes |
+|---|---|---|
+| `tenant_id` | GUID | The Entra tenant |
+| `billing_scope` | An EA enrollment account (`/providers/Microsoft.Billing/billingAccounts/{a}/enrollmentAccounts/{e}`) or an MCA invoice section (`…/billingAccounts/{a}/billingProfiles/{p}/invoiceSections/{i}`) | Subscriptions are created against it (L2). CSP is not supported in v1 (open question L1). |
+| `groups` | Object ids (GUIDs) of existing Entra groups: platform admins, network admins, security admins, backup super users | The platform never creates groups (as MC3-8) |
+| `defender` | `foundational` (free) / `standard` (Defender CSPM plus the server, storage and database plans) | Asked only with Security Tooling; drives cost advice |
+| `firewall_tier` | `standard` / `premium` | Premium adds TLS inspection and IDPS |
+
+**Naming.** `AzureSubscriptionNamer` gives `{org}-{suffix}`, the same as the subscription alias and display name, checked against 64 characters. Management group ids are `{org}-{slug}`, checked against 90 characters and the allowed characters. Network egress `central` is Azure's default, unlike Google Cloud.
+
+#### 22.12.4 Control packs on Azure
+
+`catalog/mappings/azure/<pack>.yaml` maps each neutral pack. An **`AzureControlSnapshot`** lists each control's policy definition id, display name, effect, implementation (`BUILT_IN_POLICY` or `CUSTOM_POLICY`) and frameworks. Its refresh script reads the built-in definitions and the regulatory-compliance initiatives from the public `Azure/azure-policy` repository, so it needs no credentials (unlike Google Cloud's). Frameworks come from the built-in compliance initiatives: MCSB, CIS Microsoft Azure Foundations, PCI DSS v4, NIST SP 800-53 Rev. 5, ISO 27001.
+
+| Pack | Preventive (`Deny` / `DenyAction`) | Detective (`Audit` / `AuditIfNotExists`) |
+|---|---|---|
+| `foundation` | Network interfaces without public IPs; subnets must have a network security group; storage accounts with secure transfer, no public blob access and no shared keys; no classic resources; role assignments only at resource group or resource scope below the platform (custom) | MFA for accounts with owner and write permissions; no guest accounts with owner permissions; management ports closed; the Activity Log sent to the central workspace |
+| `data-protection` | Public network access off on Storage, Cosmos DB, SQL, Key Vault and Service Bus; local authentication off on Cosmos DB and Service Bus; SQL with Entra-only authentication and TLS 1.2 | Private endpoints configured; storage with infrastructure encryption; Defender for Storage and SQL enabled |
+| `network-hardening` | No VNet peering except to the region's hub (custom); no private endpoint to a resource outside the environment (custom); no IP forwarding on NICs; Function and Web apps HTTPS only | NSG flow logs on; no inbound from the internet on management ports; Network Watcher enabled |
+| `logging-integrity` | `DenyAction` on deleting the central workspace and the log storage account | Diagnostic settings on Key Vault, Storage, SQL and Cosmos DB; Activity Log retention ≥ the log retention answer |
+| `key-management` | Key Vault with purge protection and RBAC; customer-managed keys required for Storage, SQL and Cosmos DB | Keys and secrets with expiry; keys with a rotation policy |
+| `production-resilience` | `DenyAction` on deleting storage accounts, Cosmos DB accounts, SQL servers and Backup vaults on production-tier management groups (MC5-6) | Geo-redundant storage; backup on SQL and PostgreSQL; zone redundancy on supported services |
+| `data-residency` | Allowed locations and allowed locations for resource groups (`AllowedRegions`) | — |
+| `strict-residency` | As above, plus no geo-redundant storage SKUs whose pair is outside `AllowedRegions` (custom) | — (advice: breaks DR/HA storage outside the pair, as T6) |
+| `pci-cde` | All of the above on the PCI management groups, plus no public IPs on load balancers and application gateways | The PCI DSS v4 initiative |
+
+Two packs that assign the same definition to one management group are merged into one assignment, and the `DesignAdvisor` warns when their parameters conflict (for example, allowed-location lists are intersected; an empty intersection is a problem). Initiatives are capped at 1,000 definitions and a scope at 200 assignments; these are checks.
+
+#### 22.12.5 Repository and deployment stacks
+
+`landing-zone-azure-infra` holds `design.json`, the diagrams, `docs/controls.md`, `scripts/bootstrap-seed.sh`, a workflow, and one directory per stack (`main.json` + `parameters.json`, ARM JSON as in MC-4). The stacks are applied in order, at the `{org}` management group, with deny settings `denyWriteAndDelete` excluding the landing-zone identity:
+
+| Order | Stack | Main resources | Unmanaged resources |
+|---|---|---|---|
+| 0 | *Seed bootstrap (one-time, by a tenant admin running `scripts/bootstrap-seed.sh`)* | The `{org}` management group under the tenant root; an app registration and service principal `{org}-landing-zone` with a federated credential for the repository's environment; Owner on `{org}`; the billing role on the billing scope (MC5-2) | — |
+| 1 | `lz-foundation` | Custom policy definitions and initiatives at `{org}`; the management-group hierarchy | `deleteResources` |
+| 2 | `lz-structure` | Policy assignments per management group (merged per definition; `DoNotEnforce` under Policy Staging), their managed identities and remediation roles; role assignments for the admin groups; expiring exemptions | `deleteResources` |
+| 3 | `lz-subscriptions` | Subscription aliases (nested tenant-scope deployments) against the billing scope, placement under their management groups, ownership tags, sandbox budgets | **`detachAll`** (MC5-5) |
+| 4 | `lz-management` | In `{org}-management`: Log Analytics workspace, the locked log storage account, diagnostic-settings policies (`DeployIfNotExists`); in `{org}-security`: Defender for Cloud plans and contacts, Sentinel when chosen | `deleteResources` |
+| 5 | `lz-network` | In `{org}-connectivity`, per governed region: hub VNet, Azure Firewall and firewall policy (environment and flow rules), VPN/ExpressRoute gateway, private DNS zones linked to the hub and their record policies. In each workload subscription, per region: spoke VNet from the IPAM plan with a `functions` subnet (delegated to `Microsoft.App/environments`) and an `endpoints` subnet, NSG, route table to the firewall, peering both ways | `deleteResources` |
+| 6 | `lz-vault` | In `{org}-backup`, `rg-cloudinfra-backup`: per governed region a Backup vault `bv-teardown-{region}` (immutability locked, 60-day retention, soft delete on), a Resource Guard, and the storage account with the locked 60-day `cloudinfra-teardown` container (the names MC-4d already uses); only the backup super-user group may delete after the lock | `detachAll` |
+
+**Workflow.** The workflow signs in with the app registration's federated credential and previews every stack with `az deployment mg what-if`. After approval it applies them in order with `az stack mg create`. The approval workflow (§20.7) is unchanged.
+
+**Read-back.** It uses the signed manifest, as for the other landing zones (§21).
+
+**Checks.** The MC-4b schema rule (bundled resource types, pinned API versions) and lint rules apply. The design also requires that every generated template decompiles and builds with Bicep, as MC-4 was verified.
+
+#### 22.12.6 Checks, advice and outputs
+
+| Kind | Azure |
+|---|---|
+| Checks (block submit) | Management group depth ≤ 6 below the root; ids unique and ≤ 90 characters; subscription names ≤ 64 characters and unique; policies only on management groups (R4); ≤ 200 assignments per scope; merged parameters not empty; a governed region's hub needs its pair governed too when DR or HA is offered (storage replicates only to the pair, MC4-4); existing R1–R3 rules (neutral) |
+| Advice (shown, never blocking) | Proactive controls with no equivalent; Defender plans' cost; `egress: local` skips inspection; strict residency against paired-region storage; the Identity subscription only for AD DS; billing accounts limit how many subscriptions can be created, so request more before applying large designs |
+| Executor outputs | Subscription ids per environment and portfolio/product → **account bindings** (`provider = azure`); each spoke's subnets per region → **networks** (`network_ref` the VNet id, `subnet_refs` functions then endpoints, `firewall_refs` the NSG id), the shape MC-4a checks; the backup subscription → the **teardown vault** for Azure |
+
+`BackupAccountResolver` reads the applied Azure landing zone's backup subscription. `azure_backup_subscription` stays as an explicit override, as `gcp_backup_project` does.
+
+#### 22.12.7 Platform changes
+
+| Area | Change |
+|---|---|
+| Provider | `AzureProvider.landing_zone()` and `has_landing_zone = True`: repository `landing-zone-azure-infra`, `AzureLandingZoneAnswers`, `AzureSubscriptionNamer`, `AZURE_UNITS`, `root_detail` (tenant and billing scope), checks, advice, `AllInherited`. |
+| Catalog | `catalog/mappings/azure/*.yaml`, `AzureControlSnapshot` (`catalog/azure_controls.yaml`) and its refresh script. Templates gain `regions.azure`: public sector `eastus2`/`centralus`; EU sovereignty `westeurope`/`northeurope` (both pairs). |
+| Bundle | `AzureLandingZoneBundle`: the seven stacks, `design.json`, diagrams, `controls.md`, the seed script, workflow and README. |
+| Adapters | `LocalAzureLandingZone` executor returning subscriptions, spoke networks and the backup subscription; registered in `AdapterFactory.landing_zone_executors`. |
+| UI | `cloudText` for Azure (repository, organization intro, shared units, hub and egress options, compliance and controls notes, `accountsIntro`, answer checks); the Organization step asks the Azure answers; the landing-zone picker then offers Azure. |
+
+#### 22.12.8 Delivery (TDD, 100% coverage)
+
+| Step | Scope | Exit |
+|---|---|---|
+| **MC-5a Azure design** | Provider answers, namer, units, `AzureControlSnapshot` and mappings for every pack, checks and advice, template regions | Every industry template proposes on Azure with no problems |
+| **MC-5b Azure bundle** | The seven stacks, seed script, workflow, README; schema and lint rules | Every template's stacks pass the rules and build with Bicep; golden tests per stack |
+| **MC-5c Apply and registries** | `LocalAzureLandingZone`; account bindings, networks and the backup subscription filled; teardown vault resolved from the landing zone | Approve → applied → an Azure project provisions into a vended subscription and tears down into the landing zone's vault, locally |
+| **MC-5d UI** | Azure in the landing-zone picker, its questions, controls and words | 100% frontend coverage |
+
+#### 22.12.9 Decisions and open questions
+
+| # | Decision | Recommendation |
+|---|---|---|
+| MC5-1 | Landing-zone IaC | **ARM JSON templates applied as deployment stacks at the organization's management group**, like MC4-1. The ALZ accelerators are the reference, not vendored: generated JSON stays deterministic and readable back, and stacks give deny settings and clean removal. |
+| MC5-2 | Bootstrap | **A one-time seed run by a tenant admin**: the `{org}` management group, an app registration with a federated credential for the repository (no secret, no subscription needed), **Owner on `{org}` only** (not the tenant root) and the billing role on the billing scope. After it, every change goes through the platform. |
+| MC5-3 | Hierarchy | **The neutral tree as management groups under `{org}`** (Security, Infrastructure, one per environment, Sandbox, Policy Staging, the optional nodes), not ALZ's Platform/Landing Zones/Corp/Online names, so the same design reads the same on every cloud. The README maps it to ALZ's names. |
+| MC5-4 | Environment isolation (R2) | **No route** (spokes peer only to the hub; the firewall denies traffic between environments except declared flows) **plus policies on each environment management group**: public network access off on data services, no private endpoint to a resource outside the environment, no peering except to the hub. Identities stay in their subscription; MC-4 already confines role assignments to the project's resource group. Shown as weaker than VPC Service Controls (MC5, "show, don't hide"). |
+| MC5-5 | Removing a subscription | **The subscriptions stack detaches** (`detachAll`): removing a subscription from the design never cancels it. The platform lists it as detached and asks the admin to move or cancel it by hand, as closing an AWS account is manual. |
+| MC5-6 | Production resilience | **`DenyAction` on deleting data stores on production-tier management groups.** A teardown of a production environment creates a **policy exemption on the project's resource group that expires after 24 hours**, approved with the teardown, then deletes. |
+| MC5-7 | Detective controls | **Audit policies, always deployed** (free), reported by Defender for Cloud. Paid Defender plans only with Security Tooling and `defender: standard`. |
+| MC5-8 | Hub | **Hub-and-spoke with Azure Firewall**, one hub per governed region. Virtual WAN is a later option. Route tables and firewall rules are plain resources in the stack and read back clearly. |
+| MC5-9 | Private DNS | **Central `privatelink.*` zones in the Connectivity subscription**, linked to every hub, with `DeployIfNotExists` policies that add the records for new private endpoints. MC-4 projects need no change (closes A5). |
+| MC5-10 | Vault | **The `{org}-backup` subscription** with a locked immutable Backup vault and a Resource Guard per governed region, and the locked `cloudinfra-teardown` export container, using the names MC-4d backs up into. It replaces `azure_backup_subscription`, which stays as an override (closes MC4-10). |
+| MC5-11 | Spokes | **One spoke VNet per workload subscription per governed region**, peered to that region's hub, with the `functions` and `endpoints` subnets MC-4 expects. A function's VNet integration stays within its own subscription. |
+| MC5-12 | Repository | **`landing-zone-azure-infra`**; AWS and Google Cloud keep theirs |
+
+| # | Open question | Plan |
+|---|---|---|
+| L1 | Billing models | v1 supports **EA and MCA** billing scopes. CSP subscriptions are created by the partner; supporting them means binding existing subscription ids instead of creating aliases. Decide when a CSP customer needs it. |
+| L2 | Subscription aliases inside a management-group deployment stack | Verify that a stack at `{org}` manages tenant-scope aliases through nested deployments, and that `detachAll` leaves them untouched. Fallback: the workflow creates aliases with `az account alias create`, and the stack manages only their placement and tags. |
+| L3 | Network Security Perimeter | Check which of Storage, Cosmos DB, Key Vault and Service Bus it covers at general availability; add it per environment when it covers MC-4's services. |
+| L4 | Creating `{org}` under the tenant root | Tenants whose hierarchy settings require write permission at the root need a Global Administrator to elevate access once, for the seed only. The seed script checks and says so. |
+| L5 | Policy definition ids | The snapshot's refresh script confirms each built-in definition's id, effect and framework mapping from `Azure/azure-policy`. Until it runs, the frameworks show as "intended alignment (unverified)", as with T2. |
