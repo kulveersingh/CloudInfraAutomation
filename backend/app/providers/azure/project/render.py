@@ -42,8 +42,9 @@ class AzureReadmeRenderer(FileRenderer):
 
 
 class StackWorkflowRenderer(FileRenderer):
-    """Signs in with the deploy identity's federated credential, plans with what-if, then deploys the data stack, the
-    shared stack and an app stack per region, in that order (§22.11.4). All values come from GitHub variables."""
+    """Signs in with the deploy identity's federated credential, recovers the contract vault if a teardown left it
+    soft-deleted, plans with what-if, then deploys the data stack, the shared stack and an app stack per region, in
+    that order (§22.11.4). All values come from GitHub variables."""
 
     HEADER = """name: deploy
 on:
@@ -78,6 +79,11 @@ jobs:
       - name: Deploy identity
         run: echo "PRINCIPAL=$(az identity list -g "$RG" --query "[?clientId=='${{ vars.AZURE_CLIENT_ID }}'].principalId" -o tsv)" >> "$GITHUB_ENV"
 """
+    RECOVER_STEP = """      - name: Recover the contract vault after a teardown
+        run: |
+          az keyvault recover --name "${{ vars.CONTRACT_VAULT }}" --resource-group "$RG" --location "${{ vars.AZURE_PRIMARY_REGION }}" \\
+            || echo "No soft-deleted contract vault to recover."
+"""
     DATA_STEP = """      - name: Plan and deploy the data stack
         run: |
           az deployment group what-if --resource-group "$RG" --template-file main.json --parameters "$PARAMETERS" {inputs}
@@ -111,7 +117,7 @@ jobs:
         shared = f"location=${{{{ vars.AZURE_PRIMARY_REGION }}}} {common}"
         if "endpointSubnetId" in template["shared"]["parameters"]:
             shared += " endpointSubnetId=${{ vars.ENDPOINT_SUBNET_ID }}"
-        steps = [self.DATA_STEP.format(project=request.project_name, inputs=data),
+        steps = [self.RECOVER_STEP, self.DATA_STEP.format(project=request.project_name, inputs=data),
                  self.SHARED_STEP.format(project=request.project_name, inputs=shared),
                  self._app(request, "primary", "AZURE_PRIMARY_REGION", "active", "", networked, common)]
         activation = SECONDARY_ACTIVATION.get(request.resilience.mode)

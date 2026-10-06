@@ -45,10 +45,14 @@ class AzureProvider(CloudProvider):
         return azure_project(REGION_PAIRS.get)
 
     def teardown(self):
-        raise ValidationFailedError("Teardowns on Azure are not available yet.")
+        from app.providers.azure.teardown import azure_teardown
+
+        return azure_teardown()
 
     def resources(self):
-        raise ValidationFailedError("Releases on Azure are not available yet.")
+        from app.providers.azure.releases import AzureResourceClassifier
+
+        return AzureResourceClassifier()
 
     def landing_zone(self):
         raise ValidationFailedError("The Azure landing zone is not available yet.")

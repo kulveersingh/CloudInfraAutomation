@@ -3,6 +3,7 @@ import uuid
 from app.adapters.local_backup import BackupStyle
 from app.adapters.local_cloud import LocalCloud
 from app.adapters.ports import BootstrapOutputs, BootstrapRequest
+from app.providers.azure.naming import resource_group_id
 
 BACKUP_GROUP = "/subscriptions/{subscription}/resourceGroups/rg-cloudinfra-backup/providers"
 # Cosmos DB backups die with the account, so its data is exported to a locked container instead (MC4-8).
@@ -38,8 +39,8 @@ class LocalAzure(LocalCloud):
     provider = "azure"
 
     def _outputs(self, request: BootstrapRequest) -> BootstrapOutputs:
-        identity = (f"/subscriptions/{request.account_id}/resourceGroups/rg-{request.project}-{request.environment}"
-                    f"/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-{request.project}-"
+        group = resource_group_id(request.account_id, request.project, request.environment)
+        identity = (f"{group}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-{request.project}-"
                     f"{request.environment}-deploy")
         return BootstrapOutputs(deployer_identity=identity, execution_identity=identity,
                                 federation=str(uuid.uuid5(uuid.NAMESPACE_URL, identity)),

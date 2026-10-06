@@ -131,12 +131,12 @@ def test_multi_region_data_is_backed_up_once_in_the_primary_region(client, setti
          "cloudinfra-bootstrap-invoice-ingest"])
 
 
-def test_a_tier_2_storage_account_is_backed_up(client, settings, session_factory):
-    provision(client, settings, session_factory, resources=[{"id": "archive", "type": "Microsoft.Storage/storageAccounts",
+def test_a_tier_2_type_without_data_is_rebuilt(client, settings, session_factory):
+    provision(client, settings, session_factory, resources=[{"id": "cache", "type": "Microsoft.Cache/redis",
                                                              "config": {}}])
     [dev] = preview(client)["environments"]
-    assert [(store["service_id"], store["physical_name"]) for store in dev["data_stores"]] == [
-        ("archive", "invoice-ingest-archive")]
+    assert (dev["data_stores"], dev["not_backed_up"][0]) == (
+        [], "cache (Microsoft.Cache/redis): rebuilt from the templates and the application repository")
 
 
 def test_data_the_platform_cannot_back_up_blocks_the_teardown(client, settings, session_factory):
@@ -262,6 +262,17 @@ EXPRESSIONS = ArmExpressions(parameters={"projectName": "demo", "location": "eas
     ("[variables('unknown')]", None),
     ("[resourceGroup().location]", None),
     ("[concat('a', 1)]", None),
+    ("[toLower('ABC')]", "abc"),
+    ("[]", None),
+    ("[concat('a') + 'b']", None),
+    ("[concat('a']", None),
+    ("[concat('a'", "[concat('a'"),
+    ("['a' 'b']", None),
+    ("[take('abc', 'x')]", None),
+    ("[parameters('projectName').id]", None),
+    ("[resourceGroup()]", None),
+    ("[resourceGroup().]", None),
+    ("[projectName]", None),
     (None, None),
 ])
 def test_names_resolve_only_from_what_the_platform_knows(text, value):

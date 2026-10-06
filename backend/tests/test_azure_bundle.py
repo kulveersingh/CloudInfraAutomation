@@ -3,6 +3,7 @@
 import json
 
 from app.adapters.ports import BootstrapOutputs
+from app.providers.azure.expressions import unique_string
 from app.providers.azure.provider import AzureProvider
 from app.provisioning.topology import TopologyFactory
 from app.synth.request import ProjectRequest, Resilience
@@ -88,7 +89,8 @@ def test_environment_variables_for_azure():
     assert variables({"mode": "single", "primary_region": "eastus2", "secondary_region": None}) == {
         "ENVIRONMENT_NAME": "prod", "AZURE_SUBSCRIPTION_ID": SUBSCRIPTION, "AZURE_CLIENT_ID": "client-1",
         "AZURE_TENANT_ID": "tenant-1", "AZURE_RESOURCE_GROUP": "rg-invoice-ingest-prod",
-        "AZURE_PRIMARY_REGION": "eastus2"}
+        "AZURE_PRIMARY_REGION": "eastus2",
+        "CONTRACT_VAULT": f"kv{unique_string(f'/subscriptions/{SUBSCRIPTION}/resourceGroups/rg-invoice-ingest-prod')}"}
 
 
 def test_secondary_region_variables():

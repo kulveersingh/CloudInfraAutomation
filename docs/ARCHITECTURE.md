@@ -1,10 +1,11 @@
 # CloudInfraAutomation — Architecture
 
-**Status:** v2.37, approved; implementation in progress. No code is written until this design is approved.
+**Status:** v2.38, approved; implementation in progress. No code is written until this design is approved.
 **Date:** 2026-10-05
 **Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9). Every solution is **DR-capable**: it can run in one region, as DR (primary active, secondary standby) or as an HA pair (both active), with **any region pair chosen in the UI** (default us-east-1 / us-east-2) (§10).
 
 **Changes in v2:** added the org registry and tagging strategy (§4); permissions based on tags (§4.5–4.8); multi-account, five-environment model (§5); promotion pipeline (§8). Payload, provisioning, security and scaling sections are updated to match.
+**Changes in v2.38:** MC-4d: Azure release rows from the templates and what-if, where any change to data is medium risk; teardown with names computed from ARM's `uniqueString`, blob backups and Cosmos DB exports into the locked vault, restore with adoption; the workflow recovers the soft-deleted contract vault; wider vault column (§22.11 notes).
 **Changes in v2.37:** MC-4c: Azure provisioning, read-back and Change infrastructure end to end; a third, shared stack (`deleteResources`) for identities, access, wiring and queues, so removing a connection or service revokes its access (refines MC4-2); templates depend only on their own resources and declare every parameter they use (§22.11 notes).
 **Changes in v2.36:** MC-4b: Azure ARM templates (a data stack and an app stack), curated services, role assignments and Event Grid, lint, the resource-type snapshot, repository files, workflow and variables (§22.11 notes).
 **Changes in v2.35:** MC-4a: Azure registered with its vocabulary, region pairs, subscription bindings, VNet checks and local adapter (§22.11 notes).
@@ -4314,7 +4315,7 @@ A registered Azure network is checked like this:
 | Cosmos DB | **Export** of every container into `cloudinfra-teardown` (a blob container with a **locked 60-day time-based immutability policy**) in the backup subscription | A new account with the original name, then an import |
 | Anything else that holds data | Blocks the teardown | — |
 
-**Not backed up:** Service Bus messages (transient), logs (keep them with diagnostic settings), function code (rebuilt from the application repository).
+**Not backed up:** Service Bus messages (transient), logs (keep them with diagnostic settings), function code (rebuilt from the application repository). The contract Key Vault is soft-deleted with the resource group and kept for 90 days (purge protection); the next deployment recovers it (MC-4d notes).
 
 **Delete order:**
 1. The app stacks (secondary region first).
@@ -4394,6 +4395,25 @@ Deny settings exclude only the deploy identity and the platform's teardown ident
 - **Parameters.** A private endpoint declares `endpointSubnetId` on the template it is written to, and a VNet-integrated function app declares `subnetId`. Before, an attached project with storage or Cosmos DB but no function used `endpointSubnetId` without declaring it. The workflow passes each stack only the parameters its template declares. Tests check that every template declares every parameter it uses.
 - **Verified with Bicep.** Default, everything (DR, attached, every service and connection, a Tier-2 type), HA, and attached data stores without functions all decompile and build with Bicep CLI 0.48.1. In the shared stack, role assignments on data-stack resources decompile to string scopes, which Bicep rejects (BCP036). Declaring those targets `existing`, which is what ARM's string scope means, builds with no errors.
 
+**MC-4d implementation notes.**
+- **Names the platform computes.** Global names end in `uniqueString(resourceGroup().id)`. `app/providers/azure/expressions.py` has:
+  - `unique_string`, ARM's 64-bit MurmurHash with 13 base-32 letters. It is checked against Bicep CLI 0.48.1 (`bicep console`) on ten inputs, covering every tail length, two arguments and UTF-8.
+  - `ArmExpressions`, which evaluates the template functions the names use (`concat`, `take`, `format`, `toLower`, `uniqueString`, `parameters`, `variables`, `resourceGroup().id`). Anything else is unknown, and a data store with an unknown name blocks the teardown.
+  - `app/providers/azure/naming.py` names the resource group, `rg-{project}-{environment}`.
+- **Release rows.**
+  - `AzureResourceClassifier` treats storage accounts, Cosmos DB, SQL, PostgreSQL/MySQL flexible servers, Service Bus and Key Vault (and their child types) as data. `Microsoft.Authorization/*`, managed identities and Cosmos SQL role assignments and definitions are permission types.
+  - Rows of a generated project are `{stack}/{type}/{service}`, numbered when a service has two of a kind.
+  - `ResourceClassifier.rules()` lets a provider add risk rules. Azure adds `StatefulModificationRule`: what-if cannot show a replacement, so any Modify of data is medium risk (MC4-9).
+  - `WhatIfReader` reads `az deployment group what-if` JSON. Create → Add; Modify and Deploy → Modify; NoChange and Ignore are skipped. A Delete counts only for a resource the stack manages (`az stack group show`), because complete mode also lists the other stacks' resources; the data stack is read without managed resources, since it never deletes (A1).
+- **Teardown inventory.** `AzureInventory` reads the data template the current request generates.
+  - Storage accounts and Cosmos DB accounts are backed up once, in the primary region, with their real names and resource ids.
+  - Any other data type in the data stack (for example Tier-2 SQL) blocks the teardown.
+  - Services without data in the data stack (functions, queues, caches) are rebuilt.
+  - Nothing is kept by a retain policy: the data stack is deleted with `deleteAll`.
+  - The deploy units, in delete order, are each region's app stack, the shared stack, the data stack and the bootstrap.
+- **Vault.** Blob backups go to `bv-teardown-{region}` in `rg-cloudinfra-backup` of the backup subscription; Cosmos DB exports go to the locked `cloudinfra-teardown` container. A missing `azure_backup_subscription` blocks the teardown. Azure vault ids are longer than 128 characters, so `teardown_recovery_points.vault` is now 512 (migration `b5e2d8f41c93`).
+- **Restore and the contract vault.** Restore brings storage accounts and Cosmos DB back under their names and adopts them, as on the other clouds. The resource group's id is the same, so every `uniqueString` name is too, including the contract Key Vault's. That vault stays soft-deleted for 90 days under purge protection, and a deployment would fail on it. So the platform computes its name into the `CONTRACT_VAULT` variable, and the workflow runs `az keyvault recover` before the data stack; when there is nothing to recover, it carries on.
+
 #### 22.11.9 Decisions and open questions
 
 | # | Decision | Recommendation |
@@ -4411,7 +4431,7 @@ Deny settings exclude only the deploy identity and the platform's teardown ident
 
 | # | Open question | Plan |
 |---|---|---|
-| A1 | What-if for deployment stacks | Use `az deployment group what-if` on each stack's template until stack what-if is generally available; verify in MC-4d |
+| A1 | What-if for deployment stacks | Use `az deployment group what-if` on each stack's template until stack what-if is generally available. MC-4d: deletes count only for the stack's managed resources; still to verify against a live subscription |
 | A2 | Platform credentials (MC7): can the AWS-hosted control plane federate into Entra without a secret? | Verify Entra workload identity federation with a token the platform's AWS role can mint. Until then, a certificate in Secrets Manager, rotated. Only the platform's teardown and release identities need this; deploys use the repository's OIDC. |
 | A3 | Service Bus multi-region | Premium in DR/HA. Verify whether geo-replication (data) or geo-disaster recovery (metadata only) fits; until then the README states that messages in flight are not replicated |
 | A4 | `org:` tag names on every resource type | Colons are allowed in Azure tag names, but some services restrict tag names; verify for the curated types, and fall back to `org_` names (a tag policy) if needed |

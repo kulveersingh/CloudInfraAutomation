@@ -171,14 +171,9 @@ def test_settings_name_the_azure_backup_subscription(settings):
 
 # ---- what is not there yet ----
 
-@pytest.mark.parametrize("part, message", [
-    ("teardown", "Teardowns on Azure are not available yet."),
-    ("resources", "Releases on Azure are not available yet."),
-    ("landing_zone", "The Azure landing zone is not available yet."),
-])
-def test_parts_still_to_come_say_so(part, message):
-    with pytest.raises(ValidationFailedError, match=re.escape(message)):
-        getattr(provider(), part)()
+def test_the_landing_zone_is_still_to_come():
+    with pytest.raises(ValidationFailedError, match="The Azure landing zone is not available yet."):
+        provider().landing_zone()
 
 
 def test_an_azure_project_previews_its_templates(client):

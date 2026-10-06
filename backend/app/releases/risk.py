@@ -18,6 +18,10 @@ class ResourceClassifier(ABC):
     def rows(self, document: dict) -> list[tuple[str, str]]:
         """(address, type) of each resource of a generated document: the rows a first plan of it would have."""
 
+    def rules(self) -> list["RiskRule"]:
+        """Rules this provider's plans need besides the common ones."""
+        return []
+
 
 class RiskLevel:
     LOW = "low"
@@ -66,7 +70,8 @@ class ChangeRiskClassifier:
 
     @classmethod
     def for_resources(cls, resources: ResourceClassifier) -> "ChangeRiskClassifier":
-        return cls([StatefulDestructionRule(resources), PermissionChangeRule(resources), ResourceRemovalRule()])
+        return cls([StatefulDestructionRule(resources), PermissionChangeRule(resources), ResourceRemovalRule(),
+                    *resources.rules()])
 
     def risk_of(self, change: ChangeSpec) -> str:
         return RiskLevel.highest([level for rule in self._rules if (level := rule.risk_of(change)) is not None])
