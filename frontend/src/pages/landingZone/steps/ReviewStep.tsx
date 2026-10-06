@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useApi } from "../../../api/ApiContext";
 import type { IndustryTemplate, LandingZoneProposal } from "../../../api/types";
 import { ErrorAlert } from "../../../components/Notices";
+import { useVocabulary } from "../../../providers/VocabularyContext";
 import { EditDescriber } from "../../../landingZone/EditDescriber";
 import type { LandingZoneDraft } from "../../../landingZone/LandingZoneDraft";
 import { OuTreeIndex } from "../../../landingZone/OuTreeIndex";
@@ -14,6 +15,7 @@ export function ReviewStep({ draft, onChange, onSubmitted, template }: StepProps
   const [proposal, setProposal] = useState<LandingZoneProposal>();
   const [error, setError] = useState<string>();
   const problems = draft.problems();
+  const words = useVocabulary(draft.provider);
 
   const attempt = async (action: () => Promise<void>) => {
     try {
@@ -36,8 +38,8 @@ export function ReviewStep({ draft, onChange, onSubmitted, template }: StepProps
 
   return (
     <>
-      <p className="sub">The platform proposes the OU structure from your answers and generates the CloudFormation. Nothing
-        is created until a second platform admin approves.</p>
+      <p className="sub">The platform proposes the {words.hierarchy_node} structure from your answers and generates the{" "}
+        {words.iac_document}. Nothing is created until a second platform admin approves.</p>
       {template && <TemplateBanner draft={draft} template={template} onReset={() => onChange(draft.withTemplate(template))} />}
       <ProblemList problems={problems} />
       <div className="row">

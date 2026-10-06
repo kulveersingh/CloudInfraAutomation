@@ -1,10 +1,11 @@
 # CloudInfraAutomation — Architecture
 
-**Status:** v2.38, approved; implementation in progress. No code is written until this design is approved.
+**Status:** v2.39, approved; implementation in progress. No code is written until this design is approved.
 **Date:** 2026-10-05
 **Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9). Every solution is **DR-capable**: it can run in one region, as DR (primary active, secondary standby) or as an HA pair (both active), with **any region pair chosen in the UI** (default us-east-1 / us-east-2) (§10).
 
 **Changes in v2:** added the org registry and tagging strategy (§4); permissions based on tags (§4.5–4.8); multi-account, five-environment model (§5); promotion pipeline (§8). Payload, provisioning, security and scaling sections are updated to match.
+**Changes in v2.39:** MC-4e: Azure in the project wizard with its regions, services and words; the region-pair hint, a secondary that follows the primary's pair, and warnings for storage outside the pair; landing-zone clouds limited to those that have one; cloud-neutral wording; MC-4 complete (§22.11 notes).
 **Changes in v2.38:** MC-4d: Azure release rows from the templates and what-if, where any change to data is medium risk; teardown with names computed from ARM's `uniqueString`, blob backups and Cosmos DB exports into the locked vault, restore with adoption; the workflow recovers the soft-deleted contract vault; wider vault column (§22.11 notes).
 **Changes in v2.37:** MC-4c: Azure provisioning, read-back and Change infrastructure end to end; a third, shared stack (`deleteResources`) for identities, access, wiring and queues, so removing a connection or service revokes its access (refines MC4-2); templates depend only on their own resources and declare every parameter they use (§22.11 notes).
 **Changes in v2.36:** MC-4b: Azure ARM templates (a data stack and an app stack), curated services, role assignments and Event Grid, lint, the resource-type snapshot, repository files, workflow and variables (§22.11 notes).
@@ -4413,6 +4414,22 @@ Deny settings exclude only the deploy identity and the platform's teardown ident
   - The deploy units, in delete order, are each region's app stack, the shared stack, the data stack and the bootstrap.
 - **Vault.** Blob backups go to `bv-teardown-{region}` in `rg-cloudinfra-backup` of the backup subscription; Cosmos DB exports go to the locked `cloudinfra-teardown` container. A missing `azure_backup_subscription` blocks the teardown. Azure vault ids are longer than 128 characters, so `teardown_recovery_points.vault` is now 512 (migration `b5e2d8f41c93`).
 - **Restore and the contract vault.** Restore brings storage accounts and Cosmos DB back under their names and adopts them, as on the other clouds. The resource group's id is the same, so every `uniqueString` name is too, including the contract Key Vault's. That vault stays soft-deleted for 90 days under purge protection, and a deployment would fail on it. So the platform computes its name into the `CONTRACT_VAULT` variable, and the workflow runs `az keyvault recover` before the data stack; when there is nothing to recover, it carries on.
+
+**MC-4e implementation notes.**
+- **Provider description.** It now carries `region_pairs` (Azure's table, empty elsewhere) and `landing_zone` (`has_landing_zone`, false on Azure until MC-5).
+- **Project wizard.**
+  - Azure appears in the cloud picker after AWS and Google Cloud, with its enabled regions, its curated services and its words; none of that needed new code.
+  - On the Resilience step, `RegionPairs` gives a hint in DR and HA: "Storage replicates to eastus2's pair, centralus."
+  - Choosing a primary moves the secondary to that region's pair, when the pair is enabled.
+  - With storage in the project, a secondary outside the pair, or a primary without one, shows a warning naming the fix. The request rule (MC4-4) still refuses it on the server.
+- **Landing zone.** The cloud picker offers only clouds with `landing_zone`, so Azure is not offered until MC-5.
+- **Wording.**
+  - Connections say they grant access to exactly the target resource (no ARNs).
+  - The page header is cloud-neutral.
+  - The review uses the cloud's hierarchy and document words ("folder structure", "Terraform configuration").
+  - The accounts step's intro is per cloud (`accountsIntro`: Account Factory on AWS, the platform's Terraform on Google Cloud).
+  - These had been AWS-only, wrongly, on Google Cloud too.
+- **MC-4 is complete.** Next is MC-5, the Azure landing zone, which starts with its design for approval.
 
 #### 22.11.9 Decisions and open questions
 

@@ -87,7 +87,7 @@ describe("the landing zone's cloud", () => {
     const accounts = screen.getByText(/created by the platform's Terraform/);
     await goTo("Review");
     expect([accounts, screen.getByText(/proposes the folder structure from your answers and generates the Terraform /),
-      screen.queryByText(/Control Tower Account Factory|CloudFormation/)]).toEqual([expect.anything(), expect.anything(), null]);
+      screen.queryAllByText(/Control Tower Account Factory|CloudFormation/).map((element) => element.outerHTML)]).toEqual([expect.anything(), expect.anything(), []]);
   });
 
   it("speaks of folders and projects", async () => {

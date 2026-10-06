@@ -19,6 +19,7 @@ class AzureProvider(CloudProvider):
     id = "azure"
     name = "Azure"
     document_file = "main.json"
+    has_landing_zone = False  # until MC-5
 
     def vocabulary(self):
         return Vocabulary(cloud="Azure", isolation_unit="subscription", hierarchy_node="management group",
@@ -30,8 +31,11 @@ class AzureProvider(CloudProvider):
     def default_regions(self):
         return ("eastus2", "centralus")
 
+    def region_pairs(self):
+        """The region geo-redundant storage replicates to, for each region that has a pair (MC4-4)."""
+        return dict(REGION_PAIRS)
+
     def region_pair(self, region: str) -> str | None:
-        """The region geo-redundant storage replicates to, if the region has a pair (MC4-4)."""
         return REGION_PAIRS.get(region)
 
     def network_problems(self, network) -> list[str]:

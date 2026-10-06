@@ -12,6 +12,8 @@ export interface LandingZoneCloudText {
   repository: string;
   regions: string[];
   organizationIntro: string;
+  /** How the landing zone creates each environment's isolation units. */
+  accountsIntro: string;
   homeRegionHint: string;
   governedRegionsHint: string;
   sharedUnits: SharedUnit[];
@@ -50,6 +52,7 @@ const AWS: LandingZoneCloudText = {
     "ap-southeast-2", "ap-southeast-3", "ap-southeast-4", "ap-northeast-1", "ap-northeast-2", "ap-northeast-3",
     "ap-east-1", "me-south-1", "me-central-1", "af-south-1", "il-central-1",
   ],
+  accountsIntro: "Accounts are created through Control Tower Account Factory, already enrolled in their environment OU.",
   organizationIntro: "Creates a new AWS Organization with all features and an AWS Control Tower landing zone in the "
     + "management (payer) account.",
   homeRegionHint: "Where Control Tower runs",
@@ -94,6 +97,7 @@ const GCP: LandingZoneCloudText = {
     "asia-south1", "asia-southeast1", "asia-southeast2", "australia-southeast1", "australia-southeast2", "me-west1",
     "me-central1", "africa-south1",
   ],
+  accountsIntro: "Projects are created by the platform's Terraform, already in their environment folder.",
   organizationIntro: "Creates new folders, projects and policies under an existing Google Cloud organization. An "
     + "organization admin runs the generated seed script once; after that every change goes through the platform.",
   homeRegionHint: "Where the Infrastructure Manager deployments run",

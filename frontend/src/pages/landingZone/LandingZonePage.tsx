@@ -44,15 +44,13 @@ type Tab = "design" | "approvals";
 const TABS: Array<{ id: Tab; label: string }> = [{ id: "design", label: "Design" }, { id: "approvals", label: "Approvals" }];
 
 export function LandingZonePage({ identity }: { identity: Identity }) {
-  const words = useVocabulary();
   return (
     <section className="page">
       <header className="head">
         <div>
           <h1>Landing zone</h1>
-          <p className="sub">Design a new {words.cloud} organization: answer the questions, review the proposed{" "}
-            {words.hierarchy_node} structure, then request approval. A second platform admin's approval commits and applies
-            the {words.iac_document}s.</p>
+          <p className="sub">Design your cloud organization: choose the cloud, answer the questions, review the proposed
+            structure, then request approval. A second platform admin's approval commits and applies it.</p>
         </div>
       </header>
       {identity.roles.includes(PLATFORM_ADMIN)

@@ -43,6 +43,7 @@ class CloudProvider(ABC):
     id: ClassVar[str]
     name: ClassVar[str]
     document_file: ClassVar[str]  # the generated repository's main IaC file, shown in previews
+    has_landing_zone: ClassVar[bool] = True  # False while a cloud's landing zone is still to come
 
     @abstractmethod
     def vocabulary(self) -> Vocabulary:
@@ -75,11 +76,16 @@ class CloudProvider(ABC):
     def tag_policy(self) -> TagPolicy:
         return TagPolicy()
 
+    def region_pairs(self) -> dict[str, str]:
+        """Each region's fixed pair, on clouds whose storage replicates only to it."""
+        return {}
+
     def describe(self) -> dict:
         primary, secondary = self.default_regions()
         return {"id": self.id, "name": self.name, "document_file": self.document_file,
                 "vocabulary": asdict(self.vocabulary()),
-                "default_regions": {"primary": primary, "secondary": secondary}}
+                "default_regions": {"primary": primary, "secondary": secondary},
+                "region_pairs": self.region_pairs(), "landing_zone": self.has_landing_zone}
 
 
 class ProviderRegistry:

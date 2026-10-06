@@ -15,8 +15,8 @@ export function ConnectionsStep({ draft, onChange }: Pick<StepProps, "draft" | "
   return (
     <>
       <h2>Connections</h2>
-      <p className="sub">Connections are the only way components get access to each other. Each generates exact-ARN
-        permissions with same-tag conditions.</p>
+      <p className="sub">Connections are the only way components get access to each other. Each grants access to exactly
+        the target resource, and nothing broader.</p>
       <ConnectionList draft={draft} onChange={onChange} />
       <div className="row">
         <Select label="Kind" value={form.kind} options={KINDS} onSelect={(kind) => update({ kind })} />

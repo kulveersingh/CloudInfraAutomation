@@ -770,15 +770,17 @@ describe("LandingZonePage", () => {
   describe("in another cloud's words", () => {
     const api = () => fakeApi({ providers: vi.fn().mockResolvedValue(OTHER_CLOUD) });
 
-    it("names the organization, structure and IaC as the cloud does", async () => {
+    it("names the units, structure and IaC as the cloud does", async () => {
       renderPage(api());
-      expect(await screen.findByText(/Design a new Azure organization: answer the questions, review the proposed management group structure/))
-        .toHaveTextContent("commits and applies the Bicep files.");
+      const units = await screen.findByRole("button", { name: "Subscriptions" });
+      await goTo("Review");
+      expect([units, screen.getByText(/proposes the management group structure from your answers and generates the Bicep file\./)])
+        .toEqual([expect.anything(), expect.anything()]);
     });
 
     it("titles the controls step with the cloud's control catalog", async () => {
       renderPage(api());
-      await screen.findByText(/Design a new Azure organization/);
+      await screen.findByRole("button", { name: "Subscriptions" });
       await goTo("Controls");
       expect(screen.getByRole("heading", { name: "8. Azure Policy initiatives" })).toBeInTheDocument();
     });

@@ -16,7 +16,7 @@ export function StartStep(props: StepProps) {
   return (
     <>
       <div className="grid3">
-        <CloudPicker providers={useProviders()} value={draft.provider} onChange={(provider) => onChange(draft.withProvider(provider))} />
+        <CloudPicker providers={useProviders().filter((provider) => provider.landing_zone)} value={draft.provider} onChange={(provider) => onChange(draft.withProvider(provider))} />
       </div>
       <CloudStart key={draft.provider} {...props} />
     </>

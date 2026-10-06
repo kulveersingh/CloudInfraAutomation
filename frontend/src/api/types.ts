@@ -58,7 +58,7 @@ export interface CatalogEntry {
   settings: ServiceSetting[];
 }
 
-/** A raw resource type a cloud publishes (Tier 2): a CloudFormation type, or a google_* Terraform type. */
+/** A raw resource type a cloud publishes (Tier 2): a CloudFormation type, a google_* Terraform type or an ARM type. */
 export interface ResourceTypeInfo {
   type: string;
   service: string;
@@ -187,6 +187,10 @@ export interface CloudProviderInfo {
   document_file: string;
   vocabulary: Vocabulary;
   default_regions: { primary: string; secondary: string };
+  /** Each region's fixed pair, where storage replicates (Azure); empty on other clouds. */
+  region_pairs: Record<string, string>;
+  /** Whether the platform can design this cloud's landing zone yet. */
+  landing_zone: boolean;
 }
 
 export interface ProjectSummary {

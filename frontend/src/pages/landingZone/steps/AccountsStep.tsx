@@ -1,4 +1,5 @@
 import type { LandingZoneAnswers } from "../../../api/types";
+import { cloudText } from "../../../landingZone/cloudText";
 import { Choices, type Choice } from "../controls";
 import type { StepProps } from "./StepProps";
 
@@ -14,8 +15,7 @@ const MODELS: Array<Choice<LandingZoneAnswers["account_model"]>> = [
 export function AccountsStep({ draft, onChange }: StepProps) {
   return (
     <>
-      <p className="sub">Accounts are created through Control Tower Account Factory, already enrolled in their
-        environment OU.</p>
+      <p className="sub">{cloudText(draft.provider).accountsIntro}</p>
       <Choices label="How many accounts per environment?" choices={MODELS} selected={draft.toAnswers().account_model}
                onSelect={(model) => onChange(draft.with({ account_model: model }))} />
     </>
