@@ -111,6 +111,12 @@ describe("LandingZoneDraft", () => {
     expect(LandingZoneDraft.fromRequest({ answers: older as never, edits: [] }).toAnswers().pack_parameters).toEqual({});
   });
 
+  it("asks for the management email when the provider answers lack it", () => {
+    const request = { ...named().toRequest(), answers: { ...named().toAnswers(), provider_answers: {} } };
+    const draft = LandingZoneDraft.fromRequest(request);
+    expect([draft.managementEmail(), draft.problems()]).toEqual(["", ["Enter the management account email."]]);
+  });
+
   it("undoes one tree edit", () => {
     expect(named().withEdit(ADD_OU).withEdit(DISABLE).withoutEdit(0).edits()).toEqual([DISABLE]);
   });

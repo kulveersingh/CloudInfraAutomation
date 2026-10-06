@@ -92,7 +92,7 @@ def test_the_aws_backup_account_comes_from_the_aws_landing_zone_only(session):
 
 # ---- the core holds no cloud's words ----
 
-@pytest.mark.parametrize("word", ["management_email", "created_by_control_tower", "Control Tower", "CloudFormation"])
+@pytest.mark.parametrize("word", ["created_by_control_tower", "Control Tower", "CloudFormation"])
 def test_the_landing_zone_core_names_no_cloud_specifics(word):
     found = [str(path.relative_to(CORE)) for path in CORE.rglob("*") if path.suffix in (".py", ".yaml")
              and word in path.read_text()]

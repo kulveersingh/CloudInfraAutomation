@@ -1,16 +1,9 @@
-"""The Control Catalog snapshot: the Control Tower controls the packs use, with their framework mappings."""
+"""A cloud's control catalog snapshot: the controls its pack mappings use, with their framework mappings."""
 
 from dataclasses import dataclass, replace
-from functools import cache
 from pathlib import Path
 
 import yaml
-
-DEFAULT_PATH = Path(__file__).with_name("controls.yaml")
-HEADER = ("# Control Catalog snapshot: the controls the packs use. Refresh with\n"
-          "#   uv run --with boto3 python -m app.providers.aws.landing_zone.refresh\n"
-          "# which also fills each control's framework mappings (ListControlMappings) and the id of the\n"
-          "# CloudFormation-hooks prerequisite (CT.CLOUDFORMATION.PR.1) that proactive controls need.\n")
 
 
 class CatalogError(ValueError):
@@ -69,11 +62,6 @@ class ControlCatalogSnapshot:
         return cls(controls, document["mappings_refreshed"], controls[prerequisite] if prerequisite else None,
                    document.get("source", ""))
 
-    @classmethod
-    @cache
-    def default(cls) -> "ControlCatalogSnapshot":
-        return cls.load(DEFAULT_PATH)
-
     def get(self, control_id: str) -> CatalogControl:
         if control_id not in self.controls:
             raise CatalogError(f"Unknown control '{control_id}'.")
@@ -88,12 +76,12 @@ class ControlCatalogSnapshot:
         merged = {**self.controls, **controls, **({prerequisite.id: prerequisite} if prerequisite else {})}
         return ControlCatalogSnapshot(merged, today, prerequisite or self.proactive_prerequisite, source)
 
-    def write(self, path: Path) -> None:
+    def write(self, path: Path, header: str = "") -> None:
         prerequisite = self.proactive_prerequisite.id if self.proactive_prerequisite else None
         document = {"source": self.source, "mappings_refreshed": self.mappings_refreshed,
                     "prerequisites": {"proactive": prerequisite},
                     "controls": {control_id: control.to_document() for control_id, control in self.controls.items()}}
-        path.write_text(HEADER + yaml.safe_dump(document, sort_keys=False, width=120, allow_unicode=True))
+        path.write_text(header + yaml.safe_dump(document, sort_keys=False, width=120, allow_unicode=True))
 
 
 def renamed(control: CatalogControl, summary: dict, frameworks: set[str]) -> CatalogControl:

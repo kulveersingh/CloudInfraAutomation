@@ -5,10 +5,3 @@ name: Network hardening
 description: No open admin ports, IMDSv2, no automatic public IPs.
 selectors:
 - workloads
-controls:
-- df2ta5ytg2zatj1q7y5e09u32
-- e94oghk9gn3wb5xhpw9l53xr9
-- cdn8m939ffm43gw43z7fzlmoj
-- 10au7g2tdfmykh2cunfbpbam1
-- 2wsx5sll20kxurworrzvjn7by
-- ev4nb47hdhfom2ic1k0ljc7am

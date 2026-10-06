@@ -7,6 +7,7 @@ MAX_OU_DEPTH = 5
 # Control Tower registers an OU of up to this many accounts, by the number of governed Regions.
 REGISTRATION_LIMITS = [(15, 1000), (21, 600)]
 REGISTRATION_LIMIT_BEYOND = 680
+STRICT_RESIDENCY = "strict-residency"
 
 
 class MaximumDepth(LandingZoneCheck):
@@ -30,3 +31,11 @@ class OuSizeWithinRegistrationLimit(DesignWarning):
 
 def _depths(nodes: list[OuNode], depth: int) -> list[tuple[OuNode, int]]:
     return [pair for node in nodes for pair in ((node, depth), *_depths(node.children, depth + 1))]
+
+
+class StrictResidencyBlocksReplication(DesignWarning):
+    def warnings(self, design):
+        if STRICT_RESIDENCY not in design.answers.packs():
+            return []
+        return [("Strict residency blocks S3 cross-Region replication, so DR/HA projects in these OUs cannot "
+                 "replicate S3 buckets.")]

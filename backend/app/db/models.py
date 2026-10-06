@@ -209,9 +209,11 @@ class LandingZoneDesignRecord(Base):
     """One version of the landing zone questionnaire answers and where it is in the approval workflow."""
 
     __tablename__ = "landing_zone_designs"
+    # Each cloud has its own landing zone, numbered from v1 (§22.10).
+    __table_args__ = (UniqueConstraint("provider", "version"),)
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    version: Mapped[int] = mapped_column(unique=True)
+    version: Mapped[int] = mapped_column()
     provider: Mapped[str] = mapped_column(String(16), default="aws", server_default="aws")
     answers: Mapped[dict] = mapped_column(JsonDocument)
     edits: Mapped[list] = mapped_column(JsonDocument, default=list)

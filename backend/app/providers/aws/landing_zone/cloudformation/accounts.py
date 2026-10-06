@@ -1,5 +1,6 @@
 from app.landing_zone.design import AccountPlan, OuNode
 from app.landing_zone.designer import network_host_suffix
+from app.providers.aws.landing_zone.answers import management_email
 from app.providers.aws.landing_zone.cloudformation.base import StackContext, StackRenderer, export
 from app.providers.aws.landing_zone.cloudformation.references import OU_ID_PATTERN, pascal
 
@@ -39,7 +40,7 @@ class AccountsStack(StackRenderer):
         return {"SecurityOuId": ou, "SandboxOuId": ou,
                 "AccountFactoryProductName": {"Type": "String", "Default": ACCOUNT_FACTORY},
                 "AccountFactoryVersion": {"Type": "String", "Default": ACCOUNT_FACTORY},
-                "SsoUserEmail": {"Type": "String", "Default": context.design.answers.management_email}}
+                "SsoUserEmail": {"Type": "String", "Default": management_email(context.design.answers)}}
 
     def _product(self, context: StackContext, ou: OuNode, account: AccountPlan, previous: str | None) -> dict:
         body = {"Type": "AWS::ServiceCatalog::CloudFormationProvisionedProduct",
@@ -58,6 +59,6 @@ class AccountsStack(StackRenderer):
         return {**body, "DependsOn": [previous]} if previous else body
 
     def _managed_ou(self, context: StackContext, ou: OuNode) -> dict:
-        if ou.created_by_control_tower:
+        if ou.created_by_service:
             return {"Fn::Sub": f"{ou.name} (${{{context.references.name_in_template(ou)}}})"}
         return {"Fn::Sub": [f"{ou.name} (${{OuId}})", {"OuId": context.references.imported_id(ou)}]}

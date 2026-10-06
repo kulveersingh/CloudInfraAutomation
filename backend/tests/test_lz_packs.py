@@ -1,13 +1,13 @@
 from dataclasses import replace
 
 import pytest
+
 from app.landing_zone.catalog.mappings import (
     AllInherited,
     PackMappings,
     PreventiveInherited,
     ProviderControls,
 )
-
 from app.landing_zone.catalog.packs import PackRegistry
 from app.landing_zone.catalog.resolver import PackResolver
 from app.landing_zone.catalog.selectors import SelectorRegistry
@@ -175,4 +175,4 @@ def test_aws_inherits_preventive_controls_only():
 def test_where_every_control_is_inherited_nested_ous_get_none_of_the_parents():
     controls = ProviderControls(aws_snapshot(), aws_controls().mappings, AllInherited())
     enabled = PackResolver(PackRegistry.default(), controls).resolve(design([add_ou("Payments")])).controls
-    assert (ROOT_MFA in [item.control.id for item in enabled["prod"]], "custom_payments" in enabled) == (True, False)
+    assert (ROOT_MFA in [item.control.id for item in enabled["prod"]], enabled.get("custom_payments", [])) == (True, [])

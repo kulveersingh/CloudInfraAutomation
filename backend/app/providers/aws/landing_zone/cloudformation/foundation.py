@@ -1,4 +1,4 @@
-from app.landing_zone.designer import AccountNamer
+from app.providers.aws.landing_zone.answers import AwsAccountNamer
 from app.providers.aws.landing_zone.cloudformation.base import StackContext, StackRenderer, export
 
 LANDING_ZONE_VERSION = "3.3"
@@ -47,12 +47,12 @@ class FoundationStack(StackRenderer):
 
     def sections(self, context: StackContext) -> dict:
         answers = context.design.answers
-        namer = AccountNamer(answers)
+        namer = AwsAccountNamer(answers)
         resources = {"Organization": {"Type": "AWS::Organizations::Organization", **RETAIN,
                                       "Properties": {"FeatureSet": "ALL"}}}
         resources |= {key: {"Type": "AWS::IAM::Role", "Properties": body} for key, body in CONTROL_TOWER_ROLES.items()}
         for key, suffix in (("LogArchiveAccount", "log-archive"), ("AuditAccount", "audit")):
-            account = namer.account(suffix)
+            account = namer.unit(suffix)
             resources[key] = {"Type": "AWS::Organizations::Account", **RETAIN, "DependsOn": ["Organization"],
                               "Properties": {"AccountName": account.name, "Email": account.email}}
         resources["LandingZone"] = {"Type": "AWS::ControlTower::LandingZone", **RETAIN,

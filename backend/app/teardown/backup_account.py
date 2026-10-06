@@ -17,7 +17,7 @@ class BackupAccountResolver:
             return self._configured[provider]
         if provider != self._landing_zone_provider:
             return None
-        record = self._landing_zone.latest_applied()
+        record = self._landing_zone.latest_applied(provider)
         if record is None:
             return None
         return (record.accounts or {}).get(f"{record.answers['organization_name']}-backup")

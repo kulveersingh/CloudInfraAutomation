@@ -16,10 +16,15 @@ MONO = 'font-family="IBM Plex Mono,monospace"'
 
 
 class OuDiagramRenderer:
-    """Draws the approved OU structure: Mermaid source and a standalone SVG (root, foundation row, environments row)."""
+    """Draws the approved OU structure: Mermaid source and a standalone SVG (root, foundation row, environments row).
+    What the root box says about the organization (its management account, landing-zone service) is the cloud's."""
+
+    def __init__(self, root_detail: list[str] | tuple[str, ...] = ()):
+        self._root_detail = list(root_detail)
 
     def mermaid(self, design: LandingZoneDesign) -> str:
-        lines = ["flowchart TD", f'  root["Root · {design.answers.organization_name}<br/>Management / payer account"]']
+        root = "<br/>".join([f"Root · {design.answers.organization_name}", *self._root_detail[:1]])
+        lines = ["flowchart TD", f'  root["{root}"]']
         for ou in design.root_ous:
             lines += self._mermaid_node(ou, "root")
         return "\n".join(lines) + "\n"
@@ -32,7 +37,7 @@ class OuDiagramRenderer:
         return lines
 
     def svg(self, design: LandingZoneDesign) -> str:
-        return SvgLayout(design).render()
+        return SvgLayout(design, self._root_detail).render()
 
 
 @dataclass
@@ -53,8 +58,9 @@ class _Box:
 class SvgLayout:
     """Tidy-tree layout per row; parents are centred over their children."""
 
-    def __init__(self, design: LandingZoneDesign):
+    def __init__(self, design: LandingZoneDesign, root_detail: list[str]):
         self._design = design
+        self._root_detail = root_detail
         self._parts: list[str] = []
 
     def render(self) -> str:
@@ -63,7 +69,7 @@ class SvgLayout:
         laid = [(title, *self._layout([self._box(ou) for ou in nodes])) for title, nodes in rows]
         width = max(row_width for _, _, row_width, _ in laid) + MARGIN * 2
         root = _Box(None, f"Root · {self._design.answers.organization_name}",
-                    ["Management / payer", f"Control Tower {self._design.answers.home_region}"], COLORS["root"])
+                    self._root_detail, COLORS["root"])
         trunk_x, top = width / 2, 20 + root.height
         y, buses = top + VERTICAL_GAP, []
         for title, boxes, row_width, levels in laid:

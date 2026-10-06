@@ -42,7 +42,7 @@ function OuNode({ ou, editor }: { ou: OuInfo; editor?: TreeEditor }) {
     <li role="treeitem" aria-selected={false}>
       <span className="ou">
         <b>{ou.name} {words.hierarchy_node}</b>
-        {ou.created_by_control_tower && <span className="chip">{words.landing_zone_service}</span>}
+        {ou.created_by_service && <span className="chip">{words.landing_zone_service}</span>}
         {ou.controls.length > 0 && <span className="chip" title={controlNames(ou)}>{plural(ou.controls.length, "control")}</span>}
         {editor && <OuActions ou={ou} editor={editor} />}
       </span>

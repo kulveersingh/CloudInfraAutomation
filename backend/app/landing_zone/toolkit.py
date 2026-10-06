@@ -1,7 +1,15 @@
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
 
+from pydantic import BaseModel
+
+from app.landing_zone.answers import LandingZoneAnswers
+from app.landing_zone.catalog.mappings import ProviderControls
+from app.landing_zone.catalog.packs import PackRegistry
+from app.landing_zone.catalog.resolver import PackResolver
 from app.landing_zone.design import LandingZoneDesign, OrgCatalog
+from app.landing_zone.designer import LandingZoneDesigner, NamerFactory
 from app.landing_zone.validation import DesignWarning
 
 
@@ -23,9 +31,22 @@ class LandingZoneRenderer(ABC):
 
 @dataclass(frozen=True)
 class LandingZoneToolkit:
-    """What a provider gives the landing-zone workflow (§22.3): its repository, renderer, limits and advice."""
+    """What a provider gives the landing-zone workflow (§22.3, §22.10): its repository, renderer, limits and advice;
+    the model of its own answers, how it names units, how it implements the control packs, placeholder answers to
+    preview templates with, and what the diagram says about the organization root."""
 
     repository_name: str
     bundle: LandingZoneRenderer
     checks: tuple[LandingZoneCheck, ...]
     advice: tuple[DesignWarning, ...]
+    answers: type[BaseModel]
+    namer: NamerFactory
+    controls: ProviderControls
+    preview_answers: dict
+    root_detail: Callable[[LandingZoneAnswers], list[str]]
+
+    def designer(self) -> LandingZoneDesigner:
+        return LandingZoneDesigner.default(self.namer)
+
+    def resolver(self) -> PackResolver:
+        return PackResolver(PackRegistry.default(), self.controls)

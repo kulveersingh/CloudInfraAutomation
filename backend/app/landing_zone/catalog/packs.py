@@ -1,4 +1,5 @@
-"""Control packs: named sets of Control Tower controls with the OUs they target. One YAML file per pack."""
+"""Control packs: neutral, named sets of controls with the nodes they target. One YAML file per pack; each cloud
+maps a pack to its own controls (catalog mappings, §22.10.4)."""
 
 from dataclasses import dataclass
 from functools import cache
@@ -6,7 +7,7 @@ from pathlib import Path
 
 import yaml
 
-from app.landing_zone.catalog.controls import CatalogError, ControlCatalogSnapshot
+from app.landing_zone.catalog.controls import CatalogError
 from app.landing_zone.catalog.selectors import SelectorRegistry
 
 PACKS_DIRECTORY = Path(__file__).parent / "packs"
@@ -28,16 +29,16 @@ class ControlPack:
     name: str
     description: str
     selectors: tuple[str, ...]
-    control_ids: tuple[str, ...]
     optional: bool = False
     order: int = UNORDERED
 
     @classmethod
     def from_document(cls, document: dict) -> "ControlPack":
+        if "controls" in document:
+            raise CatalogError(f"Pack '{document['id']}' lists controls; they belong in each cloud's mapping.")
         return cls(id=document["id"], version=document["version"], name=document["name"],
                    description=document["description"], selectors=tuple(document["selectors"]),
-                   control_ids=tuple(document["controls"]), optional=document.get("optional", False),
-                   order=document.get("order", UNORDERED))
+                   optional=document.get("optional", False), order=document.get("order", UNORDERED))
 
 
 class PackRegistry:
@@ -46,17 +47,16 @@ class PackRegistry:
         self._profiles = profiles
 
     @classmethod
-    def load(cls, directory: Path, snapshot: ControlCatalogSnapshot,
-             profiles: dict[str, list[str]] = PROFILE_PACKS) -> "PackRegistry":
+    def load(cls, directory: Path, profiles: dict[str, list[str]] = PROFILE_PACKS) -> "PackRegistry":
         packs = [ControlPack.from_document(yaml.safe_load(path.read_text())) for path in sorted(directory.glob("*.yaml"))]
         for pack in packs:
-            cls._check(pack, snapshot)
+            cls._check(pack)
         return cls(packs, profiles)
 
     @classmethod
     @cache
     def default(cls) -> "PackRegistry":
-        return cls.load(PACKS_DIRECTORY, ControlCatalogSnapshot.default())
+        return cls.load(PACKS_DIRECTORY)
 
     def all(self) -> list[ControlPack]:
         return list(self._packs.values())
@@ -73,10 +73,7 @@ class PackRegistry:
         return list(self._profiles[profile])
 
     @staticmethod
-    def _check(pack: ControlPack, snapshot: ControlCatalogSnapshot) -> None:
-        for control_id in pack.control_ids:
-            if control_id not in snapshot.controls:
-                raise CatalogError(f"Pack '{pack.id}' uses unknown control '{control_id}'.")
+    def _check(pack: ControlPack) -> None:
         for selector in pack.selectors:
             if not SelectorRegistry().knows(selector):
                 raise CatalogError(f"Pack '{pack.id}' uses unknown selector '{selector}'.")

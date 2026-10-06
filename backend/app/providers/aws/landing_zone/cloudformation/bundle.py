@@ -7,6 +7,7 @@ from app.landing_zone.design import LandingZoneDesign, OrgCatalog, OuNode
 from app.landing_zone.designer import network_host_suffix
 from app.landing_zone.diagram import OuDiagramRenderer
 from app.landing_zone.edits import TreeEditor
+from app.providers.aws.landing_zone.answers import root_detail
 from app.providers.aws.landing_zone.cloudformation.accounts import AccountsStack
 from app.providers.aws.landing_zone.cloudformation.backup import BackupStack
 from app.providers.aws.landing_zone.cloudformation.base import StackContext, StackRenderer
@@ -51,7 +52,7 @@ class DesignJson(BundleFile):
 
 class DiagramFiles(BundleFile):
     def render(self, context):
-        renderer = OuDiagramRenderer()
+        renderer = OuDiagramRenderer(root_detail(context.design.answers))
         return {"docs/ou-structure.svg": renderer.svg(context.design),
                 "docs/ou-structure.mmd": renderer.mermaid(context.design)}
 
@@ -144,7 +145,7 @@ class ApplyScript(BundleFile):
         lines = ["NETWORK_PARAMETERS=("]
         for ou in [*context.design.environment_ous(), infrastructure]:
             key = f"Ou{pascal(ou.key)}Arn"
-            if ou.created_by_control_tower:
+            if ou.created_by_service:
                 lines.append(f'  "{key}=arn:aws:organizations::$MANAGEMENT_ACCOUNT_ID:ou/$ORG_ID/$SANDBOX_OU_ID"')
             else:
                 lines.append(f'  "{key}=$(output "$REGION" lz-structure {key})"')

@@ -18,12 +18,12 @@ export function OrganizationStep({ draft, onChange }: StepProps) {
         <div className="field">
           <label htmlFor="lz-name">Organization name</label>
           <input type="text" id="lz-name" value={answers.organization_name}
-                 onChange={(event) => onChange(draft.withOrganization(event.target.value, answers.management_email))} />
+                 onChange={(event) => onChange(draft.withOrganization(event.target.value, draft.managementEmail()))} />
           <span className="hint">Prefix for account names and OU paths</span>
         </div>
         <div className="field">
           <label htmlFor="lz-email">Management account email</label>
-          <input type="text" id="lz-email" value={answers.management_email}
+          <input type="text" id="lz-email" value={draft.managementEmail()}
                  onChange={(event) => onChange(draft.withOrganization(answers.organization_name, event.target.value))} />
           <span className="hint">A distribution list, not a person</span>
         </div>

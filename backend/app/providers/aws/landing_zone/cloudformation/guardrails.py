@@ -1,9 +1,11 @@
 import math
 from dataclasses import dataclass, field
 
+from app.landing_zone.catalog.packs import PackRegistry
 from app.landing_zone.catalog.resolver import EnabledControl, PackResolver
 from app.landing_zone.design import LandingZoneDesign, OrgCatalog, OuNode
 from app.providers.aws.landing_zone.cloudformation.references import OuReferences
+from app.providers.aws.landing_zone.controls import aws_controls
 
 SCP = "SERVICE_CONTROL_POLICY"
 RCP = "RESOURCE_CONTROL_POLICY"
@@ -62,7 +64,7 @@ class GuardrailPlan:
     @classmethod
     def for_design(cls, design: LandingZoneDesign, catalog: OrgCatalog | None = None) -> "GuardrailPlan":
         builder = PolicyBuilder(design, OuReferences(design), catalog or OrgCatalog(portfolios=[], products=[]))
-        return cls(design, builder.policies(), PackResolver.default().resolve(design).controls)
+        return cls(design, builder.policies(), PackResolver(PackRegistry.default(), aws_controls()).resolve(design).controls)
 
     def attach_scp(self, name: str, ou: OuNode) -> None:
         self.policies.append(PolicySpec(name=name, type=SCP, content=_document(_statement(name, "*")), targets=[ou]))

@@ -37,7 +37,7 @@ export function NetworkStep({ draft, onChange }: StepProps) {
                   onChange={(event) => change({ on_premises: event.target.value as Network["on_premises"] })}>
             <option value="none">None</option>
             <option value="vpn">Site-to-site VPN</option>
-            <option value="direct_connect">Direct Connect</option>
+            <option value="dedicated">Direct Connect</option>
           </select>
         </div>
       </div>

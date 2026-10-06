@@ -1,18 +1,18 @@
 import uuid
 from collections import Counter
 
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.adapters.ports import GitHubPort
 from app.db import models
 from app.errors import ConflictError, ForbiddenError, NotFoundError, ValidationFailedError
 from app.landing_zone.answers import LandingZoneAnswers
-from app.landing_zone.catalog.controls import CatalogError, ControlCatalogSnapshot
+from app.landing_zone.catalog.controls import CatalogError
 from app.landing_zone.catalog.packs import PROFILE_PACKS, PackRegistry
-from app.landing_zone.catalog.resolver import EnabledControl, PackResolver
+from app.landing_zone.catalog.resolver import EnabledControl
 from app.landing_zone.catalog.templates import IndustryTemplate, TemplateRegistry
 from app.landing_zone.design import AccountPlan, LandingZoneDesign, OrgCatalog, OuNode
-from app.landing_zone.designer import LandingZoneDesigner
 from app.landing_zone.diagram import OuDiagramRenderer
 from app.landing_zone.edits import EditPermissions, TreeEdit, TreeEditor
 from app.landing_zone.executor import LandingZoneExecutor, LandingZoneOutputs
@@ -32,9 +32,8 @@ from app.releases.policy import Actor, Role
 
 REPOSITORY_MARKER = "landing-zone"
 BEHAVIORS = ("PREVENTIVE", "DETECTIVE", "PROACTIVE")
-# Placeholder identity used only to preview a template's structure before the customer names the organization.
-PREVIEW_ORGANIZATION = {"organization_name": "example", "management_email": "aws@example.com",
-                        "home_region": "us-east-1", "governed_regions": ["us-east-1", "us-east-2"]}
+# Placeholder name used only to preview a template's structure before the customer names the organization.
+PREVIEW_ORGANIZATION = "example"
 
 
 class LandingZonePolicy:
@@ -63,7 +62,6 @@ class LandingZoneService:
         self._owner = owner
         self._sealer = ManifestSealer(signer)
         self._policy = LandingZonePolicy()
-        self._designer = LandingZoneDesigner.default()
         self._providers = ProviderRegistry.default()
 
     @classmethod
@@ -74,13 +72,15 @@ class LandingZoneService:
 
     def propose(self, request: LandingZoneRequest, actor: Actor) -> dict:
         self._policy.require_admin(actor)
+        self._check_provider_answers(request)
         design = self._design(request.answers, request.edits, request.provider)
         return {**self._explain(design), "files": self._toolkit(design.provider).bundle.render(design, self._catalog())}
 
     def create(self, request: LandingZoneRequest, actor: Actor) -> dict:
         self._policy.require_admin(actor)
-        self._toolkit(request.provider)
-        record = models.LandingZoneDesignRecord(version=self._repository.next_version(), provider=request.provider,
+        self._check_provider_answers(request)
+        record = models.LandingZoneDesignRecord(version=self._repository.next_version(request.provider),
+                                                provider=request.provider,
                                                 answers=request.answers.model_dump(mode="json"),
                                                 edits=TreeEditor.dump(request.edits),
                                                 status=DesignStatus.DRAFT, created_by=actor.name)
@@ -88,36 +88,38 @@ class LandingZoneService:
         self._repository.commit()
         return self._describe(record)
 
-    def templates(self, actor: Actor) -> list[dict]:
+    def templates(self, actor: Actor, provider: str = DEFAULT_PROVIDER) -> list[dict]:
         self._policy.require_admin(actor)
-        return [self._template_summary(template) for template in TemplateRegistry.default().all()]
+        return [self._template_summary(template, provider) for template in TemplateRegistry.default().all()]
 
-    def template(self, template_id: str, actor: Actor) -> dict:
+    def template(self, template_id: str, actor: Actor, provider: str = DEFAULT_PROVIDER) -> dict:
         self._policy.require_admin(actor)
         try:
             template = TemplateRegistry.default().get(template_id)
         except CatalogError as error:
             raise NotFoundError(str(error)) from error
-        return {**self._template_summary(template), "answers": template.answers, "edits": template.edits}
+        return {**self._template_summary(template, provider), "answers": template.answers, "edits": template.edits}
 
-    def control_packs(self, actor: Actor) -> dict:
+    def control_packs(self, actor: Actor, provider: str = DEFAULT_PROVIDER) -> dict:
         self._policy.require_admin(actor)
-        snapshot = ControlCatalogSnapshot.default()
-        return {"mappings_refreshed": snapshot.mappings_refreshed, "profiles": PROFILE_PACKS,
+        controls = self._toolkit(provider).controls
+        return {"mappings_refreshed": controls.snapshot.mappings_refreshed, "profiles": PROFILE_PACKS,
                 "packs": [{"id": pack.id, "version": pack.version, "name": pack.name, "description": pack.description,
                            "selectors": list(pack.selectors), "optional": pack.optional,
-                           "controls": [_control_json(snapshot.get(control_id)) for control_id in pack.control_ids]}
+                           "controls": [_control_json(controls.snapshot.get(control_id))
+                                        for control_id in controls.mappings.controls_for(pack.id)]}
                           for pack in PackRegistry.default().all()]}
 
-    def repository_subject(self, actor: Actor) -> LandingZoneSubject:
-        """The applied design to read back from landing-zone-infra (§21)."""
+    def repository_subject(self, actor: Actor, provider: str = DEFAULT_PROVIDER) -> LandingZoneSubject:
+        """A cloud's applied design, to read back from its landing-zone repository (§21)."""
         self._policy.require_admin(actor)
-        record = require(self._repository.latest_applied(), NotFoundError("No landing zone has been applied yet."))
+        record = require(self._repository.latest_applied(provider),
+                         NotFoundError("No landing zone has been applied yet."))
         return LandingZoneSubject(record, self._render)
 
-    def designs(self, actor: Actor) -> list[dict]:
+    def designs(self, actor: Actor, provider: str | None = None) -> list[dict]:
         self._policy.require_admin(actor)
-        return [self._describe(record) for record in self._repository.all()]
+        return [self._describe(record) for record in self._repository.all(provider)]
 
     def get(self, design_id: uuid.UUID, actor: Actor) -> dict:
         self._policy.require_admin(actor)
@@ -126,7 +128,8 @@ class LandingZoneService:
 
     def diagram(self, design_id: uuid.UUID, actor: Actor) -> str:
         self._policy.require_admin(actor)
-        return OuDiagramRenderer().svg(self._design_of(self._record(design_id)))
+        design = self._design_of(self._record(design_id))
+        return self._diagram(design).svg(design)
 
     def submit(self, design_id: uuid.UUID, actor: Actor) -> dict:
         self._policy.require_admin(actor)
@@ -170,9 +173,20 @@ class LandingZoneService:
             raise ValidationFailedError(unknown_provider(provider))
         return self._providers.get(provider).landing_zone()
 
+    def _check_provider_answers(self, request: LandingZoneRequest) -> None:
+        """What only this cloud asks must be valid before anything is designed with it."""
+        try:
+            self._toolkit(request.provider).answers.model_validate(request.answers.provider_answers)
+        except ValidationError as error:
+            fields = ", ".join(".".join(str(part) for part in item["loc"]) for item in error.errors())
+            raise ValidationFailedError(f"Invalid provider answers: {fields}.") from error
+
+    def _diagram(self, design: LandingZoneDesign) -> OuDiagramRenderer:
+        return OuDiagramRenderer(self._toolkit(design.provider).root_detail(design.answers))
+
     def _design(self, answers: LandingZoneAnswers, edits: list[TreeEdit],
                 provider: str = DEFAULT_PROVIDER) -> LandingZoneDesign:
-        design = self._designer.design(answers, self._catalog())
+        design = self._toolkit(provider).designer().design(answers, self._catalog())
         design.edit_problems = TreeEditor().apply(design, edits)
         design.edits, design.provider = list(edits), provider
         return design
@@ -191,26 +205,30 @@ class LandingZoneService:
         return [*design.edit_problems, *DesignValidator.default().problems(design),
                 *[problem for check in checks for problem in check.problems(design, catalog)]]
 
-    def _template_summary(self, template: IndustryTemplate) -> dict:
-        answers = LandingZoneAnswers.model_validate({**PREVIEW_ORGANIZATION, **template.answers})
-        design = self._design(answers, TreeEditor.parse(template.edits))
-        enabled = [item for items in PackResolver.default().resolve(design).controls.values() for item in items]
+    def _template_summary(self, template: IndustryTemplate, provider: str) -> dict:
+        toolkit = self._toolkit(provider)
+        primary, secondary = self._providers.get(provider).default_regions()
+        answers = LandingZoneAnswers.model_validate({
+            "organization_name": PREVIEW_ORGANIZATION, "provider_answers": toolkit.preview_answers,
+            "home_region": primary, "governed_regions": [primary, secondary], **template.answers})
+        design = self._design(answers, TreeEditor.parse(template.edits), provider)
+        enabled = [item for items in toolkit.resolver().resolve(design).controls.values() for item in items]
         distinct = {item.control.id: item.control.behavior for item in enabled}
         behaviors = Counter(distinct.values())
         return {"id": template.id, "version": template.version, "name": template.name, "industry": template.industry,
                 "description": template.description, "frameworks": list(template.frameworks),
-                "frameworks_verified": ControlCatalogSnapshot.default().mappings_refreshed is not None,
+                "frameworks_verified": toolkit.controls.snapshot.mappings_refreshed is not None,
                 "environments": [environment.name for environment in answers.environments()],
                 "packs": answers.packs(), "ou_count": len(list(design.walk())),
                 "control_counts": {behavior: behaviors[behavior] for behavior in BEHAVIORS},
                 "enabled_controls": len(enabled)}
 
     def _explain(self, design: LandingZoneDesign) -> dict:
-        renderer = OuDiagramRenderer()
-        controls = PackResolver.default().resolve(design).controls
+        toolkit = self._toolkit(design.provider)
+        renderer = self._diagram(design)
+        controls = toolkit.resolver().resolve(design).controls
         return {"ous": [_ou_json(ou, controls) for ou in design.root_ous], "problems": self._problems(design),
-                "warnings": DesignAdvisor([*DesignAdvisor.default().rules,
-                                           *self._toolkit(design.provider).advice]).warnings(design),
+                "warnings": DesignAdvisor.for_cloud(toolkit.controls, toolkit.advice).warnings(design),
                 "diagram": {"svg": renderer.svg(design), "mermaid": renderer.mermaid(design)}}
 
     def _record(self, design_id: uuid.UUID) -> models.LandingZoneDesignRecord:
@@ -244,7 +262,8 @@ class LandingZoneService:
 
     def _describe(self, record: models.LandingZoneDesignRecord) -> dict:
         return {"id": str(record.id), "provider": record.provider, "version": record.version, "status": record.status,
-                "organization_name": record.answers["organization_name"], "answers": record.answers,
+                "organization_name": record.answers["organization_name"],
+                "answers": LandingZoneAnswers.model_validate(record.answers).model_dump(mode="json"),
                 "edits": record.edits,
                 "created_by": record.created_by, "submitted_by": record.submitted_by,
                 "decided_by": record.decided_by, "decision_comment": record.decision_comment,
@@ -255,7 +274,7 @@ class LandingZoneService:
 def _ou_json(ou: OuNode, controls: dict[str, list[EnabledControl]]) -> dict:
     permissions = EditPermissions()
     return {"key": ou.key, "name": ou.name, "kind": ou.kind, "environment": ou.environment, "tier": ou.tier,
-            "created_by_control_tower": ou.created_by_control_tower, "custom": ou.custom,
+            "created_by_service": ou.created_by_service, "custom": ou.custom,
             "domain": ou.isolation_domain, "allowed_edits": permissions.for_ou(ou),
             "blocked_edits": permissions.blocked_for_ou(ou), "accounts": [_account_json(account) for account in ou.accounts],
             "controls": [{"id": enabled.control.id, "name": enabled.control.name, "behavior": enabled.control.behavior,

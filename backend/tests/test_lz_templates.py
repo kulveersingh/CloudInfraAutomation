@@ -1,9 +1,9 @@
 import pytest
 
-from app.landing_zone.catalog.resolver import UNRESOLVED_PREREQUISITE
 from app.landing_zone.catalog.templates import TemplateRegistry
 from app.landing_zone.validation import DesignAdvisor, DesignValidator
 from app.providers.aws.landing_zone.cloudformation.guardrails import GuardrailPlan, ScpQuotaRule
+from app.providers.aws.landing_zone.controls import UNRESOLVED_PREREQUISITE
 from app.providers.aws.provider import AwsProvider
 from tests.lz_factories import CATALOG, edited
 
@@ -72,7 +72,8 @@ def test_eu_sovereignty_stays_in_eu_regions():
 # ---- advice that doesn't block approval ----
 
 def warnings(design) -> list[str]:
-    return DesignAdvisor([*DesignAdvisor.default().rules, *AwsProvider().landing_zone().advice]).warnings(design)
+    toolkit = AwsProvider().landing_zone()
+    return DesignAdvisor.for_cloud(toolkit.controls, toolkit.advice).warnings(design)
 
 
 def test_strict_residency_warns_about_dr_replication():

@@ -378,7 +378,8 @@ export interface FlowException {
 
 export interface LandingZoneAnswers {
   organization_name: string;
-  management_email: string;
+  /** What only the chosen cloud asks (AWS: the management account email), validated by that cloud (§22.10.3). */
+  provider_answers: Record<string, unknown>;
   home_region: string;
   governed_regions: string[];
   template: TemplateReference | null;
@@ -394,7 +395,7 @@ export interface LandingZoneAnswers {
     hub: boolean;
     egress: "central" | "local";
     inspection: boolean;
-    on_premises: "none" | "vpn" | "direct_connect";
+    on_premises: "none" | "vpn" | "dedicated";
     cidr: string;
     flows: FlowException[];
   };
@@ -490,7 +491,8 @@ export interface OuInfo {
   kind: string;
   environment: string | null;
   tier: string | null;
-  created_by_control_tower: boolean;
+  /** Created by the cloud's landing-zone service (e.g. Control Tower), not by the platform. */
+  created_by_service: boolean;
   custom: boolean;
   domain: string | null;
   allowed_edits: OuEdit[];

@@ -50,7 +50,7 @@ export class LandingZoneDraft {
 
   static initial(): LandingZoneDraft {
     return new LandingZoneDraft({
-      organization_name: "", management_email: "", home_region: "us-east-1", governed_regions: ["us-east-1", "us-east-2"],
+      organization_name: "", provider_answers: { management_email: "" }, home_region: "us-east-1", governed_regions: ["us-east-1", "us-east-2"],
       template: null, environment_ids: [...ENVIRONMENT_PRESETS[5]], environment_names: {}, grouping: "separate",
       account_model: "portfolio", compliance: [],
       security_tooling: true, log_retention_days: 365,
@@ -106,7 +106,13 @@ export class LandingZoneDraft {
   }
 
   withOrganization(organizationName: string, managementEmail: string) {
-    return this.with({ organization_name: organizationName, management_email: managementEmail });
+    return this.with({ organization_name: organizationName,
+      provider_answers: { ...this.answers.provider_answers, management_email: managementEmail } });
+  }
+
+  /** The AWS management account email, among the provider answers. */
+  managementEmail(): string {
+    return String(this.answers.provider_answers.management_email ?? "");
   }
 
   withRegion(region: string, governed: boolean) {
@@ -173,10 +179,10 @@ export class LandingZoneDraft {
 
   /** Checks the browser can make; the platform validates the rest when it proposes the structure. */
   problems(): string[] {
-    const { organization_name, management_email, governed_regions, home_region } = this.answers;
+    const { organization_name, governed_regions, home_region } = this.answers;
     const checks: Array<[boolean, string]> = [
       [!ORGANIZATION_NAME_PATTERN.test(organization_name), "Organization name: 2–31 lowercase letters, digits or hyphens."],
-      [!EMAIL_PATTERN.test(management_email), "Enter the management account email."],
+      [!EMAIL_PATTERN.test(this.managementEmail()), "Enter the management account email."],
       [governed_regions.length < MINIMUM_GOVERNED_REGIONS, "Choose at least two governed regions."],
       [!governed_regions.includes(home_region), "The home region must be a governed region."],
     ];
@@ -200,7 +206,7 @@ export class LandingZoneDraft {
   }
 
   private keepingOrganization(source: LandingZoneDraft) {
-    return this.withOrganization(source.answers.organization_name, source.answers.management_email);
+    return this.withOrganization(source.answers.organization_name, source.managementEmail());
   }
 }
 

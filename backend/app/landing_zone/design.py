@@ -19,7 +19,7 @@ class AccountPlan:
     """An account to vend. Fixed accounts belong to a questionnaire answer; added ones come from the tree editor."""
 
     name: str
-    email: str
+    email: str | None = None  # AWS accounts have one; Google Cloud projects don't
     fixed: bool = False
     added: bool = False
     enabled: bool = True
@@ -37,7 +37,7 @@ class OuNode:
     kind: str
     environment: str | None = None
     tier: str | None = None
-    created_by_control_tower: bool = False
+    created_by_service: bool = False  # created by the cloud's landing-zone service, not by the platform
     children: list["OuNode"] = field(default_factory=list)
     accounts: list[AccountPlan] = field(default_factory=list)
     custom: bool = False
@@ -74,6 +74,7 @@ class LandingZoneDesign:
     edit_problems: list[str] = field(default_factory=list)
     edits: list = field(default_factory=list)  # the TreeEdits applied, in order
     provider: str = "aws"
+    namer: object = None  # the cloud's UnitNamer, which the tree editor also uses for the units it adds
 
     def walk(self) -> Iterator[OuNode]:
         yield from _walk(self.root_ous)

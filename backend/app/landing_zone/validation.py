@@ -1,11 +1,10 @@
 from abc import ABC, abstractmethod
 from collections import Counter
 
+from app.landing_zone.catalog.mappings import ProviderControls
+from app.landing_zone.catalog.packs import PackRegistry
 from app.landing_zone.catalog.resolver import PackResolver
 from app.landing_zone.design import LandingZoneDesign, OuNode
-
-# Accounts per OU that Control Tower can register, by number of governed Regions (§20.12.1 F5).
-STRICT_RESIDENCY = "strict-residency"
 
 
 class DesignRule(ABC):
@@ -86,18 +85,13 @@ class DesignWarning(ABC):
 
 
 class ControlPackWarnings(DesignWarning):
-    """Packs that reach no OU, and proactive controls whose prerequisite isn't resolved yet."""
+    """Packs that reach no OU, and what the cloud's controls still need (e.g. an unresolved prerequisite)."""
+
+    def __init__(self, controls: ProviderControls):
+        self._controls = controls
 
     def warnings(self, design):
-        return PackResolver.default().resolve(design).warnings
-
-
-class StrictResidencyBlocksReplication(DesignWarning):
-    def warnings(self, design):
-        if STRICT_RESIDENCY not in design.answers.packs():
-            return []
-        return [("Strict residency blocks S3 cross-Region replication, so DR/HA projects in these OUs cannot "
-                 "replicate S3 buckets.")]
+        return PackResolver(PackRegistry.default(), self._controls).resolve(design).warnings
 
 
 class DesignAdvisor:
@@ -105,8 +99,9 @@ class DesignAdvisor:
         self.rules = rules
 
     @classmethod
-    def default(cls) -> "DesignAdvisor":
-        return cls([ControlPackWarnings(), StrictResidencyBlocksReplication()])
+    def for_cloud(cls, controls: ProviderControls, advice: tuple[DesignWarning, ...]) -> "DesignAdvisor":
+        """The neutral advice plus the cloud's own."""
+        return cls([ControlPackWarnings(controls), *advice])
 
     def warnings(self, design: LandingZoneDesign) -> list[str]:
         return [warning for rule in self.rules for warning in rule.warnings(design)]

@@ -54,9 +54,15 @@ class NetworkAnswers(BaseModel):
     hub: bool = True
     egress: Literal["central", "local"] = "central"
     inspection: bool = True
-    on_premises: Literal["none", "vpn", "direct_connect"] = "none"
+    on_premises: Literal["none", "vpn", "dedicated"] = "none"  # dedicated: Direct Connect, Cloud Interconnect
     cidr: str = "10.0.0.0/8"
     flows: list[FlowException] = Field(default_factory=list)
+
+    @field_validator("on_premises", mode="before")
+    @classmethod
+    def dedicated_link(cls, value):
+        """Designs saved before §22.10 named the dedicated link after AWS Direct Connect."""
+        return "dedicated" if value == "direct_connect" else value
 
     @property
     def central_egress(self) -> bool:
@@ -92,10 +98,12 @@ class TemplateReference(BaseModel):
 
 
 class LandingZoneAnswers(BaseModel):
-    """Everything the landing zone questionnaire asks. Defaults are the platform's recommendations."""
+    """Everything the landing zone questionnaire asks. Defaults are the platform's recommendations. What only one
+    cloud asks (an AWS management email, a Google Cloud billing account) is in `provider_answers`, which that
+    cloud's landing-zone toolkit validates (§22.10.3)."""
 
     organization_name: str = Field(pattern=r"^[a-z][a-z0-9-]{1,30}$")
-    management_email: str = Field(pattern=r"^[^@\s+]+@[^@\s]+\.[^@\s]+$")
+    provider_answers: dict = Field(default_factory=dict)
     home_region: str
     governed_regions: list[str] = Field(min_length=2)
     template: TemplateReference | None = None
@@ -113,6 +121,17 @@ class LandingZoneAnswers(BaseModel):
     controls_profile: Literal["baseline", "recommended", "regulated"] = "recommended"
     control_packs: list[str] | None = None
     pack_parameters: dict[str, dict[str, list[str]]] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def legacy_provider_answer(cls, data):
+        """Designs saved before §22.10 kept the AWS management email among the neutral answers."""
+        if not isinstance(data, dict) or "management_email" not in data:
+            return data
+        upgraded = dict(data)
+        email = upgraded.pop("management_email")
+        upgraded["provider_answers"] = {"management_email": email, **upgraded.get("provider_answers", {})}
+        return upgraded
 
     @model_validator(mode="before")
     @classmethod

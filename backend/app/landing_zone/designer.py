@@ -1,8 +1,12 @@
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import replace
 
 from app.landing_zone.answers import EnvironmentAnswer, LandingZoneAnswers
 from app.landing_zone.design import AccountPlan, LandingZoneDesign, OrgCatalog, OuNode
+from app.landing_zone.naming import UnitNamer
+
+NamerFactory = Callable[[LandingZoneAnswers], UnitNamer]
 
 INFRASTRUCTURE_ACCOUNTS = {"network": "network", "shared_services": "shared-services", "identity": "identity",
                            "backup": "backup", "monitoring": "monitoring"}
@@ -10,27 +14,9 @@ OPTIONAL_OUS = {"exceptions": ("Exceptions", "exceptions"), "suspended": ("Suspe
                 "individual_business_users": ("Business Users", "business_users")}
 
 
-class AccountNamer:
-    """Account names are "<org>-<suffix>"; emails use plus addressing on the management mailbox."""
-
-    def __init__(self, answers: LandingZoneAnswers):
-        self._organization = answers.organization_name
-        self._local, self._domain = answers.management_email.split("@")
-
-    def account(self, suffix: str) -> AccountPlan:
-        return AccountPlan(name=f"{self._organization}-{suffix}", email=f"{self._local}+{suffix}@{self._domain}")
-
-    def fixed(self, suffix: str) -> AccountPlan:
-        """An account that one questionnaire answer decides; the tree editor leaves it alone."""
-        return replace(self.account(suffix), fixed=True)
-
-    def added(self, suffix: str) -> AccountPlan:
-        """An account the tree editor added; it can be removed again."""
-        return replace(self.account(suffix), added=True)
-
-
 class AnswerHandler(ABC):
-    """Turns part of the questionnaire into OUs and accounts. New questions add a handler."""
+    """Turns part of the questionnaire into OUs and accounts. New questions add a handler. Units are named through
+    `design.namer`, the cloud's way."""
 
     @abstractmethod
     def contribute(self, answers: LandingZoneAnswers, catalog: OrgCatalog, design: LandingZoneDesign) -> None:
@@ -39,15 +25,15 @@ class AnswerHandler(ABC):
 
 class SecurityHandler(AnswerHandler):
     def contribute(self, answers, catalog, design):
-        namer = AccountNamer(answers)
+        namer = design.namer
         suffixes = ["log-archive", "audit", *(["security-tooling"] if answers.security_tooling else [])]
-        design.root_ous.append(OuNode(key="security", name="Security", kind="security", created_by_control_tower=True,
+        design.root_ous.append(OuNode(key="security", name="Security", kind="security", created_by_service=True,
                                       accounts=[namer.fixed(suffix) for suffix in suffixes]))
 
 
 class InfrastructureHandler(AnswerHandler):
     def contribute(self, answers, catalog, design):
-        namer = AccountNamer(answers)
+        namer = design.namer
         accounts = [namer.fixed(suffix) for key, suffix in INFRASTRUCTURE_ACCOUNTS.items()
                     if key in answers.infrastructure]
         design.root_ous.append(OuNode(key="infrastructure", name="Infrastructure", kind="infrastructure",
@@ -59,26 +45,26 @@ class EnvironmentHandler(AnswerHandler):
 
     def contribute(self, answers, catalog, design):
         environments = answers.environments()
-        design.root_ous += [self._ou(answers, catalog, environment) for environment in environments
+        design.root_ous += [self._ou(answers, catalog, environment, design.namer) for environment in environments
                             if environment.tier == "sandbox"]
-        workloads = [self._ou(answers, catalog, environment) for environment in environments
+        workloads = [self._ou(answers, catalog, environment, design.namer) for environment in environments
                      if environment.tier != "sandbox"]
         design.root_ous += workloads if answers.grouping == "separate" else self._parents(workloads)
 
-    def _ou(self, answers: LandingZoneAnswers, catalog: OrgCatalog, environment: EnvironmentAnswer) -> OuNode:
+    def _ou(self, answers: LandingZoneAnswers, catalog: OrgCatalog, environment: EnvironmentAnswer,
+            namer: UnitNamer) -> OuNode:
         return OuNode(key=environment.id, name=environment.name, kind="environment", environment=environment.id,
-                      tier=environment.tier, created_by_control_tower=environment.tier == "sandbox",
-                      accounts=self._accounts(answers, catalog, environment))
+                      tier=environment.tier, created_by_service=environment.tier == "sandbox",
+                      accounts=self._accounts(answers, catalog, environment, namer))
 
-    def _accounts(self, answers, catalog, environment) -> list[AccountPlan]:
-        namer = AccountNamer(answers)
+    def _accounts(self, answers, catalog, environment, namer: UnitNamer) -> list[AccountPlan]:
         suffix = environment.name.lower()
         if environment.tier == "sandbox":
             return self._sandbox_accounts(answers, catalog, namer)
         if answers.account_model == "environment":
-            return [namer.account(suffix)]
+            return [namer.unit(suffix)]
         owners = catalog.portfolios if answers.account_model == "portfolio" else catalog.products
-        return [namer.account(f"{_short(owner)}-{suffix}") for owner in owners]
+        return [namer.unit(f"{_short(owner)}-{suffix}") for owner in owners]
 
     def _sandbox_accounts(self, answers, catalog, namer) -> list[AccountPlan]:
         if answers.sandbox.model == "developer":
@@ -95,11 +81,11 @@ class ComplianceHandler(AnswerHandler):
     """Each regulated scope gets its own OU with STAGE and PROD child OUs and stricter controls."""
 
     def contribute(self, answers, catalog, design):
-        namer = AccountNamer(answers)
+        namer = design.namer
         for scope in answers.compliance:
             children = [OuNode(key=f"{scope.lower()}_{environment}", name=f"{scope}-{environment.upper()}",
                                kind="environment", environment=environment, tier="prod",
-                               accounts=[namer.account(f"{scope.lower()}-{environment}")])
+                               accounts=[namer.unit(f"{scope.lower()}-{environment}")])
                         for environment in ("stage", "prod")]
             design.root_ous.append(OuNode(key=scope.lower(), name=scope, kind="compliance", tier="prod",
                                           children=children))
@@ -109,7 +95,7 @@ class AutomationsHandler(AnswerHandler):
     def contribute(self, answers, catalog, design):
         if "cicd" in answers.infrastructure:
             design.root_ous.append(OuNode(key="automations", name="Automations", kind="automations",
-                                          accounts=[AccountNamer(answers).fixed("cicd")]))
+                                          accounts=[design.namer.fixed("cicd")]))
 
 
 class PolicyStagingHandler(AnswerHandler):
@@ -124,16 +110,18 @@ class OptionalOuHandler(AnswerHandler):
 
 
 class LandingZoneDesigner:
-    def __init__(self, handlers: list[AnswerHandler]):
+    def __init__(self, handlers: list[AnswerHandler], namer: NamerFactory):
         self._handlers = handlers
+        self._namer = namer
 
     @classmethod
-    def default(cls) -> "LandingZoneDesigner":
+    def default(cls, namer: NamerFactory) -> "LandingZoneDesigner":
+        """The standard questions, with a cloud's way of naming the units it vends."""
         return cls([SecurityHandler(), InfrastructureHandler(), EnvironmentHandler(), ComplianceHandler(),
-                    AutomationsHandler(), PolicyStagingHandler(), OptionalOuHandler()])
+                    AutomationsHandler(), PolicyStagingHandler(), OptionalOuHandler()], namer)
 
     def design(self, answers: LandingZoneAnswers, catalog: OrgCatalog) -> LandingZoneDesign:
-        design = LandingZoneDesign(answers=answers)
+        design = LandingZoneDesign(answers=answers, namer=self._namer(answers))
         for handler in self._handlers:
             handler.contribute(answers, catalog, design)
         self._record_domains(design)

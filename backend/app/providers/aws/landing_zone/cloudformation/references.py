@@ -35,7 +35,7 @@ class OuReferences:
 
     def name_in_template(self, ou: OuNode) -> str:
         """Parameter name for Control Tower OUs, logical id otherwise; both work as ${...} in Fn::Sub."""
-        if ou.created_by_control_tower:
+        if ou.created_by_service:
             return CONTROL_TOWER_PARAMETERS[ou.kind if ou.kind == "security" else "sandbox"]
         return ou_logical_id(ou)
 
@@ -44,12 +44,12 @@ class OuReferences:
 
     def imported_id(self, ou: OuNode) -> dict:
         """The OU id from another stack: parameter for Control Tower OUs, export of lz-structure otherwise."""
-        if ou.created_by_control_tower:
+        if ou.created_by_service:
             return {"Ref": self.name_in_template(ou)}
         return self.exports.value(f"{ou_logical_id(ou)}Id")
 
     def arn(self, ou: OuNode) -> dict:
-        if ou.created_by_control_tower:
+        if ou.created_by_service:
             return {"Fn::Sub": [f"arn:aws:organizations::${{AWS::AccountId}}:ou/${{OrgId}}/${{{self.name_in_template(ou)}}}",
                                 {"OrgId": self.exports.value("OrganizationId")}]}
         return {"Fn::GetAtt": [ou_logical_id(ou), "Arn"]}

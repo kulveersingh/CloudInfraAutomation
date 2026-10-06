@@ -1,10 +1,11 @@
 # CloudInfraAutomation — Architecture
 
-**Status:** v2.28, approved; implementation in progress. No code is written until this design is approved.
+**Status:** v2.29, approved; implementation in progress. No code is written until this design is approved.
 **Date:** 2026-10-05
 **Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9). Every solution is **DR-capable**: it can run in one region, as DR (primary active, secondary standby) or as an HA pair (both active), with **any region pair chosen in the UI** (default us-east-1 / us-east-2) (§10).
 
 **Changes in v2:** added the org registry and tagging strategy (§4); permissions based on tags (§4.5–4.8); multi-account, five-environment model (§5); promotion pipeline (§8). Payload, provisioning, security and scaling sections are updated to match.
+**Changes in v2.29:** MC-3a: neutral landing-zone answers with provider answers, pack mappings per cloud, unit naming from the provider, one landing zone per cloud (§22.10 notes).
 **Changes in v2.28:** MC-3 design (§22.10): the Google Cloud landing zone (folders, project factory, Org Policy/IAM deny/SCC pack mappings, Shared VPC with an NCC star topology, VPC Service Controls per environment, vault project), and the neutral split of landing-zone answers and control packs.
 **Changes in v2.27:** MC-2e: the UI picks the cloud (wizard, Admin regions and networks), follows the chosen cloud's regions, catalog, type search, networks, words and main file, and shows preview notes; MC-2 is complete (§22.9.7 notes).
 **Changes in v2.26:** MC-2d: Google Cloud release risk from Terraform plans; teardown inventory from the configuration; Bucket-Locked and Backup and DR vault backups in the vault project; restore with import (§22.9.7 notes).
@@ -4086,6 +4087,23 @@ The backup-account resolver for Google Cloud reads the applied landing zone's va
 | **MC-3c Google Cloud bundle** | The seven deployments, `design.json`, diagrams, `controls.md`, seed script, workflow; lint with the provider schema | Every template's deployments pass the lint and schema rules; golden tests per deployment |
 | **MC-3d Apply and registries** | `LocalGcpLandingZone` executor; account bindings, networks and the vault project filled; teardown vault resolved from the landing zone | Approve → applied → a Google Cloud project provisions into the vended projects and tears down into the landing zone's vault, locally |
 | **MC-3e UI** | Cloud picker on the landing-zone page, provider questions, per-cloud controls and templates, folder/project wording | 100% frontend coverage |
+
+**MC-3a implementation notes.**
+- **Answers.**
+  - `LandingZoneAnswers.provider_answers` holds what only one cloud asks. The landing-zone service validates it with the cloud's `LandingZoneToolkit.answers` model before proposing or saving, and refuses invalid answers with 422 ("Invalid provider answers: management_email.").
+  - A before-validator moves a stored design's top-level `management_email` into `provider_answers`, and `direct_connect` reads as `dedicated`. Design responses return answers in the new shape.
+- **Naming.** `UnitNamer` (`app/landing_zone/naming.py`) names the units. The designer is built per cloud (`LandingZoneToolkit.designer()`), and the design carries its namer so the tree editor names the accounts it adds the same way. AWS's `AwsAccountNamer` keeps names plus plus-addressed emails. `AccountPlan.email` is optional, and `OuNode.created_by_control_tower` became `created_by_service` (API and UI too).
+- **Packs.** Pack files are neutral, and a pack that still lists controls is refused at load time.
+  - **Where the mappings live:** each cloud's mappings and snapshot are in its provider package: `app/providers/aws/landing_zone/catalog/controls.yaml` and `mappings/<pack>.yaml`. This differs from §22.10.4, which put the mappings under the core `catalog/mappings/<provider>/`; keeping them in the provider package keeps the core free of cloud data.
+  - `ProviderControls` brings a cloud's snapshot, mappings, `InheritanceRule` (`PreventiveInherited` for AWS, `AllInherited` for Google Cloud) and `ControlPrerequisite`s. AWS's CloudFormation-hooks prerequisite is now `HooksPrerequisite` in the AWS package.
+  - `GET …/control-packs` and `…/templates` take `provider`. Template previews use the cloud's default regions and placeholder provider answers.
+- **Advice.** The core advice is the packs' warnings for the cloud's controls (`DesignAdvisor.for_cloud`). The strict-residency warning names S3, so it moved to the AWS advice.
+- **Diagrams.** The root box's detail comes from the cloud (`LandingZoneToolkit.root_detail`). AWS: "Management / payer account", "Control Tower {home region}".
+- **One landing zone per cloud.**
+  - Versions are unique per provider (migration `a7d3c5e19b42`), and `latest_applied` and `next_version` take the provider.
+  - The design list (`?provider=`) and read-back (`?provider=`, AWS by default) are per cloud.
+  - The backup-account fallback reads only the AWS landing zone's Backup account.
+- **The core holds no cloud words.** A test keeps "Control Tower", "CloudFormation" and `created_by_control_tower` out of `app/landing_zone`. The one place that still names `management_email` is the migration of stored AWS answers.
 
 #### 22.10.9 Decisions and open questions
 

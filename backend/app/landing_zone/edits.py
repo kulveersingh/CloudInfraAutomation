@@ -8,7 +8,6 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, Field, TypeAdapter
 
 from app.landing_zone.design import AccountPlan, LandingZoneDesign, OuNode
-from app.landing_zone.designer import AccountNamer
 
 OU_NAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9 -]{1,39}$")
 ACCOUNT_SUFFIX_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{1,39}$")
@@ -47,7 +46,7 @@ class EditableTree:
 
     def __init__(self, design: LandingZoneDesign):
         self.design = design
-        self.namer = AccountNamer(design.answers)
+        self.namer = design.namer
         self.permissions = EditPermissions()
 
     def ou(self, key: str) -> OuNode:

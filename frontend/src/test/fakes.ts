@@ -231,7 +231,7 @@ export function job(state: string, steps: JobStatus["steps"] = [], error: string
 }
 
 const ou = (key: string, name: string, kind: string, extra: Partial<OuInfo> = {}): OuInfo => ({
-  key, name, kind, environment: null, tier: null, created_by_control_tower: false, custom: false, domain: null,
+  key, name, kind, environment: null, tier: null, created_by_service: false, custom: false, domain: null,
   allowed_edits: [], blocked_edits: {}, accounts: [], controls: [], children: [], ...extra,
 });
 
@@ -247,7 +247,7 @@ const fixed = (name: string) => account(name, { allowed_edits: [] });
 const CONTAINER: OuInfo["allowed_edits"] = ["add_child", "add_account"];
 
 export const OU_TREE: OuInfo[] = [
-  ou("security", "Security", "security", { created_by_control_tower: true,
+  ou("security", "Security", "security", { created_by_service: true,
     accounts: [fixed("acme-log-archive"), fixed("acme-audit")] }),
   ou("infrastructure", "Infrastructure", "infrastructure", { domain: "infrastructure", allowed_edits: CONTAINER,
     accounts: [fixed("acme-network")] }),

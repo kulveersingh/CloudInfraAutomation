@@ -16,7 +16,7 @@ def svg_texts(**overrides) -> list[str]:
 
 
 def test_mermaid_starts_with_the_root():
-    assert OuDiagramRenderer().mermaid(design()).splitlines()[:2] == [
+    assert OuDiagramRenderer(["Management / payer account"]).mermaid(design()).splitlines()[:2] == [
         "flowchart TD", '  root["Root · acme<br/>Management / payer account"]']
 
 

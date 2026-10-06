@@ -15,7 +15,7 @@ class StructureStack(StackRenderer):
     description = "Landing zone structure: OUs, Control Tower baselines and controls, organization policies."
 
     def sections(self, context: StackContext) -> dict:
-        created = [ou for ou in context.design.walk() if not ou.created_by_control_tower]
+        created = [ou for ou in context.design.walk() if not ou.created_by_service]
         resources: dict = {}
         for ou in created:
             resources[ou_logical_id(ou)] = {"Type": "AWS::Organizations::OrganizationalUnit", "Properties": {
@@ -36,7 +36,7 @@ class StructureStack(StackRenderer):
 
     def _baseline(self, context: StackContext, ou: OuNode) -> dict:
         parent = context.references.ancestors(ou)[:-1]
-        depends = [f"Baseline{ou_logical_id(parent[-1])}"] if parent and not parent[-1].created_by_control_tower else []
+        depends = [f"Baseline{ou_logical_id(parent[-1])}"] if parent and not parent[-1].created_by_service else []
         body = {"Type": "AWS::ControlTower::EnabledBaseline", "Properties": {
             "BaselineIdentifier": {"Ref": "ControlTowerBaselineArn"}, "BaselineVersion": {"Ref": "BaselineVersion"},
             "TargetIdentifier": context.references.arn(ou),
@@ -50,7 +50,7 @@ class StructureStack(StackRenderer):
         for ou in context.design.walk():
             for enabled in context.guardrails.controls.get(ou.key, []):
                 name = f"Control{pascal(ou.key)}{enabled.control.id.capitalize()}"
-                depends = [] if ou.created_by_control_tower else [f"Baseline{ou_logical_id(ou)}"]
+                depends = [] if ou.created_by_service else [f"Baseline{ou_logical_id(ou)}"]
                 if len(names) >= CONTROL_BATCH:
                     depends.append(names[-CONTROL_BATCH])
                 properties = {"ControlIdentifier": control_identifier(enabled.control.id), "TargetIdentifier": context.references.arn(ou)}
