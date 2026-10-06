@@ -8,7 +8,8 @@ from app.providers.gcp.landing_zone.answers import gcp_answers
 MAX_FOLDER_DEPTH = 10
 MAX_FOLDERS_PER_PARENT = 300
 PROJECT_ID_LENGTH = (6, 30)
-PROJECT_QUOTA_HINT = 25  # an organization starts with a small project quota
+PROJECT_QUOTA_HINT = 25
+MAX_BUCKET_NAME = 63  # an organization starts with a small project quota
 STRICT_RESIDENCY = "strict-residency"
 
 
@@ -33,6 +34,18 @@ class ProjectIds(LandingZoneCheck):
         sizes = [f"Project id '{name}' is {len(name)} characters; Google Cloud allows {shortest} to {longest}."
                  for name in names if not shortest <= len(name) <= longest]
         return sizes + [f"Project id '{name}' is used twice." for name, total in Counter(names).items() if total > 1]
+
+
+class VaultBucketNames(LandingZoneCheck):
+    """Bucket names without dots are at most 63 characters."""
+
+    def problems(self, design, catalog):
+        from app.providers.gcp.landing_zone.deployments.vault import vault_bucket
+
+        project = design.namer.unit(design.units.infrastructure["backup"]).name
+        names = [vault_bucket(region, project) for region in design.answers.governed_regions]
+        return [f"Vault bucket '{name}' is {len(name)} characters; Google Cloud allows {MAX_BUCKET_NAME}. Use a "
+                "shorter organization name." for name in names if len(name) > MAX_BUCKET_NAME]
 
 
 class DetectiveControlsNeedPremium(DesignWarning):

@@ -18,6 +18,7 @@ from app.providers.gcp.landing_zone.limits import (
     ProjectIds,
     ProjectQuota,
     StrictResidencyBlocksDualRegionStorage,
+    VaultBucketNames,
 )
 
 
@@ -25,7 +26,7 @@ from app.providers.gcp.landing_zone.limits import (
 def gcp_landing_zone() -> LandingZoneToolkit:
     """Folders and projects, Org Policy, IAM deny and Security Command Center, on Infrastructure Manager (§22.10)."""
     return LandingZoneToolkit(repository_name=REPOSITORY_NAME, bundle=GcpLandingZoneBundle(),
-                              checks=(MaximumFolderDepth(), FoldersPerParent(), ProjectIds()),
+                              checks=(MaximumFolderDepth(), FoldersPerParent(), ProjectIds(), VaultBucketNames()),
                               advice=(DetectiveControlsNeedPremium(), NoCentralEgress(),
                                       StrictResidencyBlocksDualRegionStorage(), ProjectQuota()),
                               answers=GcpLandingZoneAnswers, namer=GcpProjectNamer, controls=gcp_controls(),

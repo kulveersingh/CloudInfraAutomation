@@ -86,10 +86,16 @@ class ComplianceHandler(AnswerHandler):
         for scope in answers.compliance:
             children = [OuNode(key=f"{scope.lower()}_{environment}", name=f"{scope}-{environment.upper()}",
                                kind="environment", environment=environment, tier="prod",
-                               accounts=[namer.unit(f"{scope.lower()}-{environment}")])
+                               accounts=[namer.unit(f"{scope.lower()}-{environment}"),
+                                         *self._host(design, f"{scope}-{environment}")])
                         for environment in ("stage", "prod")]
             design.root_ous.append(OuNode(key=scope.lower(), name=scope, kind="compliance", tier="prod",
                                           children=children))
+
+    def _host(self, design: LandingZoneDesign, environment_name: str) -> list[AccountPlan]:
+        """The environment's network host project, where the cloud has one."""
+        host = design.units.host_for(environment_name)
+        return [design.namer.fixed(host)] if host else []
 
 
 class AutomationsHandler(AnswerHandler):

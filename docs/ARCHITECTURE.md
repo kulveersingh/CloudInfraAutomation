@@ -1,10 +1,11 @@
 # CloudInfraAutomation — Architecture
 
-**Status:** v2.30, approved; implementation in progress. No code is written until this design is approved.
+**Status:** v2.31, approved; implementation in progress. No code is written until this design is approved.
 **Date:** 2026-10-05
 **Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9). Every solution is **DR-capable**: it can run in one region, as DR (primary active, secondary standby) or as an HA pair (both active), with **any region pair chosen in the UI** (default us-east-1 / us-east-2) (§10).
 
 **Changes in v2:** added the org registry and tagging strategy (§4); permissions based on tags (§4.5–4.8); multi-account, five-environment model (§5); promotion pipeline (§8). Payload, provisioning, security and scaling sections are updated to match.
+**Changes in v2.31:** MC-3c: the Google Cloud landing-zone deployments in Terraform JSON, inputs, seed script, workflow and README, validated with Terraform 1.5.7 (§22.10 notes).
 **Changes in v2.30:** MC-3b: the Google Cloud landing-zone design: provider answers, project ids, folders and projects, the control snapshot and pack mappings, checks and advice, templates per cloud (§22.10 notes).
 **Changes in v2.29:** MC-3a: neutral landing-zone answers with provider answers, pack mappings per cloud, unit naming from the provider, one landing zone per cloud (§22.10 notes).
 **Changes in v2.28:** MC-3 design (§22.10): the Google Cloud landing zone (folders, project factory, Org Policy/IAM deny/SCC pack mappings, Shared VPC with an NCC star topology, VPC Service Controls per environment, vault project), and the neutral split of landing-zone answers and control packs.
@@ -4125,6 +4126,36 @@ The backup-account resolver for Google Cloud reads the applied landing zone's va
 - **Templates** carry `regions: {aws, gcp}` where they fix regions (public sector: us-east1/us-west1; EU sovereignty: europe-west3/europe-west1). Every template proposes on Google Cloud with no problems.
 - **Bundle so far.** `landing-zone-gcp-infra` renders `design.json` (shared with AWS through `app/landing_zone/document.py`), the diagrams (root: "Organization {id}", "Seed project {org}-lz-seed") and `docs/controls.md`. The deployments come with MC-3c.
 - **Applying.** Landing-zone executors are per cloud (`AdapterFactory.landing_zone_executors`, picked by each cloud's mode). Google Cloud has none until MC-3d, so approving a Google Cloud design is refused before anything is committed: "Applying a Google Cloud landing zone is not available yet."
+
+**MC-3c implementation notes.**
+- **Deployments.** They live in `app/providers/gcp/landing_zone/deployments/`, one class per deployment with a shared `DeploymentContext` (design, provider answers, resolved controls, address plan).
+  - **Inputs:** each deployment is Terraform JSON with organization-level provider settings (`billing_project` = the seed project, `user_project_override`). It declares the same four inputs, which `config/landing-zone.tfvars` fills from the provider answers: organization id, billing account, seed project, home region.
+  - **Cross-deployment references:** Infrastructure Manager deployments don't share state, so later deployments find what earlier ones made through data sources:
+    - folders by display name under their parent (`google_active_folder`, chained);
+    - the environment tag and its values by short name;
+    - project numbers by project id.
+- **What each deployment holds:**
+  - **lz-foundation:** the `environment` tag key and one value per environment folder; the custom constraints that resolved packs use; the security admins as essential contact.
+  - **lz-structure:**
+    - folders with `deletion_protection` and environment tag bindings;
+    - one `google_org_policy_policy` per (folder, constraint). `ConstraintRules` sets list constraints: locations from `AllowedRegions`, the organization's directory customer id for member domains, `under:` the folder for CMEK keys and Shared VPC hosts, internal load balancers only;
+    - IAM deny policies with the provider answers' groups as exceptions;
+    - a firewall policy on each environment folder that denies SSH and RDP from the internet.
+  - **lz-projects:** every enabled unit as a project (billing, `deletion_policy = PREVENT`, no default network, labels) with the APIs its role needs; budgets for sandbox projects.
+  - **lz-network:** the hub VPC and an NCC hub with the `STAR` preset (hub spoke `center`, environments `edge`); one Shared VPC per environment with subnets from the IPAM plan, flow logs, Private Google Access and Cloud NAT per region; service-project attachments; declared flows as Private Service Connect endpoints; the HA VPN gateway when the link is VPN; NGFW endpoints per region when inspection is on.
+  - **lz-security:** the organization audit sink into a locked log bucket in the logging project; the access policy and one dry-run perimeter per environment; one combined posture per folder with detective controls (Q2), only on SCC Premium/Enterprise.
+  - **lz-vault:** per region a Bucket-Locked bucket and a Backup and DR vault (60 days); the deny policy that only backup super users escape; output `vault_project`.
+- **Flows.** A flow's endpoint is created only once its `flow_N_service_attachment` input is set (`count`). The producer side and the attachment URI are the destination team's; the README lists this.
+- **Seed, workflow and README.** `scripts/bootstrap-seed.sh <owner>/<repo>` creates:
+  - the seed project and its APIs;
+  - `lz-infra-manager` with its organization roles and billing user;
+  - a Workload Identity pool and provider whose attribute condition is the repository.
+
+  `.github/workflows/apply.yml` validates every deployment with Terraform 1.5.7, then previews and applies them in order. The README lists the deployments and what is left to a person: enforcing the dry-run perimeters, flow attachments, VPN tunnels, the Interconnect order.
+- **Compliance folders** (e.g. PCI-PROD) now get their own host project, like the other environments.
+- **New check:** a vault bucket name must fit 63 characters.
+- **Verified with real Terraform.** Every deployment of the default design (with a VPN link and a flow) and of the financial-services template passes `terraform validate` with Terraform 1.5.7 and google provider 8.5.0. So does MC-2b's project configuration (DR with network attachment, and every curated service and connection). The tests check every template against the bundled schema.
+- **Deferred:** the IAM deny against impersonation from other environments (MC3-4) waits for Q1. With the wrong principal set it would also block the Workload Identity tokens the deploy workflows use. Until then, environments are kept apart by separate VPCs with no route between them, the dry-run perimeters, and IAM bindings that stay inside each environment.
 
 #### 22.10.9 Decisions and open questions
 
