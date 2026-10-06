@@ -23,8 +23,8 @@ def test_factory_builds_a_port_per_registered_cloud(settings):
 
 
 def test_unknown_cloud_has_no_port(settings):
-    with pytest.raises(NotFoundError, match="No adapter for cloud provider 'azure'"):
-        AdapterFactory().clouds(settings).get("azure")
+    with pytest.raises(NotFoundError, match="No adapter for cloud provider 'oracle'"):
+        AdapterFactory().clouds(settings).get("oracle")
 
 
 def test_cloud_ports_wrap_given_ports(local_aws):

@@ -1,4 +1,5 @@
 from app.adapters.local_aws import LocalAws
+from app.adapters.local_azure import LocalAzure
 from app.adapters.local_gcp import LocalGcp
 from app.adapters.local_github import LocalGitHub
 from app.adapters.ports import CloudPorts, GitHubPort, ProviderPort
@@ -18,7 +19,8 @@ class AdapterFactory:
 
     def __init__(self):
         self._github: dict[str, type[GitHubPort]] = {"local": LocalGitHub}
-        self._clouds: dict[str, dict[str, type[ProviderPort]]] = {"aws": {"local": LocalAws}, "gcp": {"local": LocalGcp}}
+        self._clouds: dict[str, dict[str, type[ProviderPort]]] = {"aws": {"local": LocalAws}, "gcp": {"local": LocalGcp},
+                                                                   "azure": {"local": LocalAzure}}
         self._executors: dict[str, type[ReleaseExecutor]] = {"local": LocalReleaseExecutor}
         # Landing-zone executors per cloud, by mode; a cloud without one cannot apply a landing zone yet.
         self._landing_zone: dict[str, dict[str, type[LandingZoneExecutor]]] = {"aws": {"local": LocalLandingZoneExecutor},

@@ -1,0 +1,52 @@
+from app.errors import ValidationFailedError
+from app.providers.base import CloudProvider, Vocabulary
+
+# Azure's fixed region pairs (geo-redundant storage replicates to the pair); regions without a pair are absent.
+REGION_PAIRS = {
+    "eastus": "westus", "eastus2": "centralus", "centralus": "eastus2", "westus": "eastus", "westus2": "westcentralus",
+    "westcentralus": "westus2", "westus3": "eastus", "northcentralus": "southcentralus",
+    "southcentralus": "northcentralus", "canadacentral": "canadaeast", "canadaeast": "canadacentral",
+    "northeurope": "westeurope", "westeurope": "northeurope", "uksouth": "ukwest", "ukwest": "uksouth",
+    "francecentral": "francesouth", "germanywestcentral": "germanynorth", "swedencentral": "swedensouth",
+    "switzerlandnorth": "switzerlandwest", "norwayeast": "norwaywest", "australiaeast": "australiasoutheast",
+    "australiasoutheast": "australiaeast", "japaneast": "japanwest", "japanwest": "japaneast",
+    "koreacentral": "koreasouth", "southeastasia": "eastasia", "eastasia": "southeastasia",
+    "centralindia": "southindia", "brazilsouth": "southcentralus",
+}
+
+
+class AzureProvider(CloudProvider):
+    id = "azure"
+    name = "Azure"
+    document_file = "main.json"
+
+    def vocabulary(self):
+        return Vocabulary(cloud="Azure", isolation_unit="subscription", hierarchy_node="management group",
+                          iac_document="ARM template", deploy_unit="deployment stack",
+                          preventive_policy="Azure Policy", private_network="VNet",
+                          firewall_group="network security group", landing_zone_service="Azure Landing Zones",
+                          control_catalog="Azure Policy initiatives")
+
+    def default_regions(self):
+        return ("eastus2", "centralus")
+
+    def region_pair(self, region: str) -> str | None:
+        """The region geo-redundant storage replicates to, if the region has a pair (MC4-4)."""
+        return REGION_PAIRS.get(region)
+
+    def network_problems(self, network) -> list[str]:
+        from app.providers.azure.networks import azure_network_problems
+
+        return azure_network_problems(network)
+
+    def project(self):
+        raise ValidationFailedError("Projects on Azure are not available yet.")
+
+    def teardown(self):
+        raise ValidationFailedError("Teardowns on Azure are not available yet.")
+
+    def resources(self):
+        raise ValidationFailedError("Releases on Azure are not available yet.")
+
+    def landing_zone(self):
+        raise ValidationFailedError("The Azure landing zone is not available yet.")

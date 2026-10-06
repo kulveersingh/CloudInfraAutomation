@@ -172,9 +172,9 @@ def test_a_binding_is_created_where_there_was_none(session):
 
     ReferenceDataSeeder(session).seed()
     repository = RegistryRepository(session)
-    repository.bind_account("azure", "pf-payments", "prod", "subscription-1")
+    repository.bind_account("oracle", "pf-payments", "prod", "tenancy-1")
     repository.commit()
-    assert repository.account_for("azure", "pf-payments", "prod") == "subscription-1"
+    assert repository.account_for("oracle", "pf-payments", "prod") == "tenancy-1"
 
 
 def test_a_cloud_without_an_executor_cannot_apply_its_landing_zone(client, monkeypatch):

@@ -1,4 +1,5 @@
 import hashlib
+import uuid
 from typing import ClassVar
 
 from sqlalchemy import inspect, select
@@ -51,6 +52,16 @@ class ReferenceData:
         ("us-east4", "Northern Virginia", True),
         ("us-west1", "Oregon", True),
     )
+    AZURE_REGIONS = (
+        ("centralus", "Central US", True),
+        ("eastus", "East US", True),
+        ("eastus2", "East US 2", True),
+        ("northeurope", "North Europe", True),
+        ("swedencentral", "Sweden Central", False),
+        ("westeurope", "West Europe", True),
+        ("westus", "West US", True),
+    )
+    AZURE_NETWORK_REGIONS = ("eastus2", "centralus")
     GCP_NETWORK_HOST = "cloudinfra-net-host"
     GCP_NETWORK_REGIONS = ("us-east1", "us-east4")
     ACCOUNT_PREFIXES: ClassVar[dict[str, tuple[str, ...]]] = {"pf-payments": ("1", "2", "3", "4", "5"), "pf-retail": ("61", "62", "63", "64", "65"),
@@ -67,8 +78,21 @@ class ReferenceData:
         pairs = [(account, region) for account in accounts for region in self.NETWORK_REGIONS]
         projects = [binding.account_id for binding in self._gcp_bindings()]
         shared = [(project, region) for project in projects for region in self.GCP_NETWORK_REGIONS]
+        subscriptions = [binding.account_id for binding in self._azure_bindings()]
+        spokes = [(subscription, region) for subscription in subscriptions for region in self.AZURE_NETWORK_REGIONS]
         return [*[self._network(account, region, index) for index, (account, region) in enumerate(pairs, start=1)],
-                *[self._shared_vpc(project, region, index) for index, (project, region) in enumerate(shared, start=1)]]
+                *[self._shared_vpc(project, region, index) for index, (project, region) in enumerate(shared, start=1)],
+                *[self._spoke_vnet(subscription, region, index)
+                  for index, (subscription, region) in enumerate(spokes, start=1)]]
+
+    def _spoke_vnet(self, subscription: str, region: str, index: int) -> models.Network:
+        group = f"/subscriptions/{subscription}/resourceGroups/rg-network/providers/Microsoft.Network"
+        vnet = f"{group}/virtualNetworks/vnet-{region}"
+        return models.Network(
+            id=f"net-{subscription}-{region}", provider="azure", name="Spoke VNet", account_id=subscription,
+            region=region, network_ref=vnet, cidr=f"10.{192 + index}.0.0/16",
+            subnet_refs=[f"{vnet}/subnets/functions", f"{vnet}/subnets/endpoints"],
+            firewall_refs=[f"{group}/networkSecurityGroups/nsg-{region}"], is_default=True)
 
     def _shared_vpc(self, project: str, region: str, index: int) -> models.Network:
         host = f"projects/{self.GCP_NETWORK_HOST}"
@@ -87,7 +111,14 @@ class ReferenceData:
             firewall_refs=[f"sg-{digest[4:21]}"], is_default=True)
 
     def account_bindings(self) -> list[models.AccountBinding]:
-        return [*self._aws_bindings(), *self._gcp_bindings()]
+        return [*self._aws_bindings(), *self._gcp_bindings(), *self._azure_bindings()]
+
+    def _azure_bindings(self) -> list[models.AccountBinding]:
+        """One Azure subscription per portfolio and environment, with stable invented GUIDs."""
+        return [models.AccountBinding(provider="azure", environment_id=environment[0], portfolio_id=portfolio_id,
+                                      account_id=str(uuid.uuid5(uuid.NAMESPACE_URL,
+                                                                f"cloudinfra:azure:{portfolio_id}:{environment[0]}")))
+                for portfolio_id in self.ACCOUNT_PREFIXES for environment in self.ENVIRONMENTS]
 
     def _gcp_bindings(self) -> list[models.AccountBinding]:
         """One Google Cloud project per portfolio and environment, e.g. cloudinfra-payments-dev."""
@@ -123,7 +154,9 @@ class ReferenceData:
         return [*[models.Region(provider=DEFAULT_PROVIDER, id=rid, name=name, enabled=enabled)
                   for rid, name, enabled in self.REGIONS],
                 *[models.Region(provider="gcp", id=rid, name=name, enabled=enabled)
-                  for rid, name, enabled in self.GCP_REGIONS]]
+                  for rid, name, enabled in self.GCP_REGIONS],
+                *[models.Region(provider="azure", id=rid, name=name, enabled=enabled)
+                  for rid, name, enabled in self.AZURE_REGIONS]]
 
 
 class ReferenceDataSeeder:

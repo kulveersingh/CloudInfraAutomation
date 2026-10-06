@@ -48,14 +48,14 @@ def test_registry_finds_a_provider_by_id():
 
 
 def test_unknown_provider():
-    with pytest.raises(NotFoundError, match="Unknown cloud provider 'azure'"):
-        ProviderRegistry.default().get("azure")
+    with pytest.raises(NotFoundError, match="Unknown cloud provider 'oracle'"):
+        ProviderRegistry.default().get("oracle")
 
 
 def test_new_providers_register_without_changing_the_core():
     registry = ProviderRegistry.default()
     registry.register(ExampleProvider())
-    assert (registry.has("example"), [provider.id for provider in registry.all()]) == (True, ["aws", "gcp", "example"])
+    assert (registry.has("example"), [provider.id for provider in registry.all()]) == (True, ["aws", "gcp", "azure", "example"])
 
 
 # ---- AWS provider ----
@@ -85,7 +85,7 @@ def test_providers_api(client):
 
 
 def test_regions_belong_to_a_provider(client):
-    assert {region["provider"] for region in client.get("/v1/admin/regions").json()} == {"aws", "gcp"}
+    assert {region["provider"] for region in client.get("/v1/admin/regions").json()} == {"aws", "gcp", "azure"}
 
 
 def test_regions_can_be_listed_per_provider(client):
@@ -110,8 +110,8 @@ def test_requests_default_to_aws(client):
 
 
 def test_unknown_provider_is_rejected(client):
-    response = client.post("/v1/projects:preview", json=request_dict(provider="azure"))
-    assert (response.status_code, response.json()["detail"]) == (422, "Unknown cloud provider 'azure'.")
+    response = client.post("/v1/projects:preview", json=request_dict(provider="oracle"))
+    assert (response.status_code, response.json()["detail"]) == (422, "Unknown cloud provider 'oracle'.")
 
 
 def test_project_row_records_the_provider(client, session_factory):

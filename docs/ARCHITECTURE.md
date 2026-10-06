@@ -1,10 +1,11 @@
 # CloudInfraAutomation — Architecture
 
-**Status:** v2.34, approved; implementation in progress. No code is written until this design is approved.
+**Status:** v2.35, approved; implementation in progress. No code is written until this design is approved.
 **Date:** 2026-10-05
 **Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9). Every solution is **DR-capable**: it can run in one region, as DR (primary active, secondary standby) or as an HA pair (both active), with **any region pair chosen in the UI** (default us-east-1 / us-east-2) (§10).
 
 **Changes in v2:** added the org registry and tagging strategy (§4); permissions based on tags (§4.5–4.8); multi-account, five-environment model (§5); promotion pipeline (§8). Payload, provisioning, security and scaling sections are updated to match.
+**Changes in v2.35:** MC-4a: Azure registered with its vocabulary, region pairs, subscription bindings, VNet checks and local adapter (§22.11 notes).
 **Changes in v2.34:** MC-4 design (§22.11): Azure projects on ARM templates and deployment stacks (a data stack and an app stack per region), federated managed identities, Flex Consumption functions, storage, Cosmos DB and Service Bus with exact-resource role assignments, Event Grid with native prefix filters, what-if release rows, locked immutable vaults and Cosmos exports.
 **Changes in v2.33:** MC-3e: the landing-zone UI picks the cloud and asks, offers and words each cloud's own; landing-zone read-back per cloud; MC-3 complete (§22.10 notes).
 **Changes in v2.32:** MC-3d: applying a Google Cloud landing zone locally fills account bindings, networks and the teardown vault (§22.10 notes).
@@ -4341,6 +4342,19 @@ Deny settings exclude only the deploy identity and the platform's teardown ident
 | **MC-4c** | Provisioning, read-back and Change infrastructure end to end |
 | **MC-4d** | Release rows from what-if and the classifier; teardown inventory, vaulted blob backups and Cosmos exports into the locked vault, restore |
 | **MC-4e** | UI: Azure in the pickers, the pair hint, wording |
+
+**MC-4a implementation notes.**
+- **Provider.** `AzureProvider` (`app/providers/azure/`) is registered third, after AWS and Google Cloud.
+  - Vocabulary: Azure, subscription, management group, ARM template, deployment stack, Azure Policy, VNet, network security group, Azure Landing Zones, Azure Policy initiatives.
+  - Default regions `eastus2`/`centralus`, a pair. `region_pair(region)` gives each region's fixed pair from a table in the provider (`None` for regions without one); MC-4b's storage rule uses it.
+  - Main file `main.json`. Projects, teardowns, releases and the landing zone refuse clearly until their steps.
+- **Networks** (`app/providers/azure/networks.py`):
+  - the subscription id is a GUID;
+  - `network_ref` is a VNet resource id;
+  - every subnet ref is a subnet of that VNet;
+  - `firewall_refs` are network security group ids.
+- **Seed.** Seven Azure regions (Sweden Central disabled). One subscription per portfolio and environment, with stable invented GUIDs (`uuid5` of `cloudinfra:azure:{portfolio}:{environment}`). One spoke VNet per subscription in `eastus2` and `centralus`, with a `functions` and an `endpoints` subnet and an NSG.
+- **Local adapter.** `LocalAzure` records bootstraps under `<state>/azure`. The deploy identity is a user-assigned identity in `rg-{project}-{environment}`, which also applies the templates; `federation` is its (stand-in) client id. `AzureBackupStyle` sends blob backups to `bv-teardown-{region}` in the backup subscription, and Cosmos DB exports to the locked `cloudinfra-teardown` container. `azure_mode` and `azure_backup_subscription` are settings.
 
 #### 22.11.9 Decisions and open questions
 

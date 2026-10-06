@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     github_mode: str = "local"
     aws_mode: str = "local"
     gcp_mode: str = "local"
+    azure_mode: str = "local"
     local_state_dir: str = "var"
     github_owner: str = "acme-platform"
     # Keys that sign the manifest in every generated repository (§21.2). On AWS a Secrets Manager secret injects them;
@@ -30,6 +31,7 @@ class Settings(BaseSettings):
     # Backup account is used; without either, teardowns are refused.
     backup_account_id: str | None = None
     gcp_backup_project: str | None = None  # the Google Cloud vault project (§22.9.5), until the landing zone has one
+    azure_backup_subscription: str | None = None  # the Azure backup subscription (§22.11.6), until the landing zone
     worker_poll_seconds: float = 2.0
     cors_origins: list[str] = ["http://localhost:5173", "http://localhost:8080"]
 
@@ -39,7 +41,7 @@ class Settings(BaseSettings):
 
     def backup_accounts(self) -> dict[str, str | None]:
         """The configured central backup account per cloud provider (on Google Cloud, the vault project)."""
-        return {"aws": self.backup_account_id, "gcp": self.gcp_backup_project}
+        return {"aws": self.backup_account_id, "gcp": self.gcp_backup_project, "azure": self.azure_backup_subscription}
 
     def sqlalchemy_url(self) -> str:
         if self.database_password is None:
