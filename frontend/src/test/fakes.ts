@@ -305,6 +305,17 @@ export const PACK_CATALOG: ControlPackCatalog = {
   ],
 };
 
+/** Google Cloud's implementation of the packs: Org Policy constraints and SCC detectors, nothing proactive. */
+export const GCP_PACK_CATALOG: ControlPackCatalog = {
+  ...PACK_CATALOG,
+  packs: [{ id: "foundation", version: 1, name: "Foundation", description: "Root user and MFA basics.", selectors: ["workloads"],
+    optional: false, controls: [
+      { id: "constraints/iam.disableServiceAccountKeyCreation", name: "Disable service account key creation",
+        behavior: "PREVENTIVE", severity: "HIGH", implementation: "ORG_POLICY", frameworks: [] },
+      { id: "MFA_NOT_ENFORCED", name: "2-step verification not enforced", behavior: "DETECTIVE", severity: "HIGH",
+        implementation: "SCC_DETECTOR", frameworks: [] }] }],
+};
+
 const SAAS_SUMMARY: TemplateSummary = {
   id: "saas", version: 1, name: "SaaS & technology", industry: "Software and technology companies",
   description: "Account-per-tenant SaaS.", frameworks: ["SSAE-18-SOC-2-Oct-2023", "CIS-v8.0"], frameworks_verified: false,

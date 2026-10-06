@@ -18,27 +18,27 @@ describe("PlatformApi landing zone", () => {
 
   it("lists industry templates", async () => {
     const fetcher = respond([]);
-    await new PlatformApi("", fetcher).landingZoneTemplates();
-    expect(fetcher.mock.calls[0][0]).toBe("/v1/admin/landing-zone/templates");
+    await new PlatformApi("", fetcher).landingZoneTemplates("gcp");
+    expect(fetcher.mock.calls[0][0]).toBe("/v1/admin/landing-zone/templates?provider=gcp");
   });
 
   it("reads a template", async () => {
     const fetcher = respond();
-    await new PlatformApi("", fetcher).landingZoneTemplate("saas");
-    expect(fetcher.mock.calls[0][0]).toBe("/v1/admin/landing-zone/templates/saas");
+    await new PlatformApi("", fetcher).landingZoneTemplate("saas", "gcp");
+    expect(fetcher.mock.calls[0][0]).toBe("/v1/admin/landing-zone/templates/saas?provider=gcp");
   });
 
   it("reads back the landing zone repository", async () => {
     const fetcher = respond();
-    await new PlatformApi("", fetcher).landingZoneReadBack();
-    expect(fetcher).toHaveBeenCalledWith("/v1/admin/landing-zone/repository:read-back",
+    await new PlatformApi("", fetcher).landingZoneReadBack("gcp");
+    expect(fetcher).toHaveBeenCalledWith("/v1/admin/landing-zone/repository:read-back?provider=gcp",
       expect.objectContaining({ method: "GET" }));
   });
 
   it("lists control packs", async () => {
     const fetcher = respond();
-    await new PlatformApi("", fetcher).controlPacks();
-    expect(fetcher.mock.calls[0][0]).toBe("/v1/admin/landing-zone/control-packs");
+    await new PlatformApi("", fetcher).controlPacks("gcp");
+    expect(fetcher.mock.calls[0][0]).toBe("/v1/admin/landing-zone/control-packs?provider=gcp");
   });
 
   it("saves a design", async () => {
