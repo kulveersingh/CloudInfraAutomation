@@ -40,7 +40,7 @@ class ExampleProvider(CloudProvider):
 # ---- registry ----
 
 def test_default_registry_has_the_supported_clouds():
-    assert [provider.id for provider in ProviderRegistry.default().all()] == ["aws", "gcp"]
+    assert [provider.id for provider in ProviderRegistry.default().all()] == ["aws", "gcp", "azure"]
 
 
 def test_registry_finds_a_provider_by_id():
@@ -81,7 +81,7 @@ def test_provider_description():
 # ---- API ----
 
 def test_providers_api(client):
-    assert [provider["id"] for provider in client.get("/v1/providers").json()] == ["aws", "gcp"]
+    assert [provider["id"] for provider in client.get("/v1/providers").json()] == ["aws", "gcp", "azure"]
 
 
 def test_regions_belong_to_a_provider(client):

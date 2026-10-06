@@ -1,6 +1,6 @@
 # CloudInfraAutomation — Architecture
 
-**Status:** v2.34, §22.11 (MC-4) for review; implementation in progress. No code is written until this design is approved.
+**Status:** v2.34, approved; implementation in progress. No code is written until this design is approved.
 **Date:** 2026-10-05
 **Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9). Every solution is **DR-capable**: it can run in one region, as DR (primary active, secondary standby) or as an HA pair (both active), with **any region pair chosen in the UI** (default us-east-1 / us-east-2) (§10).
 
@@ -4213,7 +4213,7 @@ The backup-account resolver for Google Cloud reads the applied landing zone's va
 
 ### 22.11 MC-4 in detail: Azure projects
 
-**Status: design for review.**
+**Status: approved (MC4-1…MC4-10 as recommended); implementation in progress.**
 
 **Goal.** A project on Azure goes through the same flows as on AWS and Google Cloud:
 - wizard, preview, provisioning;

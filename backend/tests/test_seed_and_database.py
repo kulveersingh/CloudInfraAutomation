@@ -18,7 +18,7 @@ def reference_counts(session) -> tuple:
 
 
 def test_seed_inserts_reference_data(seeded):
-    assert reference_counts(seeded) == (3, 5, 5, 13, 30)
+    assert reference_counts(seeded) == (3, 5, 5, 20, 45)
 
 
 def test_seed_sets_organization_default(seeded):
@@ -27,7 +27,7 @@ def test_seed_sets_organization_default(seeded):
 
 def test_seed_is_idempotent(seeded):
     ReferenceDataSeeder(seeded).seed()
-    assert reference_counts(seeded) == (3, 5, 5, 13, 30)
+    assert reference_counts(seeded) == (3, 5, 5, 20, 45)
 
 
 def test_account_belongs_to_one_environment_only(seeded):
