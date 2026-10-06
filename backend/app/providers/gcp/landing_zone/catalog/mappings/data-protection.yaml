@@ -1,0 +1,9 @@
+pack: data-protection
+controls:
+- constraints/storage.uniformBucketLevelAccess
+- constraints/sql.restrictPublicIp
+- constraints/sql.restrictAuthorizedNetworks
+- custom.cloudinfraSqlRequireSsl
+- PUBLIC_SQL_INSTANCE
+- SQL_NO_ROOT_PASSWORD
+- BUCKET_POLICY_ONLY_DISABLED

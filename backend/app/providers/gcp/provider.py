@@ -1,4 +1,3 @@
-from app.errors import ValidationFailedError
 from app.providers.base import CloudProvider, Vocabulary
 
 
@@ -43,4 +42,6 @@ class GcpProvider(CloudProvider):
         return TerraformResourceClassifier()
 
     def landing_zone(self):
-        raise ValidationFailedError("The Google Cloud landing zone is not available yet.")
+        from app.providers.gcp.landing_zone.toolkit import gcp_landing_zone
+
+        return gcp_landing_zone()

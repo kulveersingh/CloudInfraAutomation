@@ -1,0 +1,4 @@
+pack: production-resilience
+controls:
+- iam-deny/protect-production
+- SQL_BACKUP_DISABLED

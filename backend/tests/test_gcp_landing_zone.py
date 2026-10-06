@@ -2,6 +2,7 @@
 the control catalog and pack mappings, checks and advice, and templates proposing on Google Cloud."""
 
 import hashlib
+from dataclasses import replace
 
 import pytest
 from pydantic import ValidationError
@@ -17,7 +18,11 @@ from tests.lz_factories import CATALOG, add_ou, answers_dict
 from tests.test_lz_api import ALEX, BASE, RILEY
 
 ORGANIZATION_ID = "123456789012"
-H4 = hashlib.sha1(ORGANIZATION_ID.encode()).hexdigest()[:4]
+
+
+def pid(name: str) -> str:
+    """A project id: the name kept to 25 characters, plus 4 hex of a hash of the organization id and the name."""
+    return f"{name[:25].rstrip('-')}-{hashlib.sha1(f'{ORGANIZATION_ID}:{name}'.encode()).hexdigest()[:4]}"
 PROVIDER_ANSWERS = {"organization_id": ORGANIZATION_ID, "billing_account": "01ABCD-23EF45-67GH89",
                     "domain": "acme.example"}
 KEY_CREATION = "constraints/iam.disableServiceAccountKeyCreation"
@@ -72,7 +77,7 @@ def test_google_cloud_answers_are_checked(change):
 # ---- folders and projects ----
 
 def test_project_ids_carry_an_organization_hash():
-    assert projects("PROD") == [f"acme-payments-prod-{H4}", f"acme-retail-prod-{H4}", f"acme-net-prod-{H4}"]
+    assert projects("PROD") == [pid("acme-payments-prod"), pid("acme-retail-prod"), pid("acme-net-prod")]
 
 
 def test_projects_have_no_email():
@@ -80,16 +85,16 @@ def test_projects_have_no_email():
 
 
 def test_the_security_folder_holds_logging_and_security_projects():
-    assert projects("Security") == [f"acme-logging-{H4}", f"acme-security-{H4}", f"acme-security-tooling-{H4}"]
+    assert projects("Security") == [pid("acme-logging"), pid("acme-security"), pid("acme-security-tooling")]
 
 
 def test_the_infrastructure_folder_holds_the_hub_shared_services_vault_and_monitoring():
-    assert projects("Infrastructure") == [f"acme-net-hub-{H4}", f"acme-shared-services-{H4}", f"acme-vault-{H4}",
-                                          f"acme-monitoring-{H4}"]
+    assert projects("Infrastructure") == [pid("acme-net-hub"), pid("acme-shared-services"), pid("acme-vault"),
+                                          pid("acme-monitoring")]
 
 
 def test_each_workload_environment_has_its_shared_vpc_host_project():
-    assert (projects("DEV")[-1], f"acme-net-sandbox-{H4}" in projects("Sandbox")) == (f"acme-net-dev-{H4}", False)
+    assert (projects("DEV")[-1], pid("acme-net-sandbox") in projects("Sandbox")) == (pid("acme-net-dev"), False)
 
 
 def test_nothing_is_created_by_a_google_cloud_service():
@@ -147,9 +152,19 @@ def test_at_most_three_hundred_folders_under_one_parent():
     assert problems(built) == ["Folder 'PROD' has 301 folders; Google Cloud allows 300 under one parent."]
 
 
-def test_a_long_project_id_is_a_problem():
-    found = problems(design(organization_name="acme-holdings-group"))
-    assert f"Project id 'acme-holdings-group-shared-services-{H4}' is 40 characters; Google Cloud allows 6 to 30." in found
+def test_long_names_are_kept_to_thirty_characters_and_stay_distinct():
+    ids = [account.name for account in design(organization_name="acme-holdings-group",
+                                                environment_ids=["sandbox", "dev", "perf", "stage", "prod"]).walk_accounts()]
+    assert (max(map(len, ids)), len(set(ids)) == len(ids), pid("acme-holdings-group-payments-perf") in ids) == (
+        30, True, True)
+
+
+def test_project_ids_are_checked():
+    built = design()
+    built.ou_named("PROD").accounts.append(replace(built.ou_named("PROD").accounts[0], name="short"))
+    built.ou_named("DEV").accounts.append(replace(built.ou_named("PROD").accounts[0]))
+    assert problems(built) == ["Project id 'short' is 5 characters; Google Cloud allows 6 to 30.",
+                               f"Project id '{pid('acme-payments-prod')}' is used twice."]
 
 
 def test_recommended_answers_have_no_problems():
@@ -159,7 +174,7 @@ def test_recommended_answers_have_no_problems():
 # ---- advice ----
 
 def test_detective_controls_need_premium_or_enterprise():
-    assert advice(design(provider_answers={"scc_tier": "standard"})) == [
+    assert advice(design(provider_answers={"scc_tier": "standard"}, network={"egress": "local"})) == [
         ("Detective controls are not deployed: Security Command Center Standard has no postures. "
          "Choose Premium or Enterprise to deploy them.")]
 

@@ -53,22 +53,23 @@ class LandingZoneService:
     """The landing zone workflow: propose → draft → submit → approve (commit + apply + register networks) or reject."""
 
     def __init__(self, repository: LandingZoneRepository, registry: RegistryService, networks: NetworkService,
-                 github: GitHubPort, executor: LandingZoneExecutor, owner: str, signer: ManifestSigner):
+                 github: GitHubPort, executors: dict[str, LandingZoneExecutor], owner: str,
+                 signer: ManifestSigner):
         self._repository = repository
         self._registry = registry
         self._networks = networks
         self._github = github
-        self._executor = executor
+        self._executors = executors
         self._owner = owner
         self._sealer = ManifestSealer(signer)
         self._policy = LandingZonePolicy()
         self._providers = ProviderRegistry.default()
 
     @classmethod
-    def for_session(cls, session: Session, github: GitHubPort, executor: LandingZoneExecutor, owner: str,
+    def for_session(cls, session: Session, github: GitHubPort, executors: dict[str, LandingZoneExecutor], owner: str,
                     signer: ManifestSigner) -> "LandingZoneService":
         return cls(LandingZoneRepository(session), RegistryService.for_session(session),
-                   NetworkService.for_session(session), github, executor, owner, signer)
+                   NetworkService.for_session(session), github, executors, owner, signer)
 
     def propose(self, request: LandingZoneRequest, actor: Actor) -> dict:
         self._policy.require_admin(actor)
@@ -98,7 +99,8 @@ class LandingZoneService:
             template = TemplateRegistry.default().get(template_id)
         except CatalogError as error:
             raise NotFoundError(str(error)) from error
-        return {**self._template_summary(template, provider), "answers": template.answers, "edits": template.edits}
+        return {**self._template_summary(template, provider), "answers": template.answers_for(provider),
+                "edits": template.edits}
 
     def control_packs(self, actor: Actor, provider: str = DEFAULT_PROVIDER) -> dict:
         self._policy.require_admin(actor)
@@ -144,9 +146,10 @@ class LandingZoneService:
     def approve(self, design_id: uuid.UUID, actor: Actor, comment: str) -> dict:
         record = self._in_status(design_id, DesignStatus.PENDING_APPROVAL)
         self._policy.require_second_admin(actor, record)
+        executor = self._executor(record.provider)
         design = self._design_of(record)
         record.commit_sha = self._commit(design, record, actor)
-        outputs = self._executor.apply(design)
+        outputs = executor.apply(design)
         self._register_networks(design, outputs)
         record.status, record.decided_by, record.decision_comment = DesignStatus.APPLIED, actor.name, comment
         repository = self._toolkit(record.provider).repository_name
@@ -172,6 +175,12 @@ class LandingZoneService:
         if not self._providers.has(provider):
             raise ValidationFailedError(unknown_provider(provider))
         return self._providers.get(provider).landing_zone()
+
+    def _executor(self, provider: str) -> LandingZoneExecutor:
+        if provider not in self._executors:
+            name = self._providers.get(provider).vocabulary().cloud
+            raise ValidationFailedError(f"Applying a {name} landing zone is not available yet.")
+        return self._executors[provider]
 
     def _check_provider_answers(self, request: LandingZoneRequest) -> None:
         """What only this cloud asks must be valid before anything is designed with it."""
@@ -210,7 +219,7 @@ class LandingZoneService:
         primary, secondary = self._providers.get(provider).default_regions()
         answers = LandingZoneAnswers.model_validate({
             "organization_name": PREVIEW_ORGANIZATION, "provider_answers": toolkit.preview_answers,
-            "home_region": primary, "governed_regions": [primary, secondary], **template.answers})
+            "home_region": primary, "governed_regions": [primary, secondary], **template.answers_for(provider)})
         design = self._design(answers, TreeEditor.parse(template.edits), provider)
         enabled = [item for items in toolkit.resolver().resolve(design).controls.values() for item in items]
         distinct = {item.control.id: item.control.behavior for item in enabled}

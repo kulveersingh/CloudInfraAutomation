@@ -27,10 +27,9 @@ def answers(**overrides) -> LandingZoneAnswers:
 
 def aws_designer():
     """The designer with AWS's account naming (names plus emails), as the AWS landing zone uses it."""
-    from app.landing_zone.designer import LandingZoneDesigner
     from app.providers.aws.provider import AwsProvider
 
-    return LandingZoneDesigner.default(AwsProvider().landing_zone().namer)
+    return AwsProvider().landing_zone().designer()
 
 
 def edited(edits: list[dict], **overrides):

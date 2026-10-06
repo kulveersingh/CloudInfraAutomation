@@ -4,10 +4,9 @@ from abc import ABC, abstractmethod
 import yaml
 
 from app.landing_zone.design import LandingZoneDesign, OrgCatalog, OuNode
-from app.landing_zone.designer import network_host_suffix
 from app.landing_zone.diagram import OuDiagramRenderer
-from app.landing_zone.edits import TreeEditor
-from app.providers.aws.landing_zone.answers import root_detail
+from app.landing_zone.document import design_document
+from app.providers.aws.landing_zone.answers import network_host_suffix, root_detail
 from app.providers.aws.landing_zone.cloudformation.accounts import AccountsStack
 from app.providers.aws.landing_zone.cloudformation.backup import BackupStack
 from app.providers.aws.landing_zone.cloudformation.base import StackContext, StackRenderer
@@ -44,10 +43,7 @@ class StackFiles(BundleFile):
 
 class DesignJson(BundleFile):
     def render(self, context):
-        design = context.design
-        document = {"answers": design.answers.model_dump(mode="json"), "edits": TreeEditor.dump(design.edits),
-                    "ous": [_ou_json(ou) for ou in design.root_ous]}
-        return {"design.json": json.dumps(document, indent=2) + "\n"}
+        return {"design.json": json.dumps(design_document(context.design), indent=2) + "\n"}
 
 
 class DiagramFiles(BundleFile):
@@ -282,11 +278,6 @@ def _control_row(enabled) -> str:
     control = enabled.control
     return (f"| `{control.id}` | {control.name} | {control.behavior} | {control.severity} | {', '.join(enabled.packs)} "
             f"| {', '.join(control.frameworks) or 'not refreshed'} |")
-
-
-def _ou_json(ou: OuNode) -> dict:
-    return {"name": ou.name, "kind": ou.kind, "environment": ou.environment,
-            "accounts": [account.name for account in ou.accounts], "children": [_ou_json(child) for child in ou.children]}
 
 
 def _tree_lines(ou: OuNode, depth: int) -> list[str]:

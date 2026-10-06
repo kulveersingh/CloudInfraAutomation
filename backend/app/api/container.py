@@ -28,7 +28,7 @@ class ServiceContainer:
         adapters = AdapterFactory()
         github, signer = adapters.github(settings), ManifestSigner.from_settings(settings)
         self.releases = ReleaseService.for_session(session, adapters.release_executor(settings))
-        self.landing_zone = LandingZoneService.for_session(session, github, adapters.landing_zone_executor(settings),
+        self.landing_zone = LandingZoneService.for_session(session, github, adapters.landing_zone_executors(settings),
                                                            settings.github_owner, signer)
         self.read_back = RepositoryReader.default(github, settings.github_owner, signer)
         self.project_changes = ProjectChangeService.for_session(session, github, settings.github_owner)

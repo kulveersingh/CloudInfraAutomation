@@ -1,0 +1,4 @@
+pack: strict-residency
+controls:
+- constraints/gcp.resourceLocations
+- custom.cloudinfraDenyMultiRegionStorage

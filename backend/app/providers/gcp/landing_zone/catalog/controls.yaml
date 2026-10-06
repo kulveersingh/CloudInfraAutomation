@@ -1,0 +1,230 @@
+# Google Cloud control snapshot: the Org Policy constraints, IAM deny policies and Security Command Center
+# detectors the Google Cloud pack mappings use (§22.10.4). Detector names and framework mappings are confirmed
+# by the refresh script with credentials; until then frameworks show as intended alignment (unverified).
+source: ''
+mappings_refreshed: null
+prerequisites:
+  proactive: null
+controls:
+  constraints/iam.disableServiceAccountKeyCreation:
+    name: Disable service account key creation
+    behavior: PREVENTIVE
+    severity: HIGH
+    implementation: ORG_POLICY
+  constraints/iam.disableServiceAccountKeyUpload:
+    name: Disable service account key upload
+    behavior: PREVENTIVE
+    severity: HIGH
+    implementation: ORG_POLICY
+  constraints/iam.allowedPolicyMemberDomains:
+    name: Domain restricted sharing
+    behavior: PREVENTIVE
+    severity: HIGH
+    implementation: ORG_POLICY
+  constraints/iam.automaticIamGrantsForDefaultServiceAccounts:
+    name: Disable automatic IAM grants for default service accounts
+    behavior: PREVENTIVE
+    severity: MEDIUM
+    implementation: ORG_POLICY
+  constraints/storage.publicAccessPrevention:
+    name: Enforce public access prevention
+    behavior: PREVENTIVE
+    severity: HIGH
+    implementation: ORG_POLICY
+  constraints/compute.skipDefaultNetworkCreation:
+    name: Skip default network creation
+    behavior: PREVENTIVE
+    severity: MEDIUM
+    implementation: ORG_POLICY
+  constraints/compute.vmExternalIpAccess:
+    name: Define allowed external IPs for VM instances (none)
+    behavior: PREVENTIVE
+    severity: HIGH
+    implementation: ORG_POLICY
+  MFA_NOT_ENFORCED:
+    name: 2-step verification not enforced
+    behavior: DETECTIVE
+    severity: HIGH
+    implementation: SCC_DETECTOR
+  PUBLIC_BUCKET_ACL:
+    name: Publicly accessible bucket
+    behavior: DETECTIVE
+    severity: HIGH
+    implementation: SCC_DETECTOR
+  OPEN_SSH_PORT:
+    name: Firewall open to SSH from the internet
+    behavior: DETECTIVE
+    severity: HIGH
+    implementation: SCC_DETECTOR
+  OPEN_RDP_PORT:
+    name: Firewall open to RDP from the internet
+    behavior: DETECTIVE
+    severity: HIGH
+    implementation: SCC_DETECTOR
+  ADMIN_SERVICE_ACCOUNT:
+    name: Service account with admin roles
+    behavior: DETECTIVE
+    severity: MEDIUM
+    implementation: SCC_DETECTOR
+  USER_MANAGED_SERVICE_ACCOUNT_KEY:
+    name: User-managed service account key
+    behavior: DETECTIVE
+    severity: MEDIUM
+    implementation: SCC_DETECTOR
+  constraints/storage.uniformBucketLevelAccess:
+    name: Enforce uniform bucket-level access
+    behavior: PREVENTIVE
+    severity: MEDIUM
+    implementation: ORG_POLICY
+  constraints/sql.restrictPublicIp:
+    name: Restrict public IP access on Cloud SQL instances
+    behavior: PREVENTIVE
+    severity: HIGH
+    implementation: ORG_POLICY
+  constraints/sql.restrictAuthorizedNetworks:
+    name: Restrict authorized networks on Cloud SQL instances
+    behavior: PREVENTIVE
+    severity: MEDIUM
+    implementation: ORG_POLICY
+  custom.cloudinfraSqlRequireSsl:
+    name: Require SSL for Cloud SQL connections
+    behavior: PREVENTIVE
+    severity: HIGH
+    implementation: CUSTOM_CONSTRAINT
+  PUBLIC_SQL_INSTANCE:
+    name: Cloud SQL instance open to the internet
+    behavior: DETECTIVE
+    severity: HIGH
+    implementation: SCC_DETECTOR
+  SQL_NO_ROOT_PASSWORD:
+    name: Cloud SQL instance without a root password
+    behavior: DETECTIVE
+    severity: HIGH
+    implementation: SCC_DETECTOR
+  BUCKET_POLICY_ONLY_DISABLED:
+    name: Uniform bucket-level access disabled
+    behavior: DETECTIVE
+    severity: MEDIUM
+    implementation: SCC_DETECTOR
+  constraints/compute.requireOsLogin:
+    name: Require OS Login
+    behavior: PREVENTIVE
+    severity: MEDIUM
+    implementation: ORG_POLICY
+  constraints/compute.disableSerialPortAccess:
+    name: Disable VM serial port access
+    behavior: PREVENTIVE
+    severity: MEDIUM
+    implementation: ORG_POLICY
+  constraints/compute.requireShieldedVm:
+    name: Shielded VMs
+    behavior: PREVENTIVE
+    severity: MEDIUM
+    implementation: ORG_POLICY
+  constraints/compute.restrictVpcPeering:
+    name: Restrict VPC peering usage
+    behavior: PREVENTIVE
+    severity: MEDIUM
+    implementation: ORG_POLICY
+  constraints/compute.restrictSharedVpcHostProjects:
+    name: Restrict Shared VPC host projects
+    behavior: PREVENTIVE
+    severity: MEDIUM
+    implementation: ORG_POLICY
+  OPEN_FIREWALL:
+    name: Firewall open to the internet
+    behavior: DETECTIVE
+    severity: HIGH
+    implementation: SCC_DETECTOR
+  FLOW_LOGS_DISABLED:
+    name: VPC flow logs disabled
+    behavior: DETECTIVE
+    severity: LOW
+    implementation: SCC_DETECTOR
+  DEFAULT_NETWORK:
+    name: Default network exists
+    behavior: DETECTIVE
+    severity: MEDIUM
+    implementation: SCC_DETECTOR
+  LEGACY_NETWORK:
+    name: Legacy network exists
+    behavior: DETECTIVE
+    severity: HIGH
+    implementation: SCC_DETECTOR
+  iam-deny/protect-logging:
+    name: Deny deleting log sinks and log buckets outside the security admins
+    behavior: PREVENTIVE
+    severity: HIGH
+    implementation: IAM_DENY
+  AUDIT_LOGGING_DISABLED:
+    name: Audit logging disabled
+    behavior: DETECTIVE
+    severity: LOW
+    implementation: SCC_DETECTOR
+  BUCKET_LOGGING_DISABLED:
+    name: Bucket access logging disabled
+    behavior: DETECTIVE
+    severity: LOW
+    implementation: SCC_DETECTOR
+  LOCKED_RETENTION_POLICY_NOT_SET:
+    name: Log bucket without a locked retention policy
+    behavior: DETECTIVE
+    severity: MEDIUM
+    implementation: SCC_DETECTOR
+  constraints/gcp.restrictNonCmekServices:
+    name: Restrict which services may create resources without CMEK
+    behavior: PREVENTIVE
+    severity: HIGH
+    implementation: ORG_POLICY
+  constraints/gcp.restrictCmekCryptoKeyProjects:
+    name: Restrict which projects may supply CMEK keys
+    behavior: PREVENTIVE
+    severity: MEDIUM
+    implementation: ORG_POLICY
+  KMS_KEY_NOT_ROTATED:
+    name: KMS key not rotated
+    behavior: DETECTIVE
+    severity: MEDIUM
+    implementation: SCC_DETECTOR
+  KMS_PUBLIC_KEY:
+    name: Publicly accessible KMS key
+    behavior: DETECTIVE
+    severity: HIGH
+    implementation: SCC_DETECTOR
+  iam-deny/protect-production:
+    name: Deny deleting projects and data stores outside the release executor
+    behavior: PREVENTIVE
+    severity: HIGH
+    implementation: IAM_DENY
+  SQL_BACKUP_DISABLED:
+    name: Cloud SQL backups disabled
+    behavior: DETECTIVE
+    severity: MEDIUM
+    implementation: SCC_DETECTOR
+  constraints/gcp.resourceLocations:
+    name: Resource location restriction
+    behavior: PREVENTIVE
+    severity: HIGH
+    implementation: ORG_POLICY
+    parameters:
+    - AllowedRegions
+  custom.cloudinfraDenyMultiRegionStorage:
+    name: Deny dual- and multi-region buckets and databases
+    behavior: PREVENTIVE
+    severity: MEDIUM
+    implementation: CUSTOM_CONSTRAINT
+  constraints/compute.restrictLoadBalancerCreationForTypes:
+    name: Restrict load balancer types to internal ones
+    behavior: PREVENTIVE
+    severity: MEDIUM
+    implementation: ORG_POLICY
+  PUBLIC_IP_ADDRESS:
+    name: VM with a public IP address
+    behavior: DETECTIVE
+    severity: HIGH
+    implementation: SCC_DETECTOR
+  SSL_NOT_ENFORCED:
+    name: Cloud SQL without SSL enforced
+    behavior: DETECTIVE
+    severity: HIGH
+    implementation: SCC_DETECTOR

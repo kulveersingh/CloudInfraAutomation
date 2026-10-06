@@ -1,0 +1,15 @@
+pack: foundation
+controls:
+- constraints/iam.disableServiceAccountKeyCreation
+- constraints/iam.disableServiceAccountKeyUpload
+- constraints/iam.allowedPolicyMemberDomains
+- constraints/iam.automaticIamGrantsForDefaultServiceAccounts
+- constraints/storage.publicAccessPrevention
+- constraints/compute.skipDefaultNetworkCreation
+- constraints/compute.vmExternalIpAccess
+- MFA_NOT_ENFORCED
+- PUBLIC_BUCKET_ACL
+- OPEN_SSH_PORT
+- OPEN_RDP_PORT
+- ADMIN_SERVICE_ACCOUNT
+- USER_MANAGED_SERVICE_ACCOUNT_KEY

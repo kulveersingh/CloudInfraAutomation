@@ -19,7 +19,8 @@ class AdapterFactory:
         self._github: dict[str, type[GitHubPort]] = {"local": LocalGitHub}
         self._clouds: dict[str, dict[str, type[ProviderPort]]] = {"aws": {"local": LocalAws}, "gcp": {"local": LocalGcp}}
         self._executors: dict[str, type[ReleaseExecutor]] = {"local": LocalReleaseExecutor}
-        self._landing_zone: dict[str, type[LandingZoneExecutor]] = {"local": LocalLandingZoneExecutor}
+        # Landing-zone executors per cloud, by mode; a cloud without one cannot apply a landing zone yet.
+        self._landing_zone: dict[str, dict[str, type[LandingZoneExecutor]]] = {"aws": {"local": LocalLandingZoneExecutor}}
 
     def register_github(self, mode: str, adapter_class: type[GitHubPort]) -> None:
         self._github[mode] = adapter_class
@@ -38,8 +39,10 @@ class AdapterFactory:
     def release_executor(self, settings: Settings) -> ReleaseExecutor:
         return self._adapter_class(self._executors, settings.aws_mode, "release executor").from_settings(settings)
 
-    def landing_zone_executor(self, settings: Settings) -> LandingZoneExecutor:
-        return self._adapter_class(self._landing_zone, settings.aws_mode, "landing zone executor").from_settings(settings)
+    def landing_zone_executors(self, settings: Settings) -> dict[str, LandingZoneExecutor]:
+        return {provider: self._adapter_class(classes, settings.cloud_mode(provider),
+                                              f"{provider} landing zone executor").from_settings(settings)
+                for provider, classes in self._landing_zone.items()}
 
     def _adapter_class(self, classes: dict, mode: str, label: str):
         if mode not in classes:

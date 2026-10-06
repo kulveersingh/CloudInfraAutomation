@@ -1,10 +1,11 @@
 # CloudInfraAutomation — Architecture
 
-**Status:** v2.29, approved; implementation in progress. No code is written until this design is approved.
+**Status:** v2.30, approved; implementation in progress. No code is written until this design is approved.
 **Date:** 2026-10-05
 **Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9). Every solution is **DR-capable**: it can run in one region, as DR (primary active, secondary standby) or as an HA pair (both active), with **any region pair chosen in the UI** (default us-east-1 / us-east-2) (§10).
 
 **Changes in v2:** added the org registry and tagging strategy (§4); permissions based on tags (§4.5–4.8); multi-account, five-environment model (§5); promotion pipeline (§8). Payload, provisioning, security and scaling sections are updated to match.
+**Changes in v2.30:** MC-3b: the Google Cloud landing-zone design: provider answers, project ids, folders and projects, the control snapshot and pack mappings, checks and advice, templates per cloud (§22.10 notes).
 **Changes in v2.29:** MC-3a: neutral landing-zone answers with provider answers, pack mappings per cloud, unit naming from the provider, one landing zone per cloud (§22.10 notes).
 **Changes in v2.28:** MC-3 design (§22.10): the Google Cloud landing zone (folders, project factory, Org Policy/IAM deny/SCC pack mappings, Shared VPC with an NCC star topology, VPC Service Controls per environment, vault project), and the neutral split of landing-zone answers and control packs.
 **Changes in v2.27:** MC-2e: the UI picks the cloud (wizard, Admin regions and networks), follows the chosen cloud's regions, catalog, type search, networks, words and main file, and shows preview notes; MC-2 is complete (§22.9.7 notes).
@@ -4104,6 +4105,26 @@ The backup-account resolver for Google Cloud reads the applied landing zone's va
   - The design list (`?provider=`) and read-back (`?provider=`, AWS by default) are per cloud.
   - The backup-account fallback reads only the AWS landing zone's Backup account.
 - **The core holds no cloud words.** A test keeps "Control Tower", "CloudFormation" and `created_by_control_tower` out of `app/landing_zone`. The one place that still names `management_email` is the migration of stored AWS answers.
+
+**MC-3b implementation notes.**
+- **Provider answers.** `GcpLandingZoneAnswers` (`app/providers/gcp/landing_zone/answers.py`) checks:
+  - the organization id (digits) and the billing account (`XXXXXX-XXXXXX-XXXXXX`, uppercase letters and digits);
+  - the domain, and each named group's address;
+  - the SCC tier (Premium by default).
+
+  A group not named defaults to `gcp-<role>@<domain>`.
+- **Project ids (refines MC3-7).** `"{org}-{suffix}"` is kept to 25 characters, plus 4 hex characters of a hash of the organization id **and the full name**. Ids always fit 30 characters, and two long names that share their first 25 characters still get different ids. The plain `{org}-{suffix}-{h4}` exceeded 30 characters for the healthcare template's platform projects (for example `payments-core-validation`). `ProjectIds` still checks 6–30 characters and that no id repeats.
+- **Units.** A `UnitCatalog` per cloud names the Security and Infrastructure units, the network host per environment and the nodes the cloud's service creates.
+  - AWS keeps Log Archive, Audit and the five shared accounts.
+  - Google Cloud has `logging`, `security` (+ `security-tooling`) and `net-hub`, `shared-services`, `vault`, `monitoring` (no Identity project), plus a `net-{environment}` host project in each workload environment folder (not in Sandbox). Nothing is created by a service.
+  - The compliance child folders (e.g. PCI-PROD) get their host projects with the network deployment in MC-3c.
+- **Controls.** The Google Cloud snapshot (`app/providers/gcp/landing_zone/catalog/controls.yaml`) holds 44 controls: Org Policy constraints, two custom constraints, two IAM deny policies and Security Command Center detectors. Every pack maps to some of them, and none is proactive. Every control goes on the top-most targeted folder (`AllInherited`).
+- **Checks and advice.**
+  - Checks: folder depth ≤ 10, ≤ 300 folders per parent, project ids.
+  - Advice: detective controls need Premium/Enterprise; no central egress; strict residency vs dual-region storage; a project-quota reminder above 25 projects.
+- **Templates** carry `regions: {aws, gcp}` where they fix regions (public sector: us-east1/us-west1; EU sovereignty: europe-west3/europe-west1). Every template proposes on Google Cloud with no problems.
+- **Bundle so far.** `landing-zone-gcp-infra` renders `design.json` (shared with AWS through `app/landing_zone/document.py`), the diagrams (root: "Organization {id}", "Seed project {org}-lz-seed") and `docs/controls.md`. The deployments come with MC-3c.
+- **Applying.** Landing-zone executors are per cloud (`AdapterFactory.landing_zone_executors`, picked by each cloud's mode). Google Cloud has none until MC-3d, so approving a Google Cloud design is refused before anything is committed: "Applying a Google Cloud landing zone is not available yet."
 
 #### 22.10.9 Decisions and open questions
 

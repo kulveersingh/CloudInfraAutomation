@@ -10,6 +10,7 @@ from app.landing_zone.catalog.packs import PackRegistry
 from app.landing_zone.catalog.resolver import PackResolver
 from app.landing_zone.design import LandingZoneDesign, OrgCatalog
 from app.landing_zone.designer import LandingZoneDesigner, NamerFactory
+from app.landing_zone.naming import UnitCatalog
 from app.landing_zone.validation import DesignWarning
 
 
@@ -44,9 +45,10 @@ class LandingZoneToolkit:
     controls: ProviderControls
     preview_answers: dict
     root_detail: Callable[[LandingZoneAnswers], list[str]]
+    units: UnitCatalog
 
     def designer(self) -> LandingZoneDesigner:
-        return LandingZoneDesigner.default(self.namer)
+        return LandingZoneDesigner.default(self.namer, self.units)
 
     def resolver(self) -> PackResolver:
         return PackResolver(PackRegistry.default(), self.controls)

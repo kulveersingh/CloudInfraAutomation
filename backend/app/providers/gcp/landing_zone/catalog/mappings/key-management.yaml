@@ -1,0 +1,6 @@
+pack: key-management
+controls:
+- constraints/gcp.restrictNonCmekServices
+- constraints/gcp.restrictCmekCryptoKeyProjects
+- KMS_KEY_NOT_ROTATED
+- KMS_PUBLIC_KEY

@@ -4,12 +4,10 @@ from dataclasses import replace
 
 from app.landing_zone.answers import EnvironmentAnswer, LandingZoneAnswers
 from app.landing_zone.design import AccountPlan, LandingZoneDesign, OrgCatalog, OuNode
-from app.landing_zone.naming import UnitNamer
+from app.landing_zone.naming import UnitCatalog, UnitNamer
 
 NamerFactory = Callable[[LandingZoneAnswers], UnitNamer]
 
-INFRASTRUCTURE_ACCOUNTS = {"network": "network", "shared_services": "shared-services", "identity": "identity",
-                           "backup": "backup", "monitoring": "monitoring"}
 OPTIONAL_OUS = {"exceptions": ("Exceptions", "exceptions"), "suspended": ("Suspended", "suspended"),
                 "individual_business_users": ("Business Users", "business_users")}
 
@@ -25,16 +23,16 @@ class AnswerHandler(ABC):
 
 class SecurityHandler(AnswerHandler):
     def contribute(self, answers, catalog, design):
-        namer = design.namer
-        suffixes = ["log-archive", "audit", *(["security-tooling"] if answers.security_tooling else [])]
-        design.root_ous.append(OuNode(key="security", name="Security", kind="security", created_by_service=True,
-                                      accounts=[namer.fixed(suffix) for suffix in suffixes]))
+        units = design.units
+        suffixes = [*units.security, *([units.security_tooling] if answers.security_tooling else [])]
+        design.root_ous.append(OuNode(key="security", name="Security", kind="security",
+                                      created_by_service="security" in units.created_by_service,
+                                      accounts=[design.namer.fixed(suffix) for suffix in suffixes]))
 
 
 class InfrastructureHandler(AnswerHandler):
     def contribute(self, answers, catalog, design):
-        namer = design.namer
-        accounts = [namer.fixed(suffix) for key, suffix in INFRASTRUCTURE_ACCOUNTS.items()
+        accounts = [design.namer.fixed(suffix) for key, suffix in design.units.infrastructure.items()
                     if key in answers.infrastructure]
         design.root_ous.append(OuNode(key="infrastructure", name="Infrastructure", kind="infrastructure",
                                       accounts=accounts))
@@ -45,17 +43,20 @@ class EnvironmentHandler(AnswerHandler):
 
     def contribute(self, answers, catalog, design):
         environments = answers.environments()
-        design.root_ous += [self._ou(answers, catalog, environment, design.namer) for environment in environments
+        design.root_ous += [self._ou(answers, catalog, environment, design) for environment in environments
                             if environment.tier == "sandbox"]
-        workloads = [self._ou(answers, catalog, environment, design.namer) for environment in environments
+        workloads = [self._ou(answers, catalog, environment, design) for environment in environments
                      if environment.tier != "sandbox"]
         design.root_ous += workloads if answers.grouping == "separate" else self._parents(workloads)
 
     def _ou(self, answers: LandingZoneAnswers, catalog: OrgCatalog, environment: EnvironmentAnswer,
-            namer: UnitNamer) -> OuNode:
+            design: LandingZoneDesign) -> OuNode:
+        sandbox = environment.tier == "sandbox"
+        host = None if sandbox else design.units.host_for(environment.name)
+        accounts = self._accounts(answers, catalog, environment, design.namer)
         return OuNode(key=environment.id, name=environment.name, kind="environment", environment=environment.id,
-                      tier=environment.tier, created_by_service=environment.tier == "sandbox",
-                      accounts=self._accounts(answers, catalog, environment, namer))
+                      tier=environment.tier, created_by_service=sandbox and "sandbox" in design.units.created_by_service,
+                      accounts=[*accounts, *([design.namer.fixed(host)] if host else [])])
 
     def _accounts(self, answers, catalog, environment, namer: UnitNamer) -> list[AccountPlan]:
         suffix = environment.name.lower()
@@ -110,18 +111,19 @@ class OptionalOuHandler(AnswerHandler):
 
 
 class LandingZoneDesigner:
-    def __init__(self, handlers: list[AnswerHandler], namer: NamerFactory):
+    def __init__(self, handlers: list[AnswerHandler], namer: NamerFactory, units: UnitCatalog):
         self._handlers = handlers
         self._namer = namer
+        self._units = units
 
     @classmethod
-    def default(cls, namer: NamerFactory) -> "LandingZoneDesigner":
-        """The standard questions, with a cloud's way of naming the units it vends."""
+    def default(cls, namer: NamerFactory, units: UnitCatalog) -> "LandingZoneDesigner":
+        """The standard questions, with a cloud's units and way of naming them."""
         return cls([SecurityHandler(), InfrastructureHandler(), EnvironmentHandler(), ComplianceHandler(),
-                    AutomationsHandler(), PolicyStagingHandler(), OptionalOuHandler()], namer)
+                    AutomationsHandler(), PolicyStagingHandler(), OptionalOuHandler()], namer, units)
 
     def design(self, answers: LandingZoneAnswers, catalog: OrgCatalog) -> LandingZoneDesign:
-        design = LandingZoneDesign(answers=answers, namer=self._namer(answers))
+        design = LandingZoneDesign(answers=answers, namer=self._namer(answers), units=self._units)
         for handler in self._handlers:
             handler.contribute(answers, catalog, design)
         self._record_domains(design)
@@ -131,14 +133,6 @@ class LandingZoneDesigner:
         """Each account remembers its isolation domain, so a later move out of it is caught."""
         for ou in design.walk():
             ou.accounts = [replace(account, domain=ou.isolation_domain) for account in ou.accounts]
-
-
-def network_host_suffix(answers: LandingZoneAnswers) -> str | None:
-    """The account that owns the shared VPCs: Network, else Shared Services, else the management account (None)."""
-    for key in ("network", "shared_services"):
-        if key in answers.infrastructure:
-            return INFRASTRUCTURE_ACCOUNTS[key]
-    return None
 
 
 def _short(registry_id: str) -> str:

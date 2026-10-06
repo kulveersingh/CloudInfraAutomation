@@ -1,0 +1,3 @@
+pack: data-residency
+controls:
+- constraints/gcp.resourceLocations

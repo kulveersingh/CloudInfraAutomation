@@ -23,13 +23,18 @@ class IndustryTemplate:
     answers: dict
     edits: list[dict]
     order: int = UNORDERED
+    regions: dict[str, dict] | None = None  # the home and governed regions per cloud, for templates that fix them
+
+    def answers_for(self, provider: str) -> dict:
+        """The template's answers, with the regions it fixes on that cloud."""
+        return {**self.answers, **(self.regions or {}).get(provider, {})}
 
     @classmethod
     def from_document(cls, document: dict) -> "IndustryTemplate":
         return cls(id=document["id"], version=document["version"], name=document["name"],
                    industry=document["industry"], description=document["description"],
                    frameworks=tuple(document["frameworks"]), answers=document["answers"], edits=document["edits"],
-                   order=document.get("order", UNORDERED))
+                   order=document.get("order", UNORDERED), regions=document.get("regions"))
 
 
 class TemplateRegistry:

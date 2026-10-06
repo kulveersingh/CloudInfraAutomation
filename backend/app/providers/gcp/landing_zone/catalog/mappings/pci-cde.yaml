@@ -1,0 +1,8 @@
+pack: pci-cde
+controls:
+- constraints/compute.restrictLoadBalancerCreationForTypes
+- constraints/compute.vmExternalIpAccess
+- constraints/sql.restrictPublicIp
+- PUBLIC_IP_ADDRESS
+- SSL_NOT_ENFORCED
+- OPEN_FIREWALL

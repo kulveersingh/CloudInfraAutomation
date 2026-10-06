@@ -1,0 +1,6 @@
+pack: logging-integrity
+controls:
+- iam-deny/protect-logging
+- AUDIT_LOGGING_DISABLED
+- BUCKET_LOGGING_DISABLED
+- LOCKED_RETENTION_POLICY_NOT_SET

@@ -75,6 +75,7 @@ class LandingZoneDesign:
     edits: list = field(default_factory=list)  # the TreeEdits applied, in order
     provider: str = "aws"
     namer: object = None  # the cloud's UnitNamer, which the tree editor also uses for the units it adds
+    units: object = None  # the cloud's UnitCatalog
 
     def walk(self) -> Iterator[OuNode]:
         yield from _walk(self.root_ous)

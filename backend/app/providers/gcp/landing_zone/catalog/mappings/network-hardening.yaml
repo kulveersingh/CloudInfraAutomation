@@ -1,0 +1,11 @@
+pack: network-hardening
+controls:
+- constraints/compute.requireOsLogin
+- constraints/compute.disableSerialPortAccess
+- constraints/compute.requireShieldedVm
+- constraints/compute.restrictVpcPeering
+- constraints/compute.restrictSharedVpcHostProjects
+- OPEN_FIREWALL
+- FLOW_LOGS_DISABLED
+- DEFAULT_NETWORK
+- LEGACY_NETWORK
