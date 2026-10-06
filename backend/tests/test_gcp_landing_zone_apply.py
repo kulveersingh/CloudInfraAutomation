@@ -187,3 +187,11 @@ def test_a_cloud_without_an_executor_cannot_apply_its_landing_zone(client, monke
     response = client.post(f"{BASE}/designs/{design_id}:approve", json={"comment": "ok"}, headers=RILEY)
     assert (response.status_code, response.json()["detail"]) == (
         422, "Applying a Google Cloud landing zone is not available yet.")
+
+
+def test_the_applied_google_cloud_landing_zone_reads_back_from_its_repository(client):
+    applied = approved(client)
+    result = client.get(f"{BASE}/repository:read-back", params={"provider": "gcp"}, headers=ALEX).json()
+    assert (result["verified"], result["findings"], result["commit_sha"], result["request"]["provider"],
+            result["request"]["answers"]["provider_answers"]["organization_id"]) == (
+        True, [], applied["commit_sha"], "gcp", "123456789012")

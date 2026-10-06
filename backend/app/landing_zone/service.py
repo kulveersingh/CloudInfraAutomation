@@ -117,7 +117,7 @@ class LandingZoneService:
         self._policy.require_admin(actor)
         record = require(self._repository.latest_applied(provider),
                          NotFoundError("No landing zone has been applied yet."))
-        return LandingZoneSubject(record, self._render)
+        return LandingZoneSubject(record, self._render, self._toolkit(provider).repository_name)
 
     def designs(self, actor: Actor, provider: str | None = None) -> list[dict]:
         self._policy.require_admin(actor)

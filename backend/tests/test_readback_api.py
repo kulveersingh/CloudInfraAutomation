@@ -75,7 +75,7 @@ def test_landing_zone_read_back_returns_the_applied_design(client, applied):
 
 def test_landing_zone_read_back_returns_answers_and_edits(client, applied):
     request = client.get(READ_BACK, headers=ALEX).json()["request"]
-    assert request == {"answers": applied["answers"], "edits": applied["edits"]}
+    assert request == {"provider": "aws", "answers": applied["answers"], "edits": applied["edits"]}
 
 
 def test_landing_zone_read_back_follows_the_latest_version(client, applied):

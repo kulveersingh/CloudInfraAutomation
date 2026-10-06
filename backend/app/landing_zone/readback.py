@@ -14,14 +14,16 @@ GENERATOR = Generator(name="cloudinfra-landing-zone", version="0.1.0")
 
 
 class LandingZoneSubject(ReadBackSubject):
-    """The applied landing zone design, generated into landing-zone-infra."""
+    """A cloud's applied landing zone design, generated into that cloud's landing-zone repository."""
 
     kind = KIND
     input_file = INPUT_FILE
 
-    def __init__(self, record: models.LandingZoneDesignRecord, render: Callable[[LandingZoneRequest], dict[str, str]]):
+    def __init__(self, record: models.LandingZoneDesignRecord, render: Callable[[LandingZoneRequest], dict[str, str]],
+                 repository: str = REPOSITORY_NAME):
         self._record = record
         self._render = render
+        self._repository = repository
 
     @property
     def id(self):
@@ -33,20 +35,22 @@ class LandingZoneSubject(ReadBackSubject):
 
     @property
     def repository(self):
-        return REPOSITORY_NAME
+        return self._repository
 
     @property
     def recorded_commit(self):
         return self._record.commit_sha
 
     def recorded_request(self):
-        return {"answers": self._record.answers, "edits": self._record.edits}
+        return {"provider": self._record.provider, "answers": self._record.answers, "edits": self._record.edits}
 
     def parse_input(self, text):
+        """design.json holds the answers and edits; the cloud is the record's (each cloud has its own repository)."""
         document = json.loads(text)
-        request = LandingZoneRequest.model_validate({"answers": document.get("answers"),
+        request = LandingZoneRequest.model_validate({"provider": self._record.provider, "answers": document.get("answers"),
                                                      "edits": document.get("edits")})
-        return {"answers": request.answers.model_dump(mode="json"), "edits": TreeEditor.dump(request.edits)}
+        return {"provider": request.provider, "answers": request.answers.model_dump(mode="json"),
+                "edits": TreeEditor.dump(request.edits)}
 
     def regenerate(self, request):
         return self._render(LandingZoneRequest.model_validate(request))
