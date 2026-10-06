@@ -15,7 +15,7 @@ from app.landing_zone.edits import TreeEditor
 from app.landing_zone.validation import DesignAdvisor
 from app.providers.gcp.provider import GcpProvider
 from tests.lz_factories import CATALOG, add_ou, answers_dict
-from tests.test_lz_api import ALEX, BASE, RILEY
+from tests.test_lz_api import ALEX, BASE
 
 ORGANIZATION_ID = "123456789012"
 
@@ -248,11 +248,3 @@ def test_template_summaries_count_google_cloud_controls(client):
     summaries = client.get(f"{BASE}/templates", params={"provider": "gcp"}, headers=ALEX).json()
     saas = next(summary for summary in summaries if summary["id"] == "saas")
     assert (saas["control_counts"]["PROACTIVE"], saas["control_counts"]["PREVENTIVE"] > 0) == (0, True)
-
-
-def test_applying_a_google_cloud_landing_zone_is_not_available_yet(client):
-    design_id = client.post(f"{BASE}/designs", json=gcp_request(network={"egress": "local"}), headers=ALEX).json()["id"]
-    client.post(f"{BASE}/designs/{design_id}:submit", headers=ALEX)
-    response = client.post(f"{BASE}/designs/{design_id}:approve", json={"comment": "ok"}, headers=RILEY)
-    assert (response.status_code, response.json()["detail"]) == (
-        422, "Applying a Google Cloud landing zone is not available yet.")

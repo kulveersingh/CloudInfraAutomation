@@ -1,10 +1,11 @@
 from app.db import models
 from app.landing_zone.repository import LandingZoneRepository
 from app.teardown.backup_account import BackupAccountResolver
+from tests.lz_factories import answers_dict
 
 
 def record(status: str, version: int, accounts: dict | None) -> models.LandingZoneDesignRecord:
-    return models.LandingZoneDesignRecord(version=version, answers={"organization_name": "acme"}, edits=[],
+    return models.LandingZoneDesignRecord(version=version, answers=answers_dict(), edits=[],
                                           status=status, created_by="alex", accounts=accounts)
 
 
