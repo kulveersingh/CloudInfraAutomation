@@ -1,10 +1,11 @@
 # CloudInfraAutomation — Architecture
 
-**Status:** v2.42, approved; implementation in progress. No code is written until this design is approved. No code is written until this design is approved.
+**Status:** v2.43, approved; implementation in progress. No code is written until this design is approved. No code is written until this design is approved.
 **Date:** 2026-10-05
 **Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9). Every solution is **DR-capable**: it can run in one region, as DR (primary active, secondary standby) or as an HA pair (both active), with **any region pair chosen in the UI** (default us-east-1 / us-east-2) (§10).
 
 **Changes in v2:** added the org registry and tagging strategy (§4); permissions based on tags (§4.5–4.8); multi-account, five-environment model (§5); promotion pipeline (§8). Payload, provisioning, security and scaling sections are updated to match.
+**Changes in v2.43:** MC-5c: applying an Azure landing zone locally fills subscription bindings, spoke networks and the backup subscription; an Azure project provisions into the vended subscriptions and tears down into the landing zone's vault (§22.12 notes).
 **Changes in v2.42:** MC-5b: the Azure landing-zone stacks (management groups and custom policies, subscription aliases, policy and role assignments, central logs and Defender, hubs and spokes with Azure Firewall and private DNS, the locked vault), seed script, workflow and README; subscriptions are vended before policies are assigned, so later stacks can target them (refines §22.12.5) (§22.12 notes).
 **Changes in v2.41:** MC-5 design approved; MC-5a: the Azure landing-zone design with provider answers, subscription naming, management groups and subscriptions, an Azure Policy control snapshot built from Azure/azure-policy with a mapping for every pack, checks, advice and template regions (§22.12 notes).
 **Changes in v2.40:** MC-5 design (§22.12): the Azure landing zone as management groups under the organization's own, subscription vending against an EA or MCA billing scope, Azure Policy pack mappings (all inherited, audit policies always deployed), hub-and-spoke with Azure Firewall and central private DNS, a backup subscription with locked vaults and Resource Guard, deployment stacks at management-group scope; proposed for approval.
@@ -4652,6 +4653,15 @@ Two packs that assign the same definition to one management group are merged int
 - **Verified with Bicep.** The default design and one with a VPN, a declared flow, a Premium firewall and Defender plans: every stack decompiles and builds with Bicep CLI 0.48.1 with no errors.
   - The network and vault stacks build as modules (one per nested deployment). Inline, the decompiler merges nested templates into one file and reports duplicate names.
   - The other stacks build inline. As modules, the decompiler crashes on identical nested templates.
+
+**MC-5c implementation notes.**
+- **Executor.** `LocalAzureLandingZone` (`app/providers/azure/landing_zone/local_executor.py`) is registered for `azure` in `AdapterFactory.landing_zone_executors`. It records each run under `<state>/azure`.
+- **Subscription ids.** Azure assigns them when an alias is created, so the stand-in gives each subscription a stable GUID: `uuid5` of `cloudinfra:azure:{tenant}:{alias}`.
+- **Bindings.** Subscriptions vended per portfolio become that portfolio's binding for their environment, through the neutral `_register_accounts`, as on Google Cloud.
+- **Networks.** Each spoke (a workload subscription in a governed region) is that subscription's default network. Its ref is the VNet in `rg-network`, its subnets `functions` then `endpoints`, its firewall ref the NSG, and its range the one `lz-network` deploys. Every network passes the MC-4a Azure network checks, so attached MC-4 projects use the spokes with no change.
+- **Vault.** The backup subscription is the Azure teardown vault through `BackupAccountResolver`; `azure_backup_subscription` stays an override. A design without one reports no vault.
+- **End to end, locally.** Approve, then apply. An Azure project then previews into the vended subscription and its spokes, provisions, and its teardown backs up into the landing zone's backup subscription. The applied landing zone reads back verified from `landing-zone-azure-infra`.
+- `has_landing_zone` stays false until MC-5d puts Azure in the landing-zone UI.
 
 #### 22.12.9 Decisions and open questions
 
