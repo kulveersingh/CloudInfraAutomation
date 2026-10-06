@@ -1,23 +1,23 @@
 import { useState } from "react";
 import type { FlowException, LandingZoneAnswers } from "../../../api/types";
+import { cloudText } from "../../../landingZone/cloudText";
 import type { LandingZoneDraft, LandingZoneEnvironment } from "../../../landingZone/LandingZoneDraft";
 import { Checkbox, Choices, type Choice } from "../controls";
 import type { StepProps } from "./StepProps";
 
 type Network = LandingZoneAnswers["network"];
 
-const TOPOLOGIES: Array<Choice<boolean>> = [
-  { value: true, title: "Hub and spoke (Transit Gateway)", recommended: true,
-    description: "A central Network account; each environment VPC attaches to the hub." },
-  { value: false, title: "Isolated VPCs only", description: "No hub. Environments can't reach Shared Services privately." },
-];
-
 export function NetworkStep({ draft, onChange }: StepProps) {
   const { network } = draft.toAnswers();
+  const text = cloudText(draft.provider);
+  const topologies: Array<Choice<boolean>> = [
+    { value: true, title: text.hubTitle, recommended: true, description: text.hubDescription },
+    { value: false, title: "Isolated VPCs only", description: text.isolatedDescription },
+  ];
   const change = (update: Partial<Network>) => onChange(draft.withNetwork(update));
   return (
     <>
-      <Choices label="Topology" choices={TOPOLOGIES} selected={network.hub} onSelect={(hub) => change({ hub })} />
+      <Choices label="Topology" choices={topologies} selected={network.hub} onSelect={(hub) => change({ hub })} />
       <div className="grid3">
         <div className="field">
           <label htmlFor="lz-cidr">Organization CIDR</label>
@@ -27,8 +27,7 @@ export function NetworkStep({ draft, onChange }: StepProps) {
         <div className="field">
           <label htmlFor="lz-egress">Internet egress</label>
           <select id="lz-egress" value={network.egress} onChange={(event) => change({ egress: event.target.value as Network["egress"] })}>
-            <option value="central">Central egress VPC (recommended)</option>
-            <option value="local">NAT in each VPC</option>
+            {text.egressOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
         </div>
         <div className="field">
@@ -37,11 +36,11 @@ export function NetworkStep({ draft, onChange }: StepProps) {
                   onChange={(event) => change({ on_premises: event.target.value as Network["on_premises"] })}>
             <option value="none">None</option>
             <option value="vpn">Site-to-site VPN</option>
-            <option value="dedicated">Direct Connect</option>
+            <option value="dedicated">{text.dedicatedLink}</option>
           </select>
         </div>
       </div>
-      <Checkbox label="Inspect traffic with AWS Network Firewall" hint="Required for any cross-environment flow"
+      <Checkbox label={text.inspection} hint="Required for any cross-environment flow"
                 checked={network.inspection} onChange={(inspection) => change({ inspection })} />
       <FlowExceptions draft={draft} onChange={onChange} />
     </>
@@ -74,8 +73,7 @@ function FlowExceptions({ draft, onChange }: FlowExceptionsProps) {
         </tbody>
       </table>
       <FlowForm environments={environments} onAdd={(flow) => onChange(draft.withFlow(flow))} />
-      <span className="hint">None by default: environments are fully isolated. Each exception is a single port, routed
-        only through the inspection VPC, and is approved with the design.</span>
+      <span className="hint">{cloudText(draft.provider).flowsHint}</span>
     </div>
   );
 }

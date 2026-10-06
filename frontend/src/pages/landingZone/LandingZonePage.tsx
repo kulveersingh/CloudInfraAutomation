@@ -2,7 +2,8 @@ import { useState, type ReactNode } from "react";
 import type { Identity, IndustryTemplate, LandingZoneDesign, LandingZoneReadBack, Vocabulary } from "../../api/types";
 import { StatusMessage, type SaveStatus } from "../../components/Notices";
 import { LandingZoneDraft } from "../../landingZone/LandingZoneDraft";
-import { useVocabulary } from "../../providers/VocabularyContext";
+import { cloudText } from "../../landingZone/cloudText";
+import { capitalized, useVocabulary } from "../../providers/VocabularyContext";
 import { ApprovalsPanel } from "./ApprovalsPanel";
 import { AccountsStep } from "./steps/AccountsStep";
 import { ControlsStep } from "./steps/ControlsStep";
@@ -13,22 +14,29 @@ import { OrganizationStep } from "./steps/OrganizationStep";
 import { ReviewStep } from "./steps/ReviewStep";
 import { SandboxStep } from "./steps/SandboxStep";
 import { SecurityStep } from "./steps/SecurityStep";
-import { LANDING_ZONE_REPOSITORY, StartStep } from "./steps/StartStep";
+import { StartStep } from "./steps/StartStep";
 import type { StepProps } from "./steps/StepProps";
 
 const PLATFORM_ADMIN = "platform-admin";
 
-const STEPS: Array<{ label: string; title: (words: Vocabulary) => string; render: (props: StepProps) => ReactNode }> = [
-  { label: "Start", title: () => "Start from a template", render: (props) => <StartStep {...props} /> },
-  { label: "Organization", title: () => "Organization", render: (props) => <OrganizationStep {...props} /> },
-  { label: "Environments", title: () => "Environments", render: (props) => <EnvironmentsStep {...props} /> },
-  { label: "Accounts", title: () => "Accounts per environment", render: (props) => <AccountsStep {...props} /> },
-  { label: "Security & compliance", title: () => "Security (Cyber) and compliance", render: (props) => <SecurityStep {...props} /> },
-  { label: "Shared infrastructure", title: () => "Shared infrastructure", render: (props) => <InfrastructureStep {...props} /> },
-  { label: "Network", title: () => "Network", render: (props) => <NetworkStep {...props} /> },
-  { label: "Sandbox & other OUs", title: () => "Sandbox and other OUs", render: (props) => <SandboxStep {...props} /> },
-  { label: "Controls", title: (words) => words.control_catalog, render: (props) => <ControlsStep {...props} /> },
-  { label: "Review", title: () => "Review the proposed structure", render: (props) => <ReviewStep {...props} /> },
+const units = (words: Vocabulary) => `${capitalized(words.isolation_unit)}s`;
+
+/** The questionnaire's steps, labelled in the chosen cloud's words (accounts or projects, OUs or folders). */
+const STEPS: Array<{ label: (words: Vocabulary) => string; title: (words: Vocabulary) => string;
+  render: (props: StepProps) => ReactNode }> = [
+  { label: () => "Start", title: () => "Start from a template", render: (props) => <StartStep {...props} /> },
+  { label: () => "Organization", title: () => "Organization", render: (props) => <OrganizationStep {...props} /> },
+  { label: () => "Environments", title: () => "Environments", render: (props) => <EnvironmentsStep {...props} /> },
+  { label: units, title: (words) => `${units(words)} per environment`, render: (props) => <AccountsStep {...props} /> },
+  { label: () => "Security & compliance", title: () => "Security (Cyber) and compliance",
+    render: (props) => <SecurityStep {...props} /> },
+  { label: () => "Shared infrastructure", title: () => "Shared infrastructure",
+    render: (props) => <InfrastructureStep {...props} /> },
+  { label: () => "Network", title: () => "Network", render: (props) => <NetworkStep {...props} /> },
+  { label: (words) => `Sandbox & other ${words.hierarchy_node}s`, title: (words) => `Sandbox and other ${words.hierarchy_node}s`,
+    render: (props) => <SandboxStep {...props} /> },
+  { label: () => "Controls", title: (words) => words.control_catalog, render: (props) => <ControlsStep {...props} /> },
+  { label: () => "Review", title: () => "Review the proposed structure", render: (props) => <ReviewStep {...props} /> },
 ];
 
 type Tab = "design" | "approvals";
@@ -77,8 +85,8 @@ function LandingZoneWorkspace() {
 }
 
 function Questionnaire({ onSubmitted }: { onSubmitted: (design: LandingZoneDesign) => void }) {
-  const words = useVocabulary();
   const [draft, setDraft] = useState(LandingZoneDraft.initial);
+  const words = useVocabulary(draft.provider);
   const [template, setTemplate] = useState<IndustryTemplate>();
   const [step, setStep] = useState(0);
   const [loaded, setLoaded] = useState<LandingZoneReadBack>();
@@ -99,9 +107,9 @@ function Questionnaire({ onSubmitted }: { onSubmitted: (design: LandingZoneDesig
       {loaded && <LoadedFromRepository readBack={loaded} />}
       <nav className="steps" aria-label="Questionnaire steps">
         {STEPS.map((item, index) => (
-          <button key={item.label} className={`step ${index === step ? "on" : ""}`} aria-current={index === step ? "step" : undefined}
+          <button key={index} className={`step ${index === step ? "on" : ""}`} aria-current={index === step ? "step" : undefined}
                   onClick={() => setStep(index)}>
-            {item.label}
+            {item.label(words)}
           </button>
         ))}
       </nav>
@@ -117,10 +125,11 @@ function Questionnaire({ onSubmitted }: { onSubmitted: (design: LandingZoneDesig
 }
 
 function LoadedFromRepository({ readBack }: { readBack: LandingZoneReadBack }) {
+  const repository = cloudText(readBack.request?.provider ?? "aws").repository;
   return (
     <>
       <div role="status" className="notice ok">
-        Loaded design v{readBack.design.revision} from {LANDING_ZONE_REPOSITORY} at {readBack.commit_sha?.slice(0, 7)}.
+        Loaded design v{readBack.design.revision} from {repository} at {readBack.commit_sha?.slice(0, 7)}.
       </div>
       {readBack.findings.map((finding) => <div key={finding.check} className="notice warn">{finding.message}</div>)}
     </>

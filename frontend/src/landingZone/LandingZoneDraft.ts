@@ -1,9 +1,9 @@
+import { cloudText } from "./cloudText";
 import type {
-  ControlsProfile, EnvironmentPreset, FlowException, IndustryTemplate, LandingZoneAnswers, LandingZoneRequest, TreeEdit,
+  CloudProviderInfo, ControlsProfile, EnvironmentPreset, FlowException, IndustryTemplate, LandingZoneAnswers, LandingZoneRequest, TreeEdit,
 } from "../api/types";
 
 const ORGANIZATION_NAME_PATTERN = /^[a-z][a-z0-9-]{1,30}$/;
-const EMAIL_PATTERN = /^[^@\s+]+@[^@\s]+\.[^@\s]+$/;
 const MINIMUM_GOVERNED_REGIONS = 2;
 
 export type EnvironmentTier = "sandbox" | "nonprod" | "prod";
@@ -46,7 +46,8 @@ const COMPARED_ANSWERS: Array<[keyof LandingZoneAnswers, string]> = [
  * Defaults are the platform's recommendations; the edits survive answer changes and are replayed by the platform.
  */
 export class LandingZoneDraft {
-  private constructor(private readonly answers: LandingZoneAnswers, private readonly treeEdits: TreeEdit[]) {}
+  private constructor(private readonly answers: LandingZoneAnswers, private readonly treeEdits: TreeEdit[],
+                      readonly provider: string = "aws") {}
 
   static initial(): LandingZoneDraft {
     return new LandingZoneDraft({
@@ -63,7 +64,8 @@ export class LandingZoneDraft {
 
   /** A design read back from the repository; answers it predates take the recommendations. */
   static fromRequest(request: LandingZoneRequest): LandingZoneDraft {
-    return new LandingZoneDraft({ ...LandingZoneDraft.initial().answers, ...request.answers }, request.edits);
+    return new LandingZoneDraft({ ...LandingZoneDraft.initial().answers, ...request.answers }, request.edits,
+      request.provider ?? "aws");
   }
 
   static environmentCatalog(): LandingZoneEnvironment[] {
@@ -72,9 +74,25 @@ export class LandingZoneDraft {
 
   /** The template's answers and OU edits on top of the recommendations, keeping the organization already entered. */
   withTemplate(template: IndustryTemplate): LandingZoneDraft {
-    const { answers } = LandingZoneDraft.initial().with({ ...template.answers,
-      template: { id: template.id, version: template.version } }).keepingOrganization(this);
-    return new LandingZoneDraft(answers, template.edits);
+    const { answers } = LandingZoneDraft.initial().keepingOrganization(this);
+    return new LandingZoneDraft({ ...answers, ...template.answers, template: { id: template.id, version: template.version } },
+      template.edits, this.provider);
+  }
+
+  /** Another cloud: its own answers (empty) and default regions; the organization name and the rest carry over. */
+  withProvider(provider: CloudProviderInfo): LandingZoneDraft {
+    if (provider.id === this.provider) return this;
+    const { primary, secondary } = provider.default_regions;
+    return new LandingZoneDraft({ ...this.answers, provider_answers: { ...cloudText(provider.id).emptyAnswers },
+      home_region: primary, governed_regions: [primary, secondary] }, this.treeEdits, provider.id);
+  }
+
+  withProviderAnswer(name: string, value: string): LandingZoneDraft {
+    return this.with({ provider_answers: { ...this.answers.provider_answers, [name]: value } });
+  }
+
+  providerAnswer(name: string): string {
+    return String(this.answers.provider_answers[name] ?? "");
   }
 
   fromScratch(): LandingZoneDraft {
@@ -90,15 +108,15 @@ export class LandingZoneDraft {
   }
 
   with(change: Partial<LandingZoneAnswers>): LandingZoneDraft {
-    return new LandingZoneDraft({ ...this.answers, ...change }, this.treeEdits);
+    return new LandingZoneDraft({ ...this.answers, ...change }, this.treeEdits, this.provider);
   }
 
   withEdit(edit: TreeEdit): LandingZoneDraft {
-    return new LandingZoneDraft(this.answers, [...this.treeEdits, edit]);
+    return new LandingZoneDraft(this.answers, [...this.treeEdits, edit], this.provider);
   }
 
   withoutEdit(index: number): LandingZoneDraft {
-    return new LandingZoneDraft(this.answers, this.treeEdits.filter((_, position) => position !== index));
+    return new LandingZoneDraft(this.answers, this.treeEdits.filter((_, position) => position !== index), this.provider);
   }
 
   edits(): TreeEdit[] {
@@ -179,14 +197,15 @@ export class LandingZoneDraft {
 
   /** Checks the browser can make; the platform validates the rest when it proposes the structure. */
   problems(): string[] {
-    const { organization_name, governed_regions, home_region } = this.answers;
-    const checks: Array<[boolean, string]> = [
-      [!ORGANIZATION_NAME_PATTERN.test(organization_name), "Organization name: 2–31 lowercase letters, digits or hyphens."],
-      [!EMAIL_PATTERN.test(this.managementEmail()), "Enter the management account email."],
+    const { organization_name, governed_regions, home_region, provider_answers } = this.answers;
+    const name = ORGANIZATION_NAME_PATTERN.test(organization_name)
+      ? [] : ["Organization name: 2–31 lowercase letters, digits or hyphens."];
+    const regions: Array<[boolean, string]> = [
       [governed_regions.length < MINIMUM_GOVERNED_REGIONS, "Choose at least two governed regions."],
       [!governed_regions.includes(home_region), "The home region must be a governed region."],
     ];
-    return checks.filter(([failed]) => failed).map(([, message]) => message);
+    return [...name, ...cloudText(this.provider).answerProblems(provider_answers),
+      ...regions.filter(([failed]) => failed).map(([, message]) => message)];
   }
 
   toAnswers(): LandingZoneAnswers {
@@ -194,7 +213,7 @@ export class LandingZoneDraft {
   }
 
   toRequest(): LandingZoneRequest {
-    return { answers: this.answers, edits: this.treeEdits };
+    return { provider: this.provider, answers: this.answers, edits: this.treeEdits };
   }
 
   private withEnvironments(ids: string[]) {
@@ -205,8 +224,11 @@ export class LandingZoneDraft {
     return this.with({ environment_ids: ordered, environment_names: Object.fromEntries(names) }).withNetwork({ flows });
   }
 
+  /** The organization name, the cloud and its answers and regions carry over to a template or a fresh start. */
   private keepingOrganization(source: LandingZoneDraft) {
-    return this.withOrganization(source.answers.organization_name, source.managementEmail());
+    const { organization_name, provider_answers, home_region, governed_regions } = source.answers;
+    return new LandingZoneDraft({ ...this.answers, organization_name, provider_answers, home_region, governed_regions },
+      this.treeEdits, source.provider);
   }
 }
 

@@ -1,3 +1,5 @@
+import { cloudText } from "../../../landingZone/cloudText";
+import { useVocabulary } from "../../../providers/VocabularyContext";
 import { Checkbox } from "../controls";
 import type { StepProps } from "./StepProps";
 
@@ -6,12 +8,12 @@ const COMPLIANCE_SCOPES = ["PCI", "HIPAA", "GxP"];
 
 export function SecurityStep({ draft, onChange }: StepProps) {
   const { security_tooling, log_retention_days, compliance } = draft.toAnswers();
+  const text = cloudText(draft.provider);
+  const words = useVocabulary(draft.provider);
   return (
     <>
-      <p className="notice">There is always exactly one Security OU, created by Control Tower. It holds the Log Archive and
-        Audit accounts; Audit is the delegated administrator for GuardDuty, Security Hub, Inspector and Macie.</p>
-      <Checkbox label="Add a Security Tooling account" checked={security_tooling}
-                hint="Separate account for SIEM forwarding, incident response tools and forensics"
+      <p className="notice">{text.securityNotice}</p>
+      <Checkbox label={`Add a Security Tooling ${words.isolation_unit}`} checked={security_tooling} hint={text.securityTooling}
                 onChange={(checked) => onChange(draft.with({ security_tooling: checked }))} />
       <div className="field">
         <label htmlFor="lz-retention">Central log retention</label>
@@ -31,8 +33,7 @@ export function SecurityStep({ draft, onChange }: StepProps) {
             </label>
           ))}
         </div>
-        <span className="hint">Each scope gets its own OU with STAGE and PROD child OUs, stricter controls and its Security
-          Hub standard.</span>
+        <span className="hint">{text.complianceHint}</span>
       </div>
     </>
   );

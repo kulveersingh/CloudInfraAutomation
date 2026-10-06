@@ -503,6 +503,7 @@ export interface OuInfo {
 }
 
 export interface LandingZoneRequest {
+  provider?: string;
   answers: LandingZoneAnswers;
   edits: TreeEdit[];
 }
@@ -566,10 +567,10 @@ export interface Identity {
 }
 
 export interface PlatformApiPort {
-  landingZoneTemplates(): Promise<TemplateSummary[]>;
-  landingZoneTemplate(templateId: string): Promise<IndustryTemplate>;
-  controlPacks(): Promise<ControlPackCatalog>;
-  landingZoneReadBack(): Promise<LandingZoneReadBack>;
+  landingZoneTemplates(provider: string): Promise<TemplateSummary[]>;
+  landingZoneTemplate(templateId: string, provider: string): Promise<IndustryTemplate>;
+  controlPacks(provider: string): Promise<ControlPackCatalog>;
+  landingZoneReadBack(provider: string): Promise<LandingZoneReadBack>;
   proposeLandingZone(request: LandingZoneRequest): Promise<LandingZoneProposal>;
   createLandingZoneDesign(request: LandingZoneRequest): Promise<LandingZoneDesign>;
   landingZoneDesigns(): Promise<LandingZoneDesign[]>;

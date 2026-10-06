@@ -2,6 +2,7 @@ import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { Identity, PlatformApiPort } from "../../api/types";
+import { cloudText } from "../../landingZone/cloudText";
 import { LandingZoneDraft } from "../../landingZone/LandingZoneDraft";
 import { fakeApi, GCP_PACK_CATALOG, GCP_PROVIDER, READ_BACK } from "../../test/fakes";
 import { renderWithApi } from "../../test/render";
@@ -144,5 +145,28 @@ describe("the landing zone's cloud", () => {
   it("choosing the same cloud keeps the draft", () => {
     const draft = LandingZoneDraft.initial();
     expect(draft.withProvider({ ...GCP_PROVIDER, id: "aws" })).toBe(draft);
+  });
+
+  it("deploys detective controls on Premium", async () => {
+    renderPage(fakeApi({ controlPacks: vi.fn().mockResolvedValue(GCP_PACK_CATALOG) }));
+    await chooseGoogleCloud();
+    await goTo("Controls");
+    expect([await screen.findByText(/Google Cloud has no proactive controls/),
+      screen.queryByText(/Detective controls are not deployed/)]).toEqual([expect.anything(), null]);
+  });
+
+  it("reads back a design saved before designs named their cloud as AWS's", async () => {
+    const { provider: _provider, ...older } = READ_BACK.request!;
+    renderPage(fakeApi({ landingZoneReadBack: vi.fn().mockResolvedValue({ ...READ_BACK, request: older }) }));
+    await user().click(await screen.findByRole("button", { name: /Edit the current landing zone/ }));
+    expect(await screen.findByText(/from landing-zone-infra at/)).toBeInTheDocument();
+  });
+
+  it("an answer the cloud hasn't been given is empty", () => {
+    expect(LandingZoneDraft.initial().providerAnswer("organization_id")).toBe("");
+  });
+
+  it("a cloud without its own wording uses AWS's", () => {
+    expect(cloudText("azure").repository).toBe("landing-zone-infra");
   });
 });

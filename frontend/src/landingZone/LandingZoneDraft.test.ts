@@ -93,7 +93,7 @@ describe("LandingZoneDraft", () => {
   });
 
   it("starts with no tree edits", () => {
-    expect(named().toRequest()).toEqual({ answers: named().toAnswers(), edits: [] });
+    expect(named().toRequest()).toEqual({ provider: "aws", answers: named().toAnswers(), edits: [] });
   });
 
   it("records tree edits in order", () => {

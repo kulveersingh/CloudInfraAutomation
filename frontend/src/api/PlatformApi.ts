@@ -34,16 +34,20 @@ export class PlatformApi implements PlatformApiPort {
     this.actorHeaders = { "X-Actor": identity.name, "X-Roles": identity.roles.join(",") };
   }
 
-  landingZoneTemplates() { return this.send<TemplateSummary[]>("GET", "/v1/admin/landing-zone/templates"); }
-
-  landingZoneTemplate(templateId: string) {
-    return this.send<IndustryTemplate>("GET", `/v1/admin/landing-zone/templates/${templateId}`);
+  landingZoneTemplates(provider: string) {
+    return this.send<TemplateSummary[]>("GET", `/v1/admin/landing-zone/templates?provider=${provider}`);
   }
 
-  controlPacks() { return this.send<ControlPackCatalog>("GET", "/v1/admin/landing-zone/control-packs"); }
+  landingZoneTemplate(templateId: string, provider: string) {
+    return this.send<IndustryTemplate>("GET", `/v1/admin/landing-zone/templates/${templateId}?provider=${provider}`);
+  }
 
-  landingZoneReadBack() {
-    return this.send<LandingZoneReadBack>("GET", "/v1/admin/landing-zone/repository:read-back");
+  controlPacks(provider: string) {
+    return this.send<ControlPackCatalog>("GET", `/v1/admin/landing-zone/control-packs?provider=${provider}`);
+  }
+
+  landingZoneReadBack(provider: string) {
+    return this.send<LandingZoneReadBack>("GET", `/v1/admin/landing-zone/repository:read-back?provider=${provider}`);
   }
 
   proposeLandingZone(request: LandingZoneRequest) {

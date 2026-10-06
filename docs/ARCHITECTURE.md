@@ -1,10 +1,11 @@
 # CloudInfraAutomation — Architecture
 
-**Status:** v2.32, approved; implementation in progress. No code is written until this design is approved.
+**Status:** v2.33, approved; implementation in progress. No code is written until this design is approved.
 **Date:** 2026-10-05
 **Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9). Every solution is **DR-capable**: it can run in one region, as DR (primary active, secondary standby) or as an HA pair (both active), with **any region pair chosen in the UI** (default us-east-1 / us-east-2) (§10).
 
 **Changes in v2:** added the org registry and tagging strategy (§4); permissions based on tags (§4.5–4.8); multi-account, five-environment model (§5); promotion pipeline (§8). Payload, provisioning, security and scaling sections are updated to match.
+**Changes in v2.33:** MC-3e: the landing-zone UI picks the cloud and asks, offers and words each cloud's own; landing-zone read-back per cloud; MC-3 complete (§22.10 notes).
 **Changes in v2.32:** MC-3d: applying a Google Cloud landing zone locally fills account bindings, networks and the teardown vault (§22.10 notes).
 **Changes in v2.31:** MC-3c: the Google Cloud landing-zone deployments in Terraform JSON, inputs, seed script, workflow and README, validated with Terraform 1.5.7 (§22.10 notes).
 **Changes in v2.30:** MC-3b: the Google Cloud landing-zone design: provider answers, project ids, folders and projects, the control snapshot and pack mappings, checks and advice, templates per cloud (§22.10 notes).
@@ -4170,6 +4171,22 @@ The backup-account resolver for Google Cloud reads the applied landing zone's va
   - **Networks:** these are now registered with the design's cloud.
 - **Vault.** `BackupAccountResolver` finds each cloud's backup unit in its applied landing zone, through the cloud's namer and unit catalog (AWS `{org}-backup`, Google Cloud the vault project). The configured `backup_account_id`/`gcp_backup_project` still wins.
 - **End to end, locally:** approving a Google Cloud design commits `landing-zone-gcp-infra`, binds the portfolios' environments to the vended projects and registers their Shared VPC subnets. A Google Cloud project then provisions into those projects (with their networks), and its teardown backs up into the landing zone's vault project without `gcp_backup_project`.
+
+**MC-3e implementation notes.**
+- **Cloud picker.** The landing-zone Start step has the cloud picker. Choosing a cloud gives the draft that cloud's empty provider answers and default region pair, and keeps the organization name and everything else. Templates, template details, control packs and read-back are asked for that cloud (`?provider=`), and the request carries it.
+- **Per-cloud wording and options.** `src/landingZone/cloudText.ts` holds what the questionnaire says and offers on each cloud:
+  - repository, regions, organization text;
+  - shared units: no Identity project on Google Cloud, which has the vault;
+  - hub, egress, dedicated link and inspection wording (Google Cloud offers only per-environment Cloud NAT);
+  - flow, Security and compliance text, and the controls intro;
+  - the cloud's control notes: no proactive controls, and detective ones not deployed on SCC Standard;
+  - the browser-side checks of the provider answers.
+
+  A new cloud adds an entry. AWS's wording is unchanged.
+- **Organization step on Google Cloud.** It asks for the organization id, billing account, domain and SCC tier. Step labels and titles take the vocabulary ("Projects", "Sandbox & other folders"), as does the template card's node count.
+- **Read-back fix.** The landing zone's read-back used the AWS repository name for every cloud and re-rendered without the cloud. It now reads the cloud's own repository, and the request it returns and regenerates carries the record's provider. Designs read back before this have no provider and load as AWS.
+
+**MC-3 is complete.** A Google Cloud landing zone is designed, approved, generated, applied (locally) and read back, with the same questionnaire, tree editor, templates and packs as AWS.
 
 #### 22.10.9 Decisions and open questions
 

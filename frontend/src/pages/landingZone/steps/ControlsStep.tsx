@@ -2,6 +2,7 @@ import { useApi } from "../../../api/ApiContext";
 import type { ControlPackCatalog, ControlPackInfo, ControlsProfile, IndustryTemplate } from "../../../api/types";
 import { ErrorAlert } from "../../../components/Notices";
 import { useLoad } from "../../../hooks/useLoad";
+import { cloudText } from "../../../landingZone/cloudText";
 import { Choices, type Choice } from "../controls";
 import type { StepProps } from "./StepProps";
 
@@ -17,12 +18,14 @@ const BEHAVIORS = ["PREVENTIVE", "DETECTIVE", "PROACTIVE"] as const;
 
 export function ControlsStep({ draft, onChange, template }: StepProps) {
   const api = useApi();
-  const catalog = useLoad(() => api.controlPacks());
-  const { controls_profile, control_packs } = draft.toAnswers();
+  const provider = draft.provider;
+  const catalog = useLoad(() => api.controlPacks(provider));
+  const { controls_profile, control_packs, provider_answers } = draft.toAnswers();
+  const text = cloudText(provider);
   return (
     <>
-      <p className="sub">Control Tower controls come in packs; each pack targets the OUs it fits. A profile picks a set
-        of packs, and you can add or remove single packs. Mandatory Control Tower controls are always on.</p>
+      <p className="sub">{text.controlsIntro}</p>
+      {text.controlNotes(provider_answers).map((note) => <p key={note} className="notice warn">{note}</p>)}
       <Choices label="Controls profile" choices={PROFILES} selected={control_packs ? undefined : controls_profile}
                onSelect={(profile) => onChange(draft.withProfile(profile))} />
       <ErrorAlert message={catalog.error} />
