@@ -9,6 +9,7 @@ import pytest
 from app.adapters.factory import AdapterFactory
 from app.adapters.local_azure import LocalAzure
 from app.adapters.local_github import LocalGitHub
+from app.providers.azure.expressions import unique_string
 from app.provisioning.worker import Worker
 from app.readback.manifest import MANIFEST_PATH, ManifestSigner
 from tests.azure_helpers import DR, HA, azure_request, resources, synthesize
@@ -151,6 +152,20 @@ def test_workflow_deploys_data_then_shared_then_each_region(settings, provisione
             "--action-on-unmanage deleteResources" in shared, "endpointSubnetId=${{ vars.ENDPOINT_SUBNET_ID }}" in shared,
             github(settings).repository_variables(OWNER, REPOSITORY)["ORG_COST_CENTER"]) == (
         True, True, True, True, "CC-4410")
+
+
+def test_the_contract_vault_is_named_for_the_environment_so_the_workflow_can_recover_it(settings, provisioned):
+    variables = github(settings).environment(OWNER, REPOSITORY, "prod")
+    group = f"/subscriptions/{variables['AZURE_SUBSCRIPTION_ID']}/resourceGroups/rg-invoice-ingest-prod"
+    assert variables["CONTRACT_VAULT"] == f"kv{unique_string(group)}"
+
+
+def test_workflow_recovers_a_soft_deleted_contract_vault_before_the_data_stack(settings, provisioned):
+    """After a teardown the purge-protected vault stays soft-deleted for 90 days under the same name (§22.11.6)."""
+    workflow = files(settings)[".github/workflows/deploy.yml"]
+    recover = workflow.index('az keyvault recover --name "${{ vars.CONTRACT_VAULT }}" --resource-group "$RG" '
+                             '--location "${{ vars.AZURE_PRIMARY_REGION }}"')
+    assert recover < workflow.index('--name "invoice-ingest-data"')
 
 
 def test_preview_shows_the_ownership_tags(client):
