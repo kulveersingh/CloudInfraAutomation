@@ -31,22 +31,22 @@ def validate(payload: dict) -> list[str]:
 
 
 def role(document: dict, role_id: str) -> dict:
-    [found] = [item for item in resources(document["data"], ROLE) if role_id in item["properties"]["roleDefinitionId"]]
+    [found] = [item for item in resources(document["shared"], ROLE) if role_id in item["properties"]["roleDefinitionId"]]
     return found
 
 
-# ---- the two stacks ----
+# ---- the three stacks ----
 
-def test_a_project_is_a_data_stack_and_an_app_stack():
+def test_a_project_is_a_data_stack_a_shared_stack_and_an_app_stack():
     document = synthesize(azure_request())
     assert ({stack["$schema"] for stack in document.values()}, set(document)) == (
-        {"https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#"}, {"data", "app"})
+        {"https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#"}, {"data", "shared", "app"})
 
 
 def test_stacks_share_the_project_parameters():
     document = synthesize(azure_request())
     assert {"projectName", "environmentName", "location", "costCenter"} <= set(document["data"]["parameters"]) & set(
-        document["app"]["parameters"])
+        document["shared"]["parameters"]) & set(document["app"]["parameters"])
 
 
 def test_the_app_stack_knows_its_region_role():
@@ -124,7 +124,7 @@ def test_projects_without_storage_may_use_any_secondary():
 def test_functions_run_on_flex_consumption_with_their_own_identity():
     document = synthesize(azure_request())
     site = resource(document["app"], SITES, "processor")
-    identity = resource(document["data"], "Microsoft.ManagedIdentity/userAssignedIdentities", "processor")
+    identity = resource(document["shared"], "Microsoft.ManagedIdentity/userAssignedIdentities", "processor")
     assert (site["kind"], identity["name"], list(site["identity"]["userAssignedIdentities"]),
             site["properties"]["functionAppConfig"]["runtime"],
             site["properties"]["functionAppConfig"]["scaleAndConcurrency"]) == (
@@ -195,7 +195,7 @@ def test_dr_cosmos_adds_a_read_region_and_ha_writes_everywhere():
 # ---- messaging.queue ----
 
 def test_queues_dead_letter_and_use_entra_only():
-    data = synthesize(azure_request(resources=[{"id": "jobs", "type": "messaging.queue"}]))["data"]
+    data = synthesize(azure_request(resources=[{"id": "jobs", "type": "messaging.queue"}]))["shared"]
     namespace = resource(data, "Microsoft.ServiceBus/namespaces", "jobs")
     queue = resource(data, "Microsoft.ServiceBus/namespaces/queues", "jobs")
     assert (namespace["sku"], namespace["properties"]["disableLocalAuth"], queue["properties"]["maxDeliveryCount"],
@@ -204,7 +204,7 @@ def test_queues_dead_letter_and_use_entra_only():
 
 
 def test_multi_region_queues_are_premium():
-    data = synthesize(azure_request(resources=[{"id": "jobs", "type": "messaging.queue"}], resilience=DR))["data"]
+    data = synthesize(azure_request(resources=[{"id": "jobs", "type": "messaging.queue"}], resilience=DR))["shared"]
     assert resource(data, "Microsoft.ServiceBus/namespaces", "jobs")["sku"]["name"] == "Premium"
 
 
@@ -229,7 +229,7 @@ def test_bucket_access_to_a_prefix_is_an_abac_condition():
 
 
 def test_cosmos_access_is_a_data_plane_role_on_the_container():
-    [assignment] = resources(grant({"id": "orders", "type": "database.table"}, "readwrite")["data"],
+    [assignment] = resources(grant({"id": "orders", "type": "database.table"}, "readwrite")["shared"],
                              "Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments")
     assert (assignment["properties"]["roleDefinitionId"].endswith("'00000000-0000-0000-0000-000000000002')]"),
             assignment["properties"]["scope"]) == (
@@ -239,7 +239,7 @@ def test_cosmos_access_is_a_data_plane_role_on_the_container():
 
 def test_queue_access_sends_and_receives_on_the_queue():
     document = grant({"id": "jobs", "type": "messaging.queue"}, "readwrite")
-    scopes = {item["scope"] for item in resources(document["data"], ROLE) if item.get("comments") == "processor → jobs"}
+    scopes = {item["scope"] for item in resources(document["shared"], ROLE) if item.get("comments") == "processor → jobs"}
     assert scopes == {"[format('Microsoft.ServiceBus/namespaces/{0}/queues/jobs', variables('jobsName'))]"}
 
 
@@ -254,7 +254,7 @@ def test_access_puts_the_target_in_the_app_settings():
 
 def test_bucket_events_reach_the_function_through_event_grid_with_native_filters():
     document = synthesize(azure_request())
-    topic = resource(document["data"], "Microsoft.EventGrid/systemTopics", "uploads")
+    topic = resource(document["shared"], "Microsoft.EventGrid/systemTopics", "uploads")
     subscription = resource(document["app"], "Microsoft.EventGrid/systemTopics/eventSubscriptions", "uploads → processor")
     assert (topic["properties"]["topicType"], subscription["condition"], subscription["properties"]["filter"]) == (
         "Microsoft.Storage.StorageAccounts", "[equals(parameters('activationState'), 'active')]",
@@ -427,7 +427,7 @@ def test_two_functions_share_the_code_account_and_a_bucket_topic():
                    {"id": "second", "type": "compute.function"}],
         connections=[{"kind": "event.notify", "source": "uploads", "target": name} for name in ("first", "second")]))
     assert (len(resources(document["data"], STORAGE, "code")),
-            len(resources(document["data"], "Microsoft.EventGrid/systemTopics")),
+            len(resources(document["shared"], "Microsoft.EventGrid/systemTopics")),
             len(resources(document["app"], "Microsoft.EventGrid/systemTopics/eventSubscriptions"))) == (1, 1, 2)
 
 
@@ -435,7 +435,7 @@ def test_attached_data_stores_get_private_endpoints():
     payload = azure_request(resources=[{"id": "processor", "type": "compute.function"},
                                        {"id": "orders", "type": "database.table"}, {"id": "jobs", "type": "messaging.queue"}],
                             resilience=DR, attach=True)
-    endpoints = resources(synthesize(payload)["data"], "Microsoft.Network/privateEndpoints")
+    endpoints = resources(synthesize(payload)["shared"], "Microsoft.Network/privateEndpoints")
     assert sorted(endpoint["comments"] for endpoint in endpoints) == ["jobs", "orders"]
 
 

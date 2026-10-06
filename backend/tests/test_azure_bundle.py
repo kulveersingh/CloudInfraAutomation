@@ -17,14 +17,16 @@ def files(payload: dict) -> dict[str, str]:
 
 
 def test_repository_files():
-    assert set(files(azure_request())) == {"main.json", "app.json", "parameters/dev.json", "parameters/test.json",
-                                           "parameters/stage.json", "parameters/prod.json", "infra.json", "README.md",
+    assert set(files(azure_request())) == {"main.json", "shared.json", "app.json", "parameters/dev.json",
+                                           "parameters/test.json", "parameters/stage.json", "parameters/prod.json",
+                                           "infra.json", "README.md",
                                            ".github/workflows/deploy.yml"}
 
 
-def test_main_is_the_data_stack_and_app_the_app_stack():
+def test_main_is_the_data_stack_shared_the_shared_stack_and_app_the_app_stack():
     rendered, document = files(azure_request()), synthesize(azure_request())
-    assert (json.loads(rendered["main.json"]), json.loads(rendered["app.json"])) == (document["data"], document["app"])
+    assert (json.loads(rendered["main.json"]), json.loads(rendered["shared.json"]), json.loads(rendered["app.json"])) == (
+        document["data"], document["shared"], document["app"])
 
 
 def test_parameters_per_environment():
@@ -35,7 +37,8 @@ def test_parameters_per_environment():
 
 def test_readme_points_at_the_templates_and_bicep():
     readme = files(azure_request())["README.md"]
-    assert ("regenerates `main.json` from `infra.json`" in readme, "az bicep decompile" in readme) == (True, True)
+    assert ("regenerates `main.json` from `infra.json`" in readme, "az bicep decompile" in readme,
+            "`shared.json` is the shared stack" in readme) == (True, True, True)
 
 
 def test_workflow_signs_in_with_oidc_and_deploys_the_stacks():
@@ -49,13 +52,13 @@ def test_workflow_signs_in_with_oidc_and_deploys_the_stacks():
 
 def test_single_region_projects_deploy_one_app_stack():
     workflow = files(azure_request())[".github/workflows/deploy.yml"]
-    assert (workflow.count("az stack group create"), "regionRole=primary activationState=active" in workflow) == (2, True)
+    assert (workflow.count("az stack group create"), "regionRole=primary activationState=active" in workflow) == (3, True)
 
 
 def test_dr_deploys_a_standby_app_stack_in_the_secondary_region():
     workflow = files(azure_request(resilience=DR))[".github/workflows/deploy.yml"]
     assert (workflow.count("az stack group create"), "regionRole=secondary activationState=standby" in workflow,
-            "secondaryLocation=${{ vars.AZURE_SECONDARY_REGION }}" in workflow) == (3, True, True)
+            "secondaryLocation=${{ vars.AZURE_SECONDARY_REGION }}" in workflow) == (4, True, True)
 
 
 def test_attached_compute_passes_the_subnets():
