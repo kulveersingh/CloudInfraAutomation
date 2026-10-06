@@ -12,7 +12,7 @@ TEMPLATES = [template.id for template in TemplateRegistry.default().all()]
 
 def from_template(template_id: str, **overrides):
     template = TemplateRegistry.default().get(template_id)
-    return edited(template.edits, **{**template.answers, **overrides})
+    return edited(template.edits, **{**template.answers_for("aws"), **overrides})
 
 
 def environment_names(template_id: str) -> list[str]:
