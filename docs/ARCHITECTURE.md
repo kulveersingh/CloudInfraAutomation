@@ -1,10 +1,11 @@
 # CloudInfraAutomation — Architecture
 
-**Status:** v2.33, approved; implementation in progress. No code is written until this design is approved.
+**Status:** v2.34, §22.11 (MC-4) for review; implementation in progress. No code is written until this design is approved.
 **Date:** 2026-10-05
 **Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9). Every solution is **DR-capable**: it can run in one region, as DR (primary active, secondary standby) or as an HA pair (both active), with **any region pair chosen in the UI** (default us-east-1 / us-east-2) (§10).
 
 **Changes in v2:** added the org registry and tagging strategy (§4); permissions based on tags (§4.5–4.8); multi-account, five-environment model (§5); promotion pipeline (§8). Payload, provisioning, security and scaling sections are updated to match.
+**Changes in v2.34:** MC-4 design (§22.11): Azure projects on ARM templates and deployment stacks (a data stack and an app stack per region), federated managed identities, Flex Consumption functions, storage, Cosmos DB and Service Bus with exact-resource role assignments, Event Grid with native prefix filters, what-if release rows, locked immutable vaults and Cosmos exports.
 **Changes in v2.33:** MC-3e: the landing-zone UI picks the cloud and asks, offers and words each cloud's own; landing-zone read-back per cloud; MC-3 complete (§22.10 notes).
 **Changes in v2.32:** MC-3d: applying a Google Cloud landing zone locally fills account bindings, networks and the teardown vault (§22.10 notes).
 **Changes in v2.31:** MC-3c: the Google Cloud landing-zone deployments in Terraform JSON, inputs, seed script, workflow and README, validated with Terraform 1.5.7 (§22.10 notes).
@@ -4209,3 +4210,157 @@ The backup-account resolver for Google Cloud reads the applied landing zone's va
 | Q2 | Whether a folder can hold more than one posture deployment | Generate **one combined posture per targeted folder**, which works either way |
 | Q3 | SCC tier and Security Posture availability in the customer's organization | Asked in the provider answers (`scc_tier`); refresh script confirms detector names |
 | Q4 | NCC star topology for VPC spokes in all chosen regions | Check in the refresh script; fall back to separate VPC peerings to the hub (no transitive routing) if unavailable |
+
+### 22.11 MC-4 in detail: Azure projects
+
+**Status: design for review.**
+
+**Goal.** A project on Azure goes through the same flows as on AWS and Google Cloud:
+- wizard, preview, provisioning;
+- read-back, Change infrastructure;
+- releases with risk;
+- teardown with locked backups, and restore.
+
+Everything runs locally against stand-ins, as before. The Azure landing zone (management groups, subscription vending, Azure Policy, hub networking, the backup subscription) is MC-5. Until then, environment subscriptions, networks and the backup subscription are configured in the registry, as Google Cloud's were before MC-3.
+
+#### 22.11.1 Research findings
+
+| # | Finding | Consequence |
+|---|---|---|
+| Z1 | **Deployment stacks** manage a set of resources as one unit, at resource-group or subscription scope. `actionOnUnmanage` decides what happens to resources dropped from the template: `detachAll`, `deleteResources`, or `deleteAll`. **Deny settings** (`denyDelete`, `denyWriteAndDelete`, with excluded principals and actions) stop changes outside the stack. Stacks take an ARM JSON template or a Bicep file. `actionOnUnmanage` applies to the whole stack, not per resource. | The document is an **ARM JSON template**, which Bicep compiles to (MC4-1). Data that is retained on removal lives in its own stack with `detachAll`; everything else lives in an app stack with `deleteResources` (MC4-2). |
+| Z2 | **Isolation unit.** Azure's subscription is the account/project equivalent, and a **resource group** is the natural scope for one project in one environment. Azure ABAC conditions cover storage data actions only. | One subscription per environment and portfolio (bindings with provider `azure`). One resource group per project and environment, `rg-{project}-{environment}`, and every role assignment is scoped to it or to a single resource (§22.5). |
+| Z3 | **Identity.** A **user-assigned managed identity** with a federated credential whose subject is `repo:{owner}/{repo}:environment:{environment}` (exact match, at most 20 per identity) signs the workflow in. Deployments run as the caller, so there is no separate execution role. Managing deny settings needs `Microsoft.Resources/deploymentStacks/manageDenySetting/action` (the Azure Deployment Stack Owner role). | The bootstrap creates the resource group, the deploy identity with its federated credential, and role assignments on that resource group only. `execution_identity` equals `deployer_identity`. |
+| Z4 | **Functions.** The **Flex Consumption** plan (`FC1`) runs Python, Node.js, .NET isolated, Java and PowerShell. It deploys code from a blob container named in `functionAppConfig.deployment.storage`, authenticated by managed identity. It supports VNet integration into a subnet delegated to `Microsoft.App/environments`, and its blob triggers use **Event Grid**. | `compute.function` is a Flex Consumption app with its own user-assigned identity, internal-only access when attached, and code in a per-app deployment container. |
+| Z5 | **Event Grid** subscriptions filter on `subjectBeginsWith` and `subjectEndsWith`. | Prefix and suffix filters are **native** on Azure, unlike Eventarc (MC2-4). Nothing is left for the function to check. |
+| Z6 | **Storage.** Account names are 3–24 lowercase letters and digits and globally unique. Accounts can disable shared keys (Entra only), public blob access and old TLS versions, and support versioning, soft delete and lifecycle rules. Geo-redundant storage (GRS/GZRS, RA- for read access) replicates to the region's **fixed pair**; some regions have no pair. | `storage.bucket` is a storage account with one private container. Zone-redundant storage (ZRS) in single-region projects; GZRS (DR) or RA-GZRS (HA) in multi-region projects, which **need the secondary to be the primary's pair**. A request rule checks this, like Google Cloud's continent rule. |
+| Z7 | **Cosmos DB for NoSQL.** Accounts are global, list their regions with failover priorities (any regions, not only pairs), and can allow writes in every region. Continuous backup gives 7 or 30 days of point-in-time restore. `disableLocalAuth` forces Entra RBAC on the data plane, through Cosmos SQL role assignments that can be scoped to one container. **Backups live in the account and are deleted with it.** | `database.table` is one account, database and container. It accepts `partition_key` (default `/id`), as on AWS. Continuous backup and local auth off. DR adds the secondary as a read region; HA adds multi-region writes. Teardown exports the data before deleting it (Z9). |
+| Z8 | **Service Bus.** Queues have a built-in dead-letter queue and `maxDeliveryCount`. Role assignments can target one queue. The Standard tier is single-region. Premium adds VNet private endpoints and geo-disaster recovery and replication. | `messaging.queue` is a namespace and queue: Standard in single-region projects, Premium in multi-region ones (open question A3). |
+| Z9 | **Locked backups.** Backup vaults can be made **immutable and locked**, which is irreversible. Operational and vaulted blob backups need the vault **in the storage account's region**. Resource Guard adds multi-user authorization (MC-5). Cosmos DB has no vaulted backup. | Blobs: vaulted backup into a locked immutable vault per region in the backup subscription, retention ≥ 60 days. Cosmos DB: **export into a blob container with a locked 60-day time-based immutability policy** in the backup subscription. Service Bus messages are not backed up (transient). |
+| Z10 | **Plan.** `az deployment group what-if` reports `Create`, `Modify`, `Delete`, `NoChange`, `Ignore` and `Deploy` per resource. It does not mark replacements, and it is noisy on some properties. What-if for deployment stacks is newer (open question A1). | Release rows come from what-if: Create → Add, Modify → Modify, Delete → Remove; NoChange and Ignore are skipped. Risk rules use the classifier as before. A delete of a stateful type is high risk. Replacements can't be seen, so a Modify of a stateful type is medium. |
+| Z11 | **Naming** is global for storage accounts, Cosmos accounts, function apps, Service Bus namespaces and Key Vaults, with different lengths and alphabets. Tag names may not contain `<>%&\?/`. | A per-kind `AzureNaming` with a hash of the subscription id, checked per kind's limits. Ownership tags keep the `org:` names (colons are allowed), so the tag policy is AWS's identity mapping (open question A4). |
+
+#### 22.11.2 How each concept maps
+
+| Concept | Azure | Notes |
+|---|---|---|
+| IaC document | **ARM JSON template** `main.json`, applied as a **deployment stack** | JSON is deterministic to generate and reads back like Terraform JSON. A README notes that `az bicep decompile` gives Bicep for reading. |
+| Deploy units | Per environment: a **data stack** `{project}-data` in the primary region (storage, Cosmos DB, Service Bus, Key Vault; `actionOnUnmanage: detachAll`) and an **app stack** `{project}-{region}` per region (function apps, Event Grid subscriptions, role assignments; `deleteResources`). Both have deny settings `denyWriteAndDelete`, excluding the deploy identity. | DR/HA: the secondary region gets its own app stack, in standby when DR. Global resources live once, in the data stack. |
+| Isolation unit | Subscription per environment and portfolio; resource group per project and environment | Account ids are subscription GUIDs. |
+| Deployer identity | User-assigned identity with a federated credential for the repository's environment | `BootstrapOutputs.federation` = the identity's client id; the workflow also needs the tenant and subscription ids (variables). |
+| Ownership tags | Tags with the `org:` names | The identity tag policy. Every resource and the resource group carry them. |
+| Plan | `az deployment group what-if` per stack | Feeds release risk (Z10). |
+| Raw resource types (Tier 2) | `Microsoft.{Provider}/{type}` at a pinned API version, from a committed snapshot of the Azure resource schemas (types, API versions, required properties) | Refreshed by a script, like the other clouds. Platform-managed types (`Microsoft.Authorization/*`, `Microsoft.Management/*`, `Microsoft.Resources/*`, `Microsoft.ManagedIdentity/*`, `Microsoft.Network/virtualNetworks`) are refused. |
+| Contract | A Key Vault (RBAC, purge protection) per project and environment, with the secret `contract` holding the same JSON | Application repositories read it with their own identity. |
+
+#### 22.11.3 Curated services
+
+| Neutral kind | Azure resources | Defaults |
+|---|---|---|
+| `storage.bucket` | `Microsoft.Storage/storageAccounts` (StorageV2) + one blob container `data` | Shared keys off; public blob access off; TLS 1.2; HTTPS only; versioning and blob soft delete (7 days); noncurrent versions deleted after 30 days. **Single:** ZRS. **DR:** GZRS. **HA:** RA-GZRS. Public network access off when compute attaches to the network (private endpoint in the registered subnet; DNS from the landing zone, MC-5). |
+| `compute.function` | `Microsoft.Web/serverfarms` (FC1) + `Microsoft.Web/sites` (functionapp, Flex) + a user-assigned identity + a deployment container | Settings: runtime (python 3.12, node 22, dotnet-isolated 8, java 21), memory (2048 or 4096 MB instances), timeout (1–240 min), maximum instances. VNet integration into the registered subnet when attached. Internal access only when attached. The app stack deploys it in every region; DR's secondary has its triggers disabled. |
+| `database.table` | `Microsoft.DocumentDB/databaseAccounts` (NoSQL) + SQL database + container | `partition_key` setting (default `/id`). Continuous backup (30 days). `disableLocalAuth`. Public network access off when attached. DR: secondary read region; HA: multi-region writes. Retained on removal (data stack, `detachAll`). |
+| `messaging.queue` | `Microsoft.ServiceBus/namespaces` + queue | `maxDeliveryCount` 5; dead-lettering on expiry; lock duration 1 min; local auth off. Standard tier; Premium in DR/HA. |
+
+**Connections:**
+- **`access.grant`** creates a role assignment for the source function's identity on exactly the target:
+  - storage: `Storage Blob Data Reader`/`Contributor` on the container. A prefix becomes an **ABAC condition** on the blob path.
+  - Cosmos DB: the built-in data reader/contributor via a SQL role assignment scoped to the container.
+  - Service Bus: `Azure Service Bus Data Sender`/`Receiver` on the queue.
+
+  Each also sets an app setting with the target's name.
+- **`event.notify`** (storage → function) is an Event Grid system topic on the storage account plus an event subscription to the function, filtered on `Microsoft.Storage.BlobCreated` with **native `subjectBeginsWith`/`subjectEndsWith`** for the prefix and suffix. The function also gets read access to the container.
+
+**Lint rules:**
+- no `Owner`, `Contributor` or `User Access Administrator` roles;
+- no role assignments above the resource group;
+- shared keys and public blob access off on every storage account;
+- local auth off on Cosmos DB and Service Bus;
+- every function has its own identity;
+- a structural check of every resource against the schema snapshot (type, API version, required properties).
+
+#### 22.11.4 Repository and workflow
+
+The repository contains:
+- `main.json` (data stack) and `app.json` (app stack), with `parameters/{env}.json`;
+- `infra.json`, the README, the deploy workflow and the signed manifest.
+
+The workflow:
+1. `azure/login@v2` with the deploy identity's client id, the tenant and the subscription (OIDC).
+2. `az deployment group what-if` for each stack, as the plan.
+3. `az stack group create --name {project}-data --resource-group rg-{project}-{env} --template-file main.json --parameters @parameters/{env}.json --action-on-unmanage detachAll --deny-settings-mode denyWriteAndDelete --deny-settings-excluded-principals <deploy identity>`.
+4. The same for each region's app stack with `--action-on-unmanage deleteResources`, the secondary in standby when DR.
+
+STAGE and PROD keep the release executor (§8).
+
+GitHub environment variables: `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `AZURE_RESOURCE_GROUP`, `AZURE_PRIMARY_REGION`/`AZURE_SECONDARY_REGION`, `CODE_CONTAINER`, and, when attached, `SUBNET_ID` per region.
+
+#### 22.11.5 Networks
+
+A registered Azure network is checked like this:
+- **`account_id`:** a subscription GUID.
+- **`network_ref`:** a VNet resource id, `/subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Network/virtualNetworks/{name}`.
+- **`subnet_refs`:** at least one subnet of that VNet. The first must be delegated to `Microsoft.App/environments` (Flex Consumption); a further one may hold private endpoints.
+- **`firewall_refs`:** network security group resource ids.
+
+#### 22.11.6 Teardown and restore
+
+| Data store | Backup into the locked vault (§21.9.1) | Restore |
+|---|---|---|
+| Storage account | **Vaulted blob backup** into the locked, immutable Backup vault in the storage account's region, in the backup subscription; retention 60 days | Restore into a new account with the original name, then the next stack deployment manages it again |
+| Cosmos DB | **Export** of every container into `cloudinfra-teardown` (a blob container with a **locked 60-day time-based immutability policy**) in the backup subscription | A new account with the original name, then an import |
+| Anything else that holds data | Blocks the teardown | — |
+
+**Not backed up:** Service Bus messages (transient), logs (keep them with diagnostic settings), function code (rebuilt from the application repository).
+
+**Delete order:**
+1. The app stacks (secondary region first).
+2. The data stack with `deleteAll`, after the backups are verified.
+3. The bootstrap: the federated credential, the identity and the resource group.
+4. The GitHub environment.
+
+Deny settings exclude only the deploy identity and the platform's teardown identity.
+
+#### 22.11.7 Platform changes
+
+| Area | Change |
+|---|---|
+| `app/providers/azure/` | `AzureProvider`. Vocabulary: cloud "Azure", subscription, management group, ARM template, deployment stack, Azure Policy, VNet, network security group, Azure Landing Zones, Azure Policy initiatives. Default regions `eastus2`/`centralus` (a pair). Network checks. Project, teardown and release toolkits. The landing zone refuses clearly until MC-5. |
+| Project toolkit | `ArmTemplateDialect` with two documents per project (data and app), so the dialect returns `{"main.json": …, "app.json": …}`. Curated blocks and binders above, lint rules, the schema snapshot and its refresh script, the bundle, and the GitHub variables. The **paired-region rule** for multi-region storage, and a naming check per resource kind. |
+| Releases | `WhatIfReader` (Z10) and an Azure resource classifier: stateful storage accounts, Cosmos DB, SQL, PostgreSQL/MySQL flexible servers, Service Bus, Key Vault; permission types `Microsoft.Authorization/*` and managed identities. |
+| Teardown | Inventory from the data template; a `BackupStyle` for vaulted blob backups and Cosmos exports; the locked-vault check. |
+| Adapters | `LocalAzure` (bootstrap records, stack deletion, data-store deletion, adoption, backups with the 60-day lock), `azure_mode = "local"`, `azure_backup_subscription` (until MC-5). |
+| Registry and seed | Azure regions with their pairs; example subscriptions per portfolio and environment; example VNets and subnets. |
+| UI | Azure in the cloud pickers; its regions, catalog, settings and words. The wizard notes that DR/HA storage replicates to the region's pair. |
+
+#### 22.11.8 Delivery (TDD, 100% coverage)
+
+| Step | Scope |
+|---|---|
+| **MC-4a** | `AzureProvider` registered: vocabulary, regions and pairs, network checks, seed data, `LocalAzure`; parts still to come refuse clearly |
+| **MC-4b** | ARM templates: the two-stack dialect, curated blocks, binders (including ABAC prefix conditions and Event Grid filters), lint rules, schema snapshot; bundle, workflow and variables; validated with `az bicep`-free JSON checks plus golden tests per service and connection, DR/HA shapes |
+| **MC-4c** | Provisioning, read-back and Change infrastructure end to end |
+| **MC-4d** | Release rows from what-if and the classifier; teardown inventory, vaulted blob backups and Cosmos exports into the locked vault, restore |
+| **MC-4e** | UI: Azure in the pickers, the pair hint, wording |
+
+#### 22.11.9 Decisions and open questions
+
+| # | Decision | Recommendation |
+|---|---|---|
+| MC4-1 | Document format | **ARM JSON templates**, applied as deployment stacks. Bicep would need a serializer and compiles to the same JSON. |
+| MC4-2 | Stack layout | **A data stack (`detachAll`) and an app stack per region (`deleteResources`)**, so data is retained on removal and everything else is deleted (§21.8 C3) |
+| MC4-3 | Isolation | **Resource group per project and environment** in the environment's subscription; every role assignment on that resource group or a single resource |
+| MC4-4 | Multi-region storage | **Only within the region pair** (GZRS/RA-GZRS). A request rule refuses other secondaries when the project has storage. Cosmos DB and functions can use any secondary. |
+| MC4-5 | Functions | **Flex Consumption**, each function with its own user-assigned identity |
+| MC4-6 | Prefix filters | **Native Event Grid subject filters** |
+| MC4-7 | Contract | **Key Vault secret `contract`** per project and environment |
+| MC4-8 | Teardown backups | **Vaulted blob backup in a locked immutable vault per region; Cosmos DB exported into a blob container with a locked 60-day immutability policy**, in the backup subscription |
+| MC4-9 | Release rows | **From what-if**; replacements are invisible, so a Modify of stateful data is medium risk |
+| MC4-10 | Backup subscription until MC-5 | **`azure_backup_subscription` setting**, like `gcp_backup_project` before MC-3 |
+
+| # | Open question | Plan |
+|---|---|---|
+| A1 | What-if for deployment stacks | Use `az deployment group what-if` on each stack's template until stack what-if is generally available; verify in MC-4d |
+| A2 | Platform credentials (MC7): can the AWS-hosted control plane federate into Entra without a secret? | Verify Entra workload identity federation with a token the platform's AWS role can mint. Until then, a certificate in Secrets Manager, rotated. Only the platform's teardown and release identities need this; deploys use the repository's OIDC. |
+| A3 | Service Bus multi-region | Premium in DR/HA. Verify whether geo-replication (data) or geo-disaster recovery (metadata only) fits; until then the README states that messages in flight are not replicated |
+| A4 | `org:` tag names on every resource type | Colons are allowed in Azure tag names, but some services restrict tag names; verify for the curated types, and fall back to `org_` names (a tag policy) if needed |
+| A5 | Private DNS for private endpoints | The landing zone's hub owns the private DNS zones (MC-5). Until then, attached projects create private endpoints and the README names the DNS zones to link. |
