@@ -137,7 +137,8 @@ def test_function_code_comes_from_its_deployment_container():
     storage = resource(synthesize(azure_request())["app"], SITES, "processor")["properties"]["functionAppConfig"][
         "deployment"]["storage"]
     assert (storage["type"], storage["value"], storage["authentication"]["type"]) == (
-        "blobContainer", "[format('https://{0}.blob.core.windows.net/app-processor', variables('codeName'))]",
+        "blobContainer",
+        "[format('https://{0}.blob.{1}/app-processor', variables('codeName'), environment().suffixes.storage)]",
         "UserAssignedIdentity")
 
 
@@ -394,8 +395,105 @@ def test_the_refresh_reads_the_index_and_the_pinned_types(tmp_path):
                               {"$type": "ObjectType", "name": "a", "properties": {"size": {"type": {"$ref": "#/5"}}}},
                               {"$type": "ArrayType", "itemType": {"$ref": "#/6"}},
                               {"$type": "ObjectType", "name": "tags", "additionalProperties": {"$ref": "#/0"}}]}
-    main([], BicepTypesReader(files.__getitem__), tmp_path / "types.json.gz")
+    main([], BicepTypesReader(files.__getitem__), tmp_path / "types.json.gz", ["Microsoft.X/things@2024-01-01"])
     types = AzureResourceTypes.read(tmp_path / "types.json.gz")
     assert (types.latest_stable("microsoft.x/things"), types.schema("Microsoft.X/things", "2024-01-01")) == (
         "2024-01-01", {"required": ["name"], "properties": {"name": None, "properties": {
             "required": [], "properties": {"kind": None, "size": None}}}})
+
+
+# ---- more shapes ----
+
+def test_paired_dr_storage_is_fine():
+    assert validate(azure_request(resilience=DR)) == []
+
+
+def test_access_needs_a_level_and_a_workload():
+    no_level = azure_request(resources=[{"id": "processor", "type": "compute.function"},
+                                        {"id": "jobs", "type": "messaging.queue"}],
+                             connections=[{"kind": "iam.access", "source": "processor", "target": "jobs"}])
+    from_bucket = azure_request(resources=[{"id": "uploads", "type": "storage.bucket"},
+                                           {"id": "jobs", "type": "messaging.queue"}],
+                                connections=[{"kind": "access.grant", "source": "uploads", "target": "jobs",
+                                              "access": "read"}])
+    assert (validate(no_level), validate(from_bucket)) == (
+        ["iam.access from 'processor' to 'jobs' needs an access level."],
+        ["access.grant cannot connect storage.bucket to messaging.queue."])
+
+
+def test_two_functions_share_the_code_account_and_a_bucket_topic():
+    document = synthesize(azure_request(
+        resources=[{"id": "uploads", "type": "storage.bucket"}, {"id": "first", "type": "compute.function"},
+                   {"id": "second", "type": "compute.function"}],
+        connections=[{"kind": "event.notify", "source": "uploads", "target": name} for name in ("first", "second")]))
+    assert (len(resources(document["data"], STORAGE, "code")),
+            len(resources(document["data"], "Microsoft.EventGrid/systemTopics")),
+            len(resources(document["app"], "Microsoft.EventGrid/systemTopics/eventSubscriptions"))) == (1, 1, 2)
+
+
+def test_attached_data_stores_get_private_endpoints():
+    payload = azure_request(resources=[{"id": "processor", "type": "compute.function"},
+                                       {"id": "orders", "type": "database.table"}, {"id": "jobs", "type": "messaging.queue"}],
+                            resilience=DR, attach=True)
+    endpoints = resources(synthesize(payload)["data"], "Microsoft.Network/privateEndpoints")
+    assert sorted(endpoint["comments"] for endpoint in endpoints) == ["jobs", "orders"]
+
+
+def test_raw_types_without_properties():
+    [cache] = resources(synthesize(azure_request(resources=[{"id": "cache", "type": "Microsoft.Cache/redis"}]))["data"],
+                        "Microsoft.Cache/redis")
+    assert "properties" not in cache
+
+
+@pytest.mark.parametrize("config, message", [
+    ({"properties": []}, "Microsoft.Cache/redis 'cache' properties must be a JSON object."),
+    ({"properties": {}, "extra": 1}, "Microsoft.Cache/redis 'cache' accepts only 'properties' in config, not 'extra'."),
+])
+def test_raw_type_config_is_checked(config, message):
+    assert validate(azure_request(resources=[{"id": "cache", "type": "Microsoft.Cache/redis", "config": config}])) == [
+        message]
+
+
+def test_lint_finds_functions_without_their_own_identity_and_missing_properties():
+    findings = toolkit().linter.lint(stack(
+        {"type": SITES, "apiVersion": "2024-04-01", "name": "f", "comments": "f", "location": "l", "kind": "functionapp"},
+        {"type": "Microsoft.KeyVault/vaults", "apiVersion": "2023-07-01", "name": "v", "comments": "v", "location": "l",
+         "properties": {"sku": {"family": "A", "name": "standard"}}}))
+    assert findings == ["Microsoft.Web/sites f: function app has no identity of its own.",
+                        "Microsoft.KeyVault/vaults v: missing required property 'properties.tenantId'."]
+
+
+def test_the_trimmer_stops_at_its_depth_and_reuses_shared_types():
+    from app.providers.azure.project.schema import MAX_DEPTH, Trimmer
+
+    nodes = [{"$type": "ObjectType", "name": "node", "properties": {"a": {"type": {"$ref": "#/0"}},
+                                                                    "b": {"type": {"$ref": "#/0"}}}}]
+    tree = Trimmer(nodes).resource({"body": {"$ref": "#/0"}})
+    for _ in range(MAX_DEPTH - 1):
+        assert tree["properties"]["a"] is tree["properties"]["b"]
+        tree = tree["properties"]["a"]
+    assert tree["properties"]["a"] is None
+
+
+def test_the_refresh_fetches_from_the_type_repository(monkeypatch):
+    from app.providers.azure.project import refresh
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *details):
+            return False
+
+        def read(self):
+            return b'{"resources": {}}'
+
+    seen = []
+    monkeypatch.setattr(refresh.urllib.request, "urlopen", lambda url, timeout: seen.append((url, timeout)) or Response())
+    refresh.fetch.cache_clear()
+    assert (refresh.fetch("index.json"), seen) == ({"resources": {}}, [(refresh.SOURCE + "index.json", 60)])
+
+
+def test_types_at_unpinned_versions_are_checked_for_type_and_version_only():
+    assert toolkit().linter.lint(stack({"type": "Microsoft.Cache/redis", "apiVersion": "2024-11-01", "name": "c",
+                                        "comments": "c", "location": "l", "anything": True})) == []

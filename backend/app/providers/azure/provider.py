@@ -40,7 +40,9 @@ class AzureProvider(CloudProvider):
         return azure_network_problems(network)
 
     def project(self):
-        raise ValidationFailedError("Projects on Azure are not available yet.")
+        from app.providers.azure.project.toolkit import azure_project
+
+        return azure_project(REGION_PAIRS.get)
 
     def teardown(self):
         raise ValidationFailedError("Teardowns on Azure are not available yet.")

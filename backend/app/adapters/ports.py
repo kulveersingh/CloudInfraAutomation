@@ -57,6 +57,7 @@ class BootstrapOutputs:
     deployer_identity: str  # what the deploy workflow signs in as (AWS: the deploy role)
     execution_identity: str  # what applies the IaC document (AWS: the CloudFormation execution role)
     federation: str = ""  # the workload identity provider the workflow signs in through (none on AWS: OIDC role trust)
+    directory: str = ""  # the identity's directory, where a cloud has one (Azure: the Entra tenant)
 
 
 class GitHubPort(ABC):

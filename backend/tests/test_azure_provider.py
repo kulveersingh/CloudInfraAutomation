@@ -13,7 +13,6 @@ from app.errors import ValidationFailedError
 from app.networks.models import NetworkInput
 from app.providers.base import ProviderRegistry, Vocabulary
 from app.seed import ReferenceData
-from tests.factories import request_dict
 
 ALEX = {"X-Actor": "alex", "X-Roles": "platform-admin"}
 SUBSCRIPTION = "0b1f6d5e-1234-4c3a-9a7b-2f6e8d9c0a11"
@@ -173,7 +172,6 @@ def test_settings_name_the_azure_backup_subscription(settings):
 # ---- what is not there yet ----
 
 @pytest.mark.parametrize("part, message", [
-    ("project", "Projects on Azure are not available yet."),
     ("teardown", "Teardowns on Azure are not available yet."),
     ("resources", "Releases on Azure are not available yet."),
     ("landing_zone", "The Azure landing zone is not available yet."),
@@ -183,6 +181,8 @@ def test_parts_still_to_come_say_so(part, message):
         getattr(provider(), part)()
 
 
-def test_an_azure_project_preview_is_refused_clearly(client):
-    response = client.post("/v1/projects:preview", json=request_dict(provider="azure"))
-    assert (response.status_code, response.json()["detail"]) == (422, "Projects on Azure are not available yet.")
+def test_an_azure_project_previews_its_templates(client):
+    from tests.azure_helpers import azure_request
+
+    response = client.post("/v1/projects:preview", json=azure_request())
+    assert (response.status_code, "main.json" in response.json()["files"], response.json()["lint"]) == (200, True, [])

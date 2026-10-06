@@ -1,10 +1,11 @@
 # CloudInfraAutomation — Architecture
 
-**Status:** v2.35, approved; implementation in progress. No code is written until this design is approved.
+**Status:** v2.36, approved; implementation in progress. No code is written until this design is approved.
 **Date:** 2026-10-05
 **Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9). Every solution is **DR-capable**: it can run in one region, as DR (primary active, secondary standby) or as an HA pair (both active), with **any region pair chosen in the UI** (default us-east-1 / us-east-2) (§10).
 
 **Changes in v2:** added the org registry and tagging strategy (§4); permissions based on tags (§4.5–4.8); multi-account, five-environment model (§5); promotion pipeline (§8). Payload, provisioning, security and scaling sections are updated to match.
+**Changes in v2.36:** MC-4b: Azure ARM templates (a data stack and an app stack), curated services, role assignments and Event Grid, lint, the resource-type snapshot, repository files, workflow and variables (§22.11 notes).
 **Changes in v2.35:** MC-4a: Azure registered with its vocabulary, region pairs, subscription bindings, VNet checks and local adapter (§22.11 notes).
 **Changes in v2.34:** MC-4 design (§22.11): Azure projects on ARM templates and deployment stacks (a data stack and an app stack per region), federated managed identities, Flex Consumption functions, storage, Cosmos DB and Service Bus with exact-resource role assignments, Event Grid with native prefix filters, what-if release rows, locked immutable vaults and Cosmos exports.
 **Changes in v2.33:** MC-3e: the landing-zone UI picks the cloud and asks, offers and words each cloud's own; landing-zone read-back per cloud; MC-3 complete (§22.10 notes).
@@ -4355,6 +4356,31 @@ Deny settings exclude only the deploy identity and the platform's teardown ident
   - `firewall_refs` are network security group ids.
 - **Seed.** Seven Azure regions (Sweden Central disabled). One subscription per portfolio and environment, with stable invented GUIDs (`uuid5` of `cloudinfra:azure:{portfolio}:{environment}`). One spoke VNet per subscription in `eastus2` and `centralus`, with a `functions` and an `endpoints` subnet and an NSG.
 - **Local adapter.** `LocalAzure` records bootstraps under `<state>/azure`. The deploy identity is a user-assigned identity in `rg-{project}-{environment}`, which also applies the templates; `federation` is its (stand-in) client id. `AzureBackupStyle` sends blob backups to `bv-teardown-{region}` in the backup subscription, and Cosmos DB exports to the locked `cloudinfra-teardown` container. `azure_mode` and `azure_backup_subscription` are settings.
+
+**MC-4b implementation notes.**
+- **Package.** The code is in `app/providers/azure/project/`.
+  - `ArmTemplateDialect` produces `{"data": …, "app": …}`, two ARM templates rendered as `main.json` and `app.json`. Blocks declare their names as variables in both, so either stack can refer to the other's resources (same resource group, same `uniqueString`).
+  - Every resource whose type accepts tags gets `variables('tags')`, with the ownership tags and the cost center as a deploy-time parameter.
+  - Resources carry their service id in `comments`, an ARM keyword, which keeps them traceable.
+- **Curated services.**
+  - **Storage:** a storage account with blob service settings, a `data` container and a lifecycle policy. ZRS, GZRS for DR, RA-GZRS for HA. A private endpoint when attached.
+  - **Functions:** a Flex Consumption app per region in the app stack. Its identity, code container (in a shared `stcode…` account) and host role are in the data stack.
+  - **Cosmos DB for NoSQL:** account, database `data` and container `data` with the `partition_key` setting.
+  - **Service Bus:** namespace and queue; Premium in DR/HA.
+  - **Contract:** a Key Vault secret.
+- **Connections.**
+  - Grants are role assignments in the data stack on exactly the target: blob container (with an ABAC path condition for a prefix), Cosmos SQL role assignment on the container, or the Service Bus queue.
+  - `event.notify` adds the storage account's system topic (data stack, once) and an Event Grid subscription per region in the app stack. The subscription is conditioned on `activationState == 'active'`, with native `subjectBeginsWith`/`subjectEndsWith`, so no preview notes are needed.
+- **Rules and lint.**
+  - `PairedRegionRule`: multi-region storage needs the primary's pair.
+  - Lint: broad roles, role assignments above the resource group, shared keys or public blobs, local auth on Cosmos DB and Service Bus, a function without its own identity.
+  - A schema rule checks type, API version and, for the pinned versions, every property and required property.
+- **Snapshot.** `azure_resource_types.json.gz` holds every type's API versions from `Azure/bicep-types-az`'s index, plus trimmed property schemas for the 19 pinned curated versions (writable properties, required ones, nested objects to depth 6; variants that disagree accept any value). The refresh is `python -m app.providers.azure.project.refresh`. Tier-2 types are checked for type and API version only, and use the latest stable version.
+- **Repository and workflow.**
+  - **Files:** `main.json`, `app.json`, `parameters/{env}.json`, `infra.json` and a README that points to `az bicep decompile`.
+  - **Workflow:** signs in with `azure/login@v2` and finds the deploy identity's principal for the deny-settings exclusion. It then runs what-if and `az stack group create` for the data stack (`detachAll`), then for each region's app stack (`deleteResources`), all with `denyWriteAndDelete`.
+  - **Variables:** subscription, client (the federated identity), tenant (`BootstrapOutputs.directory`), resource group, regions, and the function and endpoint subnets when attached.
+- **Verified with Bicep.** Generated templates (default, DR with network attachment, HA with every service, connection and a Tier-2 type) decompile and build with Bicep CLI 0.48.1 with no errors, only style warnings. This showed the code container's URL hard-coded `core.windows.net`; it now uses `environment().suffixes.storage`, for sovereign clouds.
 
 #### 22.11.9 Decisions and open questions
 

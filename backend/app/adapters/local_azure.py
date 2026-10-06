@@ -42,7 +42,8 @@ class LocalAzure(LocalCloud):
                     f"/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-{request.project}-"
                     f"{request.environment}-deploy")
         return BootstrapOutputs(deployer_identity=identity, execution_identity=identity,
-                                federation=str(uuid.uuid5(uuid.NAMESPACE_URL, identity)))
+                                federation=str(uuid.uuid5(uuid.NAMESPACE_URL, identity)),
+                                directory=str(uuid.uuid5(uuid.NAMESPACE_URL, "cloudinfra:azure:tenant")))
 
     def _backup_style(self):
         return AzureBackupStyle()
