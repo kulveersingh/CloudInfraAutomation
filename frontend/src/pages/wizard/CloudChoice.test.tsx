@@ -28,7 +28,7 @@ describe("choosing the cloud", () => {
     renderWizard();
     await screen.findByLabelText("Cloud");
     expect([options("Cloud"), screen.getByLabelText("Cloud")]).toEqual(
-      [["Amazon Web Services", "Google Cloud"], expect.objectContaining({ value: "aws" })]);
+      [["Amazon Web Services", "Google Cloud", "Azure"], expect.objectContaining({ value: "aws" })]);
   });
 
   it("uses the chosen cloud's enabled regions and default pair", async () => {
@@ -110,5 +110,107 @@ describe("choosing the cloud", () => {
       fakeApi({ projectReadBack: vi.fn().mockResolvedValue({ ...PROJECT_READ_BACK, request }) }));
     const cloud = await screen.findByLabelText("Cloud");
     expect([cloud, (cloud as HTMLSelectElement).disabled]).toEqual([expect.objectContaining({ value: "gcp" }), true]);
+  });
+});
+
+describe("Azure", () => {
+  async function chooseAzure() {
+    await user().selectOptions(await screen.findByLabelText("Cloud"), "azure");
+  }
+
+  const value = (label: string) => (screen.getByLabelText(label) as HTMLSelectElement).value;
+
+  it("offers Azure's enabled regions, its services and its words", async () => {
+    renderWizard();
+    await chooseAzure();
+    await goTo("Services");
+    const storage = screen.getByRole("button", { name: "Add Storage account" });
+    await goTo("Resilience");
+    expect([storage, options("Primary region"), value("Primary region")]).toEqual([expect.anything(),
+      ["eastus2 · East US 2", "centralus · Central US", "westus2 · West US 2", "westcentralus · West Central US"],
+      "eastus2"]);
+  });
+
+  it("says storage replicates to the primary region's pair", async () => {
+    renderWizard();
+    await chooseAzure();
+    await goTo("Resilience");
+    await user().click(screen.getByLabelText(/DR · active \/ standby/));
+    expect(screen.getByText("Storage replicates to eastus2's pair, centralus.")).toBeInTheDocument();
+  });
+
+  it("moves the secondary region to the new primary's pair", async () => {
+    renderWizard();
+    await chooseAzure();
+    await goTo("Resilience");
+    await user().click(screen.getByLabelText(/DR · active \/ standby/));
+    await user().selectOptions(screen.getByLabelText("Primary region"), "westus2");
+    expect([value("Secondary region"), screen.getByText("Storage replicates to westus2's pair, westcentralus.")])
+      .toEqual(["westcentralus", expect.anything()]);
+  });
+
+  it("warns when a project with storage leaves the pair", async () => {
+    renderWizard();
+    await chooseAzure();
+    await goTo("Services");
+    await user().click(screen.getByRole("button", { name: "Add Storage account" }));
+    await goTo("Resilience");
+    await user().click(screen.getByLabelText(/HA pair/));
+    await user().selectOptions(screen.getByLabelText("Secondary region"), "westus2");
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Storage can only replicate to eastus2's pair: choose centralus as the secondary region, or remove the storage.");
+  });
+
+  it("does not warn without storage, nor in a single region", async () => {
+    renderWizard();
+    await chooseAzure();
+    await goTo("Resilience");
+    await user().click(screen.getByLabelText(/HA pair/));
+    await user().selectOptions(screen.getByLabelText("Secondary region"), "westus2");
+    const withoutStorage = screen.queryByRole("alert");
+    await user().click(screen.getByLabelText(/Single region/));
+    expect([withoutStorage, screen.queryByRole("alert"), screen.queryByText(/replicates to/)]).toEqual([null, null, null]);
+  });
+
+  it("keeps the secondary region when the primary has no pair", async () => {
+    renderWizard();
+    await chooseAzure();
+    await goTo("Resilience");
+    await user().click(screen.getByLabelText(/DR · active \/ standby/));
+    await user().selectOptions(screen.getByLabelText("Secondary region"), "westus2");
+    await user().selectOptions(screen.getByLabelText("Primary region"), "westcentralus");
+    expect([value("Secondary region"), screen.queryByText(/replicates to/), screen.queryByRole("alert")])
+      .toEqual(["westus2", null, null]);
+  });
+
+  it("warns that storage cannot replicate from a primary without a pair", async () => {
+    renderWizard();
+    await chooseAzure();
+    await goTo("Services");
+    await user().click(screen.getByRole("button", { name: "Add Storage account" }));
+    await goTo("Resilience");
+    await user().click(screen.getByLabelText(/DR · active \/ standby/));
+    await user().selectOptions(screen.getByLabelText("Primary region"), "westcentralus");
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Storage cannot replicate from westcentralus: it has no pair. Choose another primary region, or remove the storage.");
+  });
+
+  it("other clouds keep any pair of enabled regions", async () => {
+    renderWizard();
+    await screen.findByLabelText("Cloud");
+    await goTo("Resilience");
+    await user().click(screen.getByLabelText(/HA pair/));
+    await user().selectOptions(screen.getByLabelText("Primary region"), "us-east-2");
+    expect([value("Secondary region"), screen.getByText(/Any pair of enabled regions/)]).toEqual(["us-east-2", expect.anything()]);
+  });
+});
+
+describe("connections", () => {
+  it("speak of access to exactly the target, on every cloud", async () => {
+    renderWizard();
+    await screen.findByLabelText("Cloud");
+    await goTo("Connections");
+    expect([screen.getByText(/grants access to exactly the target resource/), screen.queryByText(/ARN/)])
+      .toEqual([expect.anything(), null]);
   });
 });

@@ -43,6 +43,20 @@ export const GCP_REGIONS: RegionInfo[] = [
   { provider: "gcp", id: "asia-southeast1", name: "Singapore", enabled: false },
 ];
 
+export const AZURE_REGIONS: RegionInfo[] = [
+  { provider: "azure", id: "eastus2", name: "East US 2", enabled: true },
+  { provider: "azure", id: "centralus", name: "Central US", enabled: true },
+  { provider: "azure", id: "westus2", name: "West US 2", enabled: true },
+  { provider: "azure", id: "westcentralus", name: "West Central US", enabled: true },
+  { provider: "azure", id: "swedencentral", name: "Sweden Central", enabled: false },
+];
+
+export const AZURE_CATALOG: CatalogEntry[] = [
+  { type: "storage.bucket", name: "Storage account", category: "Storage", multi_region: "replicated", settings: [] },
+  { type: "compute.function", name: "Function app (Flex Consumption)", category: "Compute", multi_region: "replicated",
+    settings: [] },
+];
+
 export const GCP_CATALOG: CatalogEntry[] = [
   { type: "storage.bucket", name: "Cloud Storage bucket", category: "Storage", multi_region: "replicated", settings: [] },
   { type: "compute.function", name: "Cloud Run function", category: "Compute", multi_region: "replicated", settings: [] },
@@ -100,17 +114,25 @@ export const PROJECTS: ProjectSummary[] = [
 
 export const PROVIDERS: CloudProviderInfo[] = [{
   id: "aws", name: "Amazon Web Services", default_regions: { primary: "us-east-1", secondary: "us-east-2" },
-  document_file: "template.yaml",
+  document_file: "template.yaml", region_pairs: {}, landing_zone: true,
   vocabulary: { cloud: "AWS", isolation_unit: "account", hierarchy_node: "OU", iac_document: "CloudFormation template",
     deploy_unit: "stack", preventive_policy: "SCP", private_network: "VPC", firewall_group: "security group",
     landing_zone_service: "Control Tower", control_catalog: "Control Tower controls" },
 }, {
   id: "gcp", name: "Google Cloud", default_regions: { primary: "us-east1", secondary: "us-east4" },
-  document_file: "main.tf.json",
+  document_file: "main.tf.json", region_pairs: {}, landing_zone: true,
   vocabulary: { cloud: "Google Cloud", isolation_unit: "project", hierarchy_node: "folder",
     iac_document: "Terraform configuration", deploy_unit: "Infrastructure Manager deployment",
     preventive_policy: "organization policy", private_network: "Shared VPC", firewall_group: "network tag",
     landing_zone_service: "Google Cloud Setup", control_catalog: "Security Command Center postures" },
+}, {
+  id: "azure", name: "Azure", default_regions: { primary: "eastus2", secondary: "centralus" },
+  document_file: "main.json", landing_zone: false,
+  region_pairs: { eastus2: "centralus", centralus: "eastus2", westus2: "westcentralus" },
+  vocabulary: { cloud: "Azure", isolation_unit: "subscription", hierarchy_node: "management group",
+    iac_document: "ARM template", deploy_unit: "deployment stack", preventive_policy: "Azure Policy",
+    private_network: "VNet", firewall_group: "network security group", landing_zone_service: "Azure Landing Zones",
+    control_catalog: "Azure Policy initiatives" },
 }];
 
 export const GCP_PROVIDER = PROVIDERS[1];
@@ -347,11 +369,12 @@ export function fakeApi(overrides: Partial<PlatformApiPort> = {}): PlatformApiPo
   return {
     orgRegistry: vi.fn().mockResolvedValue(PORTFOLIOS),
     environments: vi.fn().mockResolvedValue(ENVIRONMENTS),
-    regions: vi.fn().mockImplementation(async (provider?: string) => [...REGIONS, ...GCP_REGIONS].filter(
+    regions: vi.fn().mockImplementation(async (provider?: string) => [...REGIONS, ...GCP_REGIONS, ...AZURE_REGIONS].filter(
       (region) => provider === undefined || region.provider === provider)),
     setRegionEnabled: vi.fn().mockImplementation(async (provider: string, id: string, enabled: boolean) => ({
-      ...[...REGIONS, ...GCP_REGIONS].find((region) => region.provider === provider && region.id === id)!, enabled })),
-    catalog: vi.fn().mockImplementation(async (provider: string) => (provider === "gcp" ? GCP_CATALOG : CATALOG)),
+      ...[...REGIONS, ...GCP_REGIONS, ...AZURE_REGIONS].find((region) => region.provider === provider && region.id === id)!, enabled })),
+    catalog: vi.fn().mockImplementation(async (provider: string) => (
+      { gcp: GCP_CATALOG, azure: AZURE_CATALOG }[provider] ?? CATALOG)),
     searchTypes: vi.fn().mockImplementation(async (provider: string) => (provider === "gcp"
       ? [{ type: "google_pubsub_schema", service: "pubsub", required: ["name"] }]
       : [{ type: "AWS::SNS::Topic", service: "SNS", required: [] },

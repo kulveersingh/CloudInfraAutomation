@@ -171,6 +171,20 @@ def test_settings_name_the_azure_backup_subscription(settings):
 
 # ---- what is not there yet ----
 
+def test_the_description_gives_the_region_pairs_and_no_landing_zone_yet():
+    described = provider().describe()
+    assert (described["region_pairs"]["eastus2"], described["region_pairs"]["brazilsouth"], described["landing_zone"]) == (
+        "centralus", "southcentralus", False)
+
+
+@pytest.mark.parametrize("cloud", ["aws", "gcp"])
+def test_other_clouds_have_no_pairs_and_a_landing_zone(cloud):
+    from app.providers.base import ProviderRegistry
+
+    described = ProviderRegistry.default().get(cloud).describe()
+    assert (described["region_pairs"], described["landing_zone"]) == ({}, True)
+
+
 def test_the_landing_zone_is_still_to_come():
     with pytest.raises(ValidationFailedError, match="The Azure landing zone is not available yet."):
         provider().landing_zone()

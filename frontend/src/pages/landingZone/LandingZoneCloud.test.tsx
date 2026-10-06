@@ -35,7 +35,7 @@ async function fillGoogleCloud() {
 const lastRequest = (api: PlatformApiPort) => vi.mocked(api.proposeLandingZone).mock.calls.at(-1)![0];
 
 describe("the landing zone's cloud", () => {
-  it("starts on AWS and offers every cloud", async () => {
+  it("starts on AWS and offers only the clouds that have a landing zone", async () => {
     renderPage();
     const cloud = await screen.findByLabelText("Cloud");
     expect([cloud, within(cloud).getAllByRole("option").map((option) => option.textContent)]).toEqual(
@@ -78,6 +78,16 @@ describe("the landing zone's cloud", () => {
     expect([lastRequest(api).provider, lastRequest(api).answers.provider_answers, lastRequest(api).answers.governed_regions])
       .toEqual(["gcp", { organization_id: "123456789012", billing_account: "01ABCD-23EF45-67GH89", domain: "acme.example",
         scc_tier: "standard" }, ["us-east1", "us-east4"]]);
+  });
+
+  it("says how Google Cloud creates projects and what the review generates", async () => {
+    renderPage();
+    await chooseGoogleCloud();
+    await goTo("Projects");
+    const accounts = screen.getByText(/created by the platform's Terraform/);
+    await goTo("Review");
+    expect([accounts, screen.getByText(/proposes the folder structure from your answers and generates the Terraform /),
+      screen.queryByText(/Control Tower Account Factory|CloudFormation/)]).toEqual([expect.anything(), expect.anything(), null]);
   });
 
   it("speaks of folders and projects", async () => {
