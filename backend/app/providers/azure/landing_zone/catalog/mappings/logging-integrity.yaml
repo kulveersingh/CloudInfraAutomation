@@ -1,0 +1,6 @@
+pack: logging-integrity
+controls:
+- cloudinfra-deny-delete-log-stores
+- cf820ca0-f99e-4f3e-84fb-66e913812d21
+- a6fb4358-5bf4-4ad7-ba82-2cd2f41ce5e9
+- f8d36e2f-389b-4ee4-898d-21aeb69a0f45

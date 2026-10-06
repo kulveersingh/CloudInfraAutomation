@@ -1,0 +1,10 @@
+pack: network-hardening
+controls:
+- cloudinfra-deny-peering-outside-hub
+- cloudinfra-deny-cross-environment-private-endpoints
+- 88c0b9da-ce96-4b03-9635-f29a937e2900
+- 6d555dd1-86f2-4f1c-8ed7-5abae7c6cbab
+- a4af4a39-4135-47fb-b175-47fbdf85311d
+- c251913d-7d24-4958-af87-478ed3b9ba41
+- 9daedab3-fb2d-461e-b861-71790eead4f6
+- b6e2945c-0b7b-40f5-9233-7a5323b5cdc6

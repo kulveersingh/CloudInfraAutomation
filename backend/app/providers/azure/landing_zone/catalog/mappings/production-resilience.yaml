@@ -1,0 +1,6 @@
+pack: production-resilience
+controls:
+- cloudinfra-deny-delete-data-stores
+- bf045164-79ba-4215-8f95-f8048dc1780b
+- d38fc420-0735-4ef3-ac11-c806f651a570
+- 48af4db5-9b8b-401c-8e74-076be876a430

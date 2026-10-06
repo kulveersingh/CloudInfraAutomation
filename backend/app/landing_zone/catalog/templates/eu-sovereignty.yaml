@@ -21,3 +21,4 @@ edits: []
 regions:
   aws: {home_region: eu-central-1, governed_regions: [eu-central-1, eu-west-1]}
   gcp: {home_region: europe-west3, governed_regions: [europe-west3, europe-west1]}
+  azure: {home_region: westeurope, governed_regions: [westeurope, northeurope]}

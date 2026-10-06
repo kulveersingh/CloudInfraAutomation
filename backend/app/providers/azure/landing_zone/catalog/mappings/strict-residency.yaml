@@ -1,0 +1,5 @@
+pack: strict-residency
+controls:
+- e56962a6-4747-49cd-b67b-bf8b01975c4c
+- e765b5de-1225-4ba3-bd56-1ac6695af988
+- cloudinfra-deny-geo-storage-outside-allowed-regions

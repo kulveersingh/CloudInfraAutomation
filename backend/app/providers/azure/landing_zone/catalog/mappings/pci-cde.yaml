@@ -1,0 +1,9 @@
+pack: pci-cde
+controls:
+- cloudinfra-deny-public-ip-addresses
+- 83a86a26-fd1f-447c-b59d-e51f44264114
+- 1b8ca024-1d5c-4dec-8995-b1a932b41780
+- b2982f36-99f2-4db5-8eff-283140c09693
+- 22730e10-96f6-4aac-ad84-9383d35b5917
+- c251913d-7d24-4958-af87-478ed3b9ba41
+- a6fb4358-5bf4-4ad7-ba82-2cd2f41ce5e9

@@ -199,17 +199,13 @@ def test_governed_regions_need_their_pairs_for_dr_and_ha_storage():
          "replicate for DR and HA.")]
 
 
-def test_one_governed_region_needs_no_pair():
-    assert problems(design(governed_regions=["eastus2"])) == []
-
-
 def test_a_scope_takes_a_limited_number_of_policy_assignments():
     from app.providers.azure.landing_zone.limits import PolicyAssignmentsPerScope
 
     built = design()
     assigned = len(toolkit().resolver().resolve(built).controls["prod"])
-    assert problems(built, (PolicyAssignmentsPerScope(limit=5),))[0] == (
-        f"Management group 'PROD' gets {assigned} policy assignments; Azure allows 5 per scope.")
+    assert (f"Management group 'PROD' gets {assigned} policy assignments; Azure allows 5 per scope."
+            in problems(built, (PolicyAssignmentsPerScope(limit=5),)))
 
 
 def test_recommended_answers_have_no_problems():

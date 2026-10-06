@@ -1,0 +1,316 @@
+# Azure control snapshot: the Azure Policy definitions the Azure pack mappings use (§22.12.4). Built-in
+# definitions are by their id, with the display names and effects of Azure/azure-policy (master, 2026-10-06);
+# `cloudinfra-` ones are the platform's own custom definitions. `effect` is what each is assigned with. Framework
+# mappings come with the refresh script; until it runs they show as intended alignment (unverified).
+source: ''
+mappings_refreshed: null
+prerequisites:
+  proactive: null
+controls:
+  83a86a26-fd1f-447c-b59d-e51f44264114:
+    name: Network interfaces should not have public IPs
+    behavior: PREVENTIVE
+    severity: HIGH
+    implementation: BUILT_IN_POLICY
+    effect: Deny
+  404c3081-a854-4457-ae30-26a93ef643f9:
+    name: Secure transfer to storage accounts should be enabled
+    behavior: PREVENTIVE
+    severity: HIGH
+    implementation: BUILT_IN_POLICY
+    effect: Deny
+  4fa4b6c0-31ca-4c0d-b10d-24b96f62a751:
+    name: Storage account public access should be disallowed
+    behavior: PREVENTIVE
+    severity: HIGH
+    implementation: BUILT_IN_POLICY
+    effect: Deny
+  8c6a50c6-9ffd-4ae7-986f-5fa6111f9a54:
+    name: Storage accounts should prevent shared key access
+    behavior: PREVENTIVE
+    severity: HIGH
+    implementation: BUILT_IN_POLICY
+    effect: Deny
+  4e6c27d5-a6ee-49cf-b2b4-d8fe90fa2b8b:
+    name: Users must authenticate with multi-factor authentication to create or update resources
+    behavior: DETECTIVE
+    severity: HIGH
+    implementation: BUILT_IN_POLICY
+    effect: Audit
+  339353f6-2387-4a45-abe4-7f529d121046:
+    name: Guest accounts with owner permissions on Azure resources should be removed
+    behavior: DETECTIVE
+    severity: HIGH
+    implementation: BUILT_IN_POLICY
+    effect: AuditIfNotExists
+  22730e10-96f6-4aac-ad84-9383d35b5917:
+    name: Management ports should be closed on your virtual machines
+    behavior: DETECTIVE
+    severity: HIGH
+    implementation: BUILT_IN_POLICY
+    effect: AuditIfNotExists
+  b2982f36-99f2-4db5-8eff-283140c09693:
+    name: Storage accounts should disable public network access
+    behavior: PREVENTIVE
+    severity: HIGH
+    implementation: BUILT_IN_POLICY
+    effect: Deny
+  797b37f7-06b8-444c-b1ad-fc62867f335a:
+    name: Azure Cosmos DB should disable public network access
+    behavior: PREVENTIVE
+    severity: HIGH
+    implementation: BUILT_IN_POLICY
+    effect: Deny
+  1b8ca024-1d5c-4dec-8995-b1a932b41780:
+    name: Public network access on Azure SQL Database should be disabled
+    behavior: PREVENTIVE
+    severity: HIGH
+    implementation: BUILT_IN_POLICY
+    effect: Deny
+  405c5871-3e91-4644-8a63-58e19d68ff5b:
+    name: Azure Key Vault should disable public network access
+    behavior: PREVENTIVE
+    severity: HIGH
+    implementation: BUILT_IN_POLICY
+    effect: Deny
+  cbd11fd3-3002-4907-b6c8-579f0e700e13:
+    name: Service Bus Namespaces should disable public network access
+    behavior: PREVENTIVE
+    severity: HIGH
+    implementation: BUILT_IN_POLICY
+    effect: Deny
+  5450f5bd-9c72-4390-a9c4-a7aba4edfdd2:
+    name: Cosmos DB database accounts should have local authentication methods disabled
+    behavior: PREVENTIVE
+    severity: HIGH
+    implementation: BUILT_IN_POLICY
+    effect: Deny
+  cfb11c26-f069-4c14-8e36-56c394dae5af:
+    name: Azure Service Bus namespaces should have local authentication methods disabled
+    behavior: PREVENTIVE
+    severity: HIGH
+    implementation: BUILT_IN_POLICY
+    effect: Deny
+  b3a22bc9-66de-45fb-98fa-00f5df42f41a:
+    name: Azure SQL Database should have Microsoft Entra-only authentication enabled
+    behavior: PREVENTIVE
+    severity: HIGH
+    implementation: BUILT_IN_POLICY
+    effect: Deny
+  32e6bbec-16b6-44c2-be37-c5b672d103cf:
+    name: Azure SQL Database should be running TLS version 1.2 or newer
+    behavior: PREVENTIVE
+    severity: MEDIUM
+    implementation: BUILT_IN_POLICY
+    effect: Deny
+  6edd7eda-6dd8-40f7-810d-67160c639cd9:
+    name: Storage accounts should use private link
+    behavior: DETECTIVE
+    severity: MEDIUM
+    implementation: BUILT_IN_POLICY
+    effect: AuditIfNotExists
+  4733ea7b-a883-42fe-8cac-97454c2a9e4a:
+    name: Storage accounts should have infrastructure encryption
+    behavior: DETECTIVE
+    severity: LOW
+    implementation: BUILT_IN_POLICY
+    effect: Audit
+  640d2586-54d2-465f-877f-9ffc1d2109f4:
+    name: Microsoft Defender for Storage should be enabled
+    behavior: DETECTIVE
+    severity: MEDIUM
+    implementation: BUILT_IN_POLICY
+    effect: AuditIfNotExists
+  abfb4388-5bf4-4ad7-ba82-2cd2f41ceae9:
+    name: Azure Defender for SQL should be enabled for unprotected Azure SQL servers
+    behavior: DETECTIVE
+    severity: MEDIUM
+    implementation: BUILT_IN_POLICY
+    effect: AuditIfNotExists
+  88c0b9da-ce96-4b03-9635-f29a937e2900:
+    name: Network interfaces should disable IP forwarding
+    behavior: PREVENTIVE
+    severity: MEDIUM
+    implementation: BUILT_IN_POLICY
+    effect: Deny
+  6d555dd1-86f2-4f1c-8ed7-5abae7c6cbab:
+    name: Function apps should only be accessible over HTTPS
+    behavior: PREVENTIVE
+    severity: MEDIUM
+    implementation: BUILT_IN_POLICY
+    effect: Deny
+  a4af4a39-4135-47fb-b175-47fbdf85311d:
+    name: App Service apps should only be accessible over HTTPS
+    behavior: PREVENTIVE
+    severity: MEDIUM
+    implementation: BUILT_IN_POLICY
+    effect: Deny
+  c251913d-7d24-4958-af87-478ed3b9ba41:
+    name: Flow logs should be configured for every network security group
+    behavior: DETECTIVE
+    severity: MEDIUM
+    implementation: BUILT_IN_POLICY
+    effect: Audit
+  9daedab3-fb2d-461e-b861-71790eead4f6:
+    name: All network ports should be restricted on network security groups associated to your virtual machine
+    behavior: DETECTIVE
+    severity: MEDIUM
+    implementation: BUILT_IN_POLICY
+    effect: AuditIfNotExists
+  b6e2945c-0b7b-40f5-9233-7a5323b5cdc6:
+    name: Network Watcher should be enabled
+    behavior: DETECTIVE
+    severity: LOW
+    implementation: BUILT_IN_POLICY
+    effect: AuditIfNotExists
+  cf820ca0-f99e-4f3e-84fb-66e913812d21:
+    name: Resource logs in Key Vault should be enabled
+    behavior: DETECTIVE
+    severity: MEDIUM
+    implementation: BUILT_IN_POLICY
+    effect: AuditIfNotExists
+  a6fb4358-5bf4-4ad7-ba82-2cd2f41ce5e9:
+    name: Auditing on SQL server should be enabled
+    behavior: DETECTIVE
+    severity: MEDIUM
+    implementation: BUILT_IN_POLICY
+    effect: AuditIfNotExists
+  f8d36e2f-389b-4ee4-898d-21aeb69a0f45:
+    name: Resource logs in Service Bus should be enabled
+    behavior: DETECTIVE
+    severity: LOW
+    implementation: BUILT_IN_POLICY
+    effect: AuditIfNotExists
+  0b60c0b2-2dc2-4e1c-b5c9-abbed971de53:
+    name: Key vaults should have deletion protection enabled
+    behavior: PREVENTIVE
+    severity: HIGH
+    implementation: BUILT_IN_POLICY
+    effect: Deny
+  12d4fa5e-1f9f-4c21-97a9-b99b3c6611b5:
+    name: Azure Key Vault should use RBAC permission model
+    behavior: PREVENTIVE
+    severity: MEDIUM
+    implementation: BUILT_IN_POLICY
+    effect: Deny
+  0a370ff3-6cab-4e85-8995-295fd854c5b8:
+    name: SQL servers should use customer-managed keys to encrypt data at rest
+    behavior: PREVENTIVE
+    severity: MEDIUM
+    implementation: BUILT_IN_POLICY
+    effect: Deny
+  1f905d99-2ab7-462c-a6b0-f709acca6c8f:
+    name: Azure Cosmos DB accounts should use customer-managed keys to encrypt data at rest
+    behavior: PREVENTIVE
+    severity: MEDIUM
+    implementation: BUILT_IN_POLICY
+    effect: Deny
+  6fac406b-40ca-413b-bf8e-0bf964659c25:
+    name: Storage accounts should use customer-managed key for encryption
+    behavior: DETECTIVE
+    severity: MEDIUM
+    implementation: BUILT_IN_POLICY
+    effect: Audit
+  152b15f7-8e1f-4c1f-ab71-8c010ba5dbc0:
+    name: Key Vault keys should have an expiration date
+    behavior: DETECTIVE
+    severity: MEDIUM
+    implementation: BUILT_IN_POLICY
+    effect: Audit
+  98728c90-32c7-4049-8429-847dc0f4fe37:
+    name: Key Vault secrets should have an expiration date
+    behavior: DETECTIVE
+    severity: MEDIUM
+    implementation: BUILT_IN_POLICY
+    effect: Audit
+  d8cf8476-a2ec-4916-896e-992351803c44:
+    name: Keys should have a rotation policy ensuring that their rotation is scheduled within the specified number of days
+      after creation.
+    behavior: DETECTIVE
+    severity: MEDIUM
+    implementation: BUILT_IN_POLICY
+    effect: Audit
+  bf045164-79ba-4215-8f95-f8048dc1780b:
+    name: Geo-redundant storage should be enabled for Storage Accounts
+    behavior: DETECTIVE
+    severity: MEDIUM
+    implementation: BUILT_IN_POLICY
+    effect: Audit
+  d38fc420-0735-4ef3-ac11-c806f651a570:
+    name: Long-term geo-redundant backup should be enabled for Azure SQL Databases
+    behavior: DETECTIVE
+    severity: MEDIUM
+    implementation: BUILT_IN_POLICY
+    effect: AuditIfNotExists
+  48af4db5-9b8b-401c-8e74-076be876a430:
+    name: Geo-redundant backup should be enabled for Azure Database for PostgreSQL
+    behavior: DETECTIVE
+    severity: MEDIUM
+    implementation: BUILT_IN_POLICY
+    effect: Audit
+  e56962a6-4747-49cd-b67b-bf8b01975c4c:
+    name: Allowed locations
+    behavior: PREVENTIVE
+    severity: HIGH
+    implementation: BUILT_IN_POLICY
+    effect: Deny
+    parameters:
+    - AllowedRegions
+  e765b5de-1225-4ba3-bd56-1ac6695af988:
+    name: Allowed locations for resource groups
+    behavior: PREVENTIVE
+    severity: HIGH
+    implementation: BUILT_IN_POLICY
+    effect: Deny
+    parameters:
+    - AllowedRegions
+  cloudinfra-deny-subnet-without-nsg:
+    name: Subnets must have a network security group
+    behavior: PREVENTIVE
+    severity: HIGH
+    implementation: CUSTOM_POLICY
+    effect: Deny
+  cloudinfra-deny-subscription-role-assignments:
+    name: Role assignments only at resource group or resource scope below the platform
+    behavior: PREVENTIVE
+    severity: HIGH
+    implementation: CUSTOM_POLICY
+    effect: Deny
+  cloudinfra-deny-peering-outside-hub:
+    name: Virtual network peering only to the region's hub
+    behavior: PREVENTIVE
+    severity: HIGH
+    implementation: CUSTOM_POLICY
+    effect: Deny
+  cloudinfra-deny-cross-environment-private-endpoints:
+    name: Private endpoints only to resources in the same environment
+    behavior: PREVENTIVE
+    severity: HIGH
+    implementation: CUSTOM_POLICY
+    effect: Deny
+  cloudinfra-deny-delete-log-stores:
+    name: Do not delete the central Log Analytics workspace or log storage account
+    behavior: PREVENTIVE
+    severity: HIGH
+    implementation: CUSTOM_POLICY
+    effect: DenyAction
+  cloudinfra-deny-delete-data-stores:
+    name: Do not delete storage accounts, Cosmos DB accounts, SQL servers or Backup vaults
+    behavior: PREVENTIVE
+    severity: HIGH
+    implementation: CUSTOM_POLICY
+    effect: DenyAction
+  cloudinfra-deny-geo-storage-outside-allowed-regions:
+    name: Geo-redundant storage only when the pair is an allowed region
+    behavior: PREVENTIVE
+    severity: MEDIUM
+    implementation: CUSTOM_POLICY
+    effect: Deny
+    parameters:
+    - AllowedRegions
+  cloudinfra-deny-public-ip-addresses:
+    name: No public IP addresses on load balancers and application gateways
+    behavior: PREVENTIVE
+    severity: HIGH
+    implementation: CUSTOM_POLICY
+    effect: Deny

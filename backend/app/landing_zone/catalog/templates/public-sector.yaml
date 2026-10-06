@@ -21,3 +21,4 @@ edits: []
 regions:
   aws: {home_region: us-east-1, governed_regions: [us-east-1, us-west-2]}
   gcp: {home_region: us-east1, governed_regions: [us-east1, us-west1]}
+  azure: {home_region: eastus2, governed_regions: [eastus2, centralus]}

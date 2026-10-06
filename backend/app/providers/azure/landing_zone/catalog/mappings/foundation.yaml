@@ -1,0 +1,11 @@
+pack: foundation
+controls:
+- 83a86a26-fd1f-447c-b59d-e51f44264114
+- cloudinfra-deny-subnet-without-nsg
+- 404c3081-a854-4457-ae30-26a93ef643f9
+- 4fa4b6c0-31ca-4c0d-b10d-24b96f62a751
+- 8c6a50c6-9ffd-4ae7-986f-5fa6111f9a54
+- cloudinfra-deny-subscription-role-assignments
+- 4e6c27d5-a6ee-49cf-b2b4-d8fe90fa2b8b
+- 339353f6-2387-4a45-abe4-7f529d121046
+- 22730e10-96f6-4aac-ad84-9383d35b5917

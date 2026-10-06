@@ -1,10 +1,11 @@
 # CloudInfraAutomation — Architecture
 
-**Status:** v2.40; MC-5 design (§22.12) proposed, awaiting approval; implementation of approved sections in progress. No code is written until this design is approved.
+**Status:** v2.41, approved; implementation in progress. No code is written until this design is approved. No code is written until this design is approved.
 **Date:** 2026-10-05
 **Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9). Every solution is **DR-capable**: it can run in one region, as DR (primary active, secondary standby) or as an HA pair (both active), with **any region pair chosen in the UI** (default us-east-1 / us-east-2) (§10).
 
 **Changes in v2:** added the org registry and tagging strategy (§4); permissions based on tags (§4.5–4.8); multi-account, five-environment model (§5); promotion pipeline (§8). Payload, provisioning, security and scaling sections are updated to match.
+**Changes in v2.41:** MC-5 design approved; MC-5a: the Azure landing-zone design with provider answers, subscription naming, management groups and subscriptions, an Azure Policy control snapshot built from Azure/azure-policy with a mapping for every pack, checks, advice and template regions (§22.12 notes).
 **Changes in v2.40:** MC-5 design (§22.12): the Azure landing zone as management groups under the organization's own, subscription vending against an EA or MCA billing scope, Azure Policy pack mappings (all inherited, audit policies always deployed), hub-and-spoke with Azure Firewall and central private DNS, a backup subscription with locked vaults and Resource Guard, deployment stacks at management-group scope; proposed for approval.
 **Changes in v2.39:** MC-4e: Azure in the project wizard with its regions, services and words; the region-pair hint, a secondary that follows the primary's pair, and warnings for storage outside the pair; landing-zone clouds limited to those that have one; cloud-neutral wording; MC-4 complete (§22.11 notes).
 **Changes in v2.38:** MC-4d: Azure release rows from the templates and what-if, where any change to data is medium risk; teardown with names computed from ARM's `uniqueString`, blob backups and Cosmos DB exports into the locked vault, restore with adoption; the workflow recovers the soft-deleted contract vault; wider vault column (§22.11 notes).
@@ -4457,7 +4458,7 @@ Deny settings exclude only the deploy identity and the platform's teardown ident
 
 ### 22.12 MC-5 in detail: the Azure landing zone
 
-**Status: proposed; awaiting approval. No code is written until it is approved.**
+**Status: approved (MC5-1…MC5-12 as recommended); implementation in progress.**
 
 **Goal.** An admin designs an Azure landing zone with the same questionnaire, tree editor, industry templates and control packs as on AWS and Google Cloud (§20, §22.10). The platform then generates ARM templates applied as deployment stacks, gets them approved by a second admin, applies them, and fills the registries:
 - environment subscriptions become account bindings;
@@ -4590,6 +4591,33 @@ Two packs that assign the same definition to one management group are merged int
 | **MC-5c Apply and registries** | `LocalAzureLandingZone`; account bindings, networks and the backup subscription filled; teardown vault resolved from the landing zone | Approve → applied → an Azure project provisions into a vended subscription and tears down into the landing zone's vault, locally |
 | **MC-5d UI** | Azure in the landing-zone picker, its questions, controls and words | 100% frontend coverage |
 
+**MC-5a implementation notes.**
+- **Package.** `app/providers/azure/landing_zone/`: `answers.py`, `controls.py`, `limits.py`, an interim `bundle.py` (`design.json`, diagrams, `controls.md`; the stacks come with MC-5b) and `toolkit.py`. `AzureProvider.landing_zone()` returns the toolkit. `has_landing_zone` stays false, so the UI does not offer Azure until it can be applied; the API proposes Azure designs already.
+- **Answers.** `AzureLandingZoneAnswers`:
+  - `tenant_id`, a GUID;
+  - `billing_scope`, an EA enrollment account or an MCA invoice section;
+  - `groups`, four required Entra group object ids (platform, network and security admins, backup super users), which cannot be defaulted the way Google Cloud's group emails are;
+  - `defender` (`foundational`) and `firewall_tier` (`standard`).
+- **Naming and units.**
+  - Subscriptions are `{org}-{suffix}`.
+  - Security holds `management` and `security`, plus `security-tooling` when chosen: a subscription of its own for Sentinel, as on the other clouds, rather than inside `security`.
+  - Infrastructure holds `connectivity`, `shared-services`, `identity`, `backup` and `monitoring`.
+  - Environments have no host subscription, because spokes live in each workload subscription (MC5-11).
+- **Control snapshot.** 50 controls: 42 built-in definitions and 8 of the platform's own (`cloudinfra-…`).
+  - The built-ins were read from `Azure/azure-policy` (master, 2026-10-06). Each is identified by its definition id, with its display name, and none is deprecated. The effect each is assigned with (`Deny`, `DenyAction`, `Audit` or `AuditIfNotExists`) is one the definition allows.
+  - This settles L5's ids now. Frameworks stay "intended alignment (unverified)" until the refresh script maps them.
+  - The old "MFA for owner accounts" definition is deprecated, so foundation audits its successor, "Users must authenticate with multi-factor authentication to create or update resources". It is detective (`Audit`), so it cannot lock out break-glass access.
+  - Customer-managed keys can only be audited for storage accounts, so that one is detective; SQL and Cosmos DB deny.
+- **Checks.**
+  - Management groups at most six levels below the tenant root, counting the organization's own.
+  - Management group ids (`{org}-{key}`) at most 90 characters.
+  - Subscription names at most 64 characters, and unique.
+  - Every governed region's pair is governed too. Designs always govern two or more regions, so this always applies.
+  - At most 200 policy assignments per management group.
+  - The merged-parameter check is not needed yet: `AllowedRegions` has a single source, the governed regions.
+- **Advice.** Defender plans' cost; local egress skipping the firewall; strict residency against paired storage; the Identity subscription only for AD DS; subscription creation limits on the billing account above 20 subscriptions.
+- **Templates.** Public sector `eastus2`/`centralus`, EU sovereignty `westeurope`/`northeurope`: both are pairs. Every template proposes on Azure without problems.
+
 #### 22.12.9 Decisions and open questions
 
 | # | Decision | Recommendation |
@@ -4613,4 +4641,4 @@ Two packs that assign the same definition to one management group are merged int
 | L2 | Subscription aliases inside a management-group deployment stack | Verify that a stack at `{org}` manages tenant-scope aliases through nested deployments, and that `detachAll` leaves them untouched. Fallback: the workflow creates aliases with `az account alias create`, and the stack manages only their placement and tags. |
 | L3 | Network Security Perimeter | Check which of Storage, Cosmos DB, Key Vault and Service Bus it covers at general availability; add it per environment when it covers MC-4's services. |
 | L4 | Creating `{org}` under the tenant root | Tenants whose hierarchy settings require write permission at the root need a Global Administrator to elevate access once, for the seed only. The seed script checks and says so. |
-| L5 | Policy definition ids | The snapshot's refresh script confirms each built-in definition's id, effect and framework mapping from `Azure/azure-policy`. Until it runs, the frameworks show as "intended alignment (unverified)", as with T2. |
+| L5 | Policy definition ids | MC-5a took the ids, display names and allowed effects from `Azure/azure-policy`. The refresh script adds the framework mappings; until it runs, they show as "intended alignment (unverified)", as with T2. |

@@ -1,4 +1,3 @@
-from app.errors import ValidationFailedError
 from app.providers.base import CloudProvider, Vocabulary
 
 # Azure's fixed region pairs (geo-redundant storage replicates to the pair); regions without a pair are absent.
@@ -19,7 +18,7 @@ class AzureProvider(CloudProvider):
     id = "azure"
     name = "Azure"
     document_file = "main.json"
-    has_landing_zone = False  # until MC-5
+    has_landing_zone = False  # offered once it can be applied (MC-5c, MC-5d)
 
     def vocabulary(self):
         return Vocabulary(cloud="Azure", isolation_unit="subscription", hierarchy_node="management group",
@@ -59,4 +58,6 @@ class AzureProvider(CloudProvider):
         return AzureResourceClassifier()
 
     def landing_zone(self):
-        raise ValidationFailedError("The Azure landing zone is not available yet.")
+        from app.providers.azure.landing_zone.toolkit import azure_landing_zone
+
+        return azure_landing_zone()
