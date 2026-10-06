@@ -152,3 +152,38 @@ def test_designs_record_unit_owners():
 
 def test_catalog_is_the_registry():
     assert CATALOG.portfolios == ["pf-payments", "pf-retail"]
+
+
+def test_environments_the_registry_does_not_know_are_not_bound(client, session):
+    from app.registry.repository import RegistryRepository
+
+    body = gcp_request_body(environment_ids=["sandbox", "dev", "qa", "stage", "prod"])
+    design_id = client.post(f"{BASE}/designs", json=body, headers=ALEX).json()["id"]
+    client.post(f"{BASE}/designs/{design_id}:submit", headers=ALEX)
+    response = client.post(f"{BASE}/designs/{design_id}:approve", json={"comment": "ok"}, headers=RILEY)
+    session.expire_all()
+    assert (response.json()["status"], RegistryRepository(session).account_for("gcp", "pf-payments", "qa")) == (
+        "applied", None)
+
+
+def test_a_binding_is_created_where_there_was_none(session):
+    from app.registry.repository import RegistryRepository
+    from app.seed import ReferenceDataSeeder
+
+    ReferenceDataSeeder(session).seed()
+    repository = RegistryRepository(session)
+    repository.bind_account("azure", "pf-payments", "prod", "subscription-1")
+    repository.commit()
+    assert repository.account_for("azure", "pf-payments", "prod") == "subscription-1"
+
+
+def test_a_cloud_without_an_executor_cannot_apply_its_landing_zone(client, monkeypatch):
+    from app.providers.aws.landing_zone.local_executor import LocalLandingZoneExecutor
+
+    monkeypatch.setattr(AdapterFactory, "landing_zone_executors",
+                        lambda self, settings: {"aws": LocalLandingZoneExecutor(settings.local_state_dir)})
+    design_id = client.post(f"{BASE}/designs", json=gcp_request_body(), headers=ALEX).json()["id"]
+    client.post(f"{BASE}/designs/{design_id}:submit", headers=ALEX)
+    response = client.post(f"{BASE}/designs/{design_id}:approve", json={"comment": "ok"}, headers=RILEY)
+    assert (response.status_code, response.json()["detail"]) == (
+        422, "Applying a Google Cloud landing zone is not available yet.")
