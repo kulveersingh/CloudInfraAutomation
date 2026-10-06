@@ -47,6 +47,16 @@ class RegistryRepository:
             models.AccountBinding.provider == provider, models.AccountBinding.portfolio_id == portfolio_id,
             models.AccountBinding.environment_id == environment_id))
 
+    def bind_account(self, provider: str, portfolio_id: str, environment_id: str, account_id: str) -> None:
+        """Binds a portfolio's environment to an isolation unit, replacing the binding it had."""
+        binding = self._session.scalar(select(models.AccountBinding).where(
+            models.AccountBinding.provider == provider, models.AccountBinding.portfolio_id == portfolio_id,
+            models.AccountBinding.environment_id == environment_id))
+        if binding is None:
+            binding = models.AccountBinding(provider=provider, portfolio_id=portfolio_id, environment_id=environment_id)
+            self._session.add(binding)
+        binding.account_id = account_id
+
     def override_for(self, project_name: str) -> models.CostCenterOverride | None:
         return self._session.get(models.CostCenterOverride, project_name)
 

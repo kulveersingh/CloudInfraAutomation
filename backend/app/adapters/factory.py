@@ -5,6 +5,7 @@ from app.adapters.ports import CloudPorts, GitHubPort, ProviderPort
 from app.config import Settings
 from app.landing_zone.executor import LandingZoneExecutor
 from app.providers.aws.landing_zone.local_executor import LocalLandingZoneExecutor
+from app.providers.gcp.landing_zone.local_executor import LocalGcpLandingZone
 from app.releases.executor import LocalReleaseExecutor, ReleaseExecutor
 
 
@@ -20,7 +21,8 @@ class AdapterFactory:
         self._clouds: dict[str, dict[str, type[ProviderPort]]] = {"aws": {"local": LocalAws}, "gcp": {"local": LocalGcp}}
         self._executors: dict[str, type[ReleaseExecutor]] = {"local": LocalReleaseExecutor}
         # Landing-zone executors per cloud, by mode; a cloud without one cannot apply a landing zone yet.
-        self._landing_zone: dict[str, dict[str, type[LandingZoneExecutor]]] = {"aws": {"local": LocalLandingZoneExecutor}}
+        self._landing_zone: dict[str, dict[str, type[LandingZoneExecutor]]] = {"aws": {"local": LocalLandingZoneExecutor},
+                                                                             "gcp": {"local": LocalGcpLandingZone}}
 
     def register_github(self, mode: str, adapter_class: type[GitHubPort]) -> None:
         self._github[mode] = adapter_class

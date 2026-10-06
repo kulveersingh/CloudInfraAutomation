@@ -89,6 +89,10 @@ class RegistryService:
 
     # ---- environments, accounts, regions ----
 
+    def bind_account(self, provider: str, portfolio_id: str, environment_id: str, account_id: str) -> None:
+        """A landing zone vended this unit for the portfolio's environment (§20.7, §22.10.6)."""
+        self._repository.bind_account(provider, portfolio_id, environment_id, account_id)
+
     def environments(self) -> list[dict]:
         return [{"id": env.id, "name": env.name, "tier": env.tier, "position": env.position,
                  "requires_approval": env.requires_approval} for env in self._repository.environments()]

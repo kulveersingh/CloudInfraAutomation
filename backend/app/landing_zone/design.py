@@ -24,6 +24,7 @@ class AccountPlan:
     added: bool = False
     enabled: bool = True
     domain: str | None = None
+    owner: str | None = None  # the registry portfolio an environment unit belongs to, when units are per portfolio
 
     @property
     def label(self) -> str:

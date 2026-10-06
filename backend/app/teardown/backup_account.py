@@ -1,23 +1,23 @@
+from app.landing_zone.answers import LandingZoneAnswers
 from app.landing_zone.repository import LandingZoneRepository
-from app.providers.base import DEFAULT_PROVIDER
+from app.providers.base import DEFAULT_PROVIDER, ProviderRegistry
 
 
 class BackupAccountResolver:
-    """The central backup account of each cloud: configured explicitly, or the applied landing zone's `<org>-backup`
-    account. Landing zones are on AWS until MC-3, so other clouds use only their configured account."""
+    """Each cloud's central backup account (on Google Cloud, the vault project): configured explicitly, or the
+    backup unit its applied landing zone vended (§21.9, §22.10.6)."""
 
-    def __init__(self, configured: dict[str, str | None], landing_zone: LandingZoneRepository,
-                 landing_zone_provider: str = DEFAULT_PROVIDER):
+    def __init__(self, configured: dict[str, str | None], landing_zone: LandingZoneRepository):
         self._configured = configured
         self._landing_zone = landing_zone
-        self._landing_zone_provider = landing_zone_provider
 
     def resolve(self, provider: str = DEFAULT_PROVIDER) -> str | None:
         if self._configured.get(provider):
             return self._configured[provider]
-        if provider != self._landing_zone_provider:
-            return None
         record = self._landing_zone.latest_applied(provider)
         if record is None:
             return None
-        return (record.accounts or {}).get(f"{record.answers['organization_name']}-backup")
+        toolkit = ProviderRegistry.default().get(provider).landing_zone()
+        backup = toolkit.namer(LandingZoneAnswers.model_validate(record.answers)).unit(
+            toolkit.units.infrastructure["backup"]).name
+        return (record.accounts or {}).get(backup)

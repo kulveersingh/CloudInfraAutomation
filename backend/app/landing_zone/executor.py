@@ -20,6 +20,7 @@ class NetworkOutput:
 class LandingZoneOutputs:
     accounts: dict[str, str]
     networks: list[NetworkOutput] = field(default_factory=list)
+    vault_account: str | None = None  # the unit holding the locked teardown vault
 
 
 class LandingZoneExecutor(ABC):

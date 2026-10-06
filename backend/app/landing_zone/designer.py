@@ -64,13 +64,14 @@ class EnvironmentHandler(AnswerHandler):
             return self._sandbox_accounts(answers, catalog, namer)
         if answers.account_model == "environment":
             return [namer.unit(suffix)]
-        owners = catalog.portfolios if answers.account_model == "portfolio" else catalog.products
-        return [namer.unit(f"{_short(owner)}-{suffix}") for owner in owners]
+        if answers.account_model == "portfolio":
+            return [replace(namer.unit(f"{_short(owner)}-{suffix}"), owner=owner) for owner in catalog.portfolios]
+        return [namer.unit(f"{_short(owner)}-{suffix}") for owner in catalog.products]
 
     def _sandbox_accounts(self, answers, catalog, namer) -> list[AccountPlan]:
         if answers.sandbox.model == "developer":
             return [namer.fixed("developer-sandbox-01")]
-        return [namer.fixed(f"{_short(portfolio)}-sandbox") for portfolio in catalog.portfolios]
+        return [replace(namer.fixed(f"{_short(portfolio)}-sandbox"), owner=portfolio) for portfolio in catalog.portfolios]
 
     def _parents(self, workloads: list[OuNode]) -> list[OuNode]:
         return [OuNode(key=f"parent_{tier}", name=name, kind="parent", tier=tier,

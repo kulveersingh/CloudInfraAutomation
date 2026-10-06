@@ -150,6 +150,7 @@ class LandingZoneService:
         design = self._design_of(record)
         record.commit_sha = self._commit(design, record, actor)
         outputs = executor.apply(design)
+        self._register_accounts(design, outputs)
         self._register_networks(design, outputs)
         record.status, record.decided_by, record.decision_comment = DesignStatus.APPLIED, actor.name, comment
         repository = self._toolkit(record.provider).repository_name
@@ -259,13 +260,26 @@ class LandingZoneService:
         return self._github.commit_files(self._owner, repository, files,
                                          f"Landing zone design v{record.version} approved by {actor.name}")
 
+    def _register_accounts(self, design: LandingZoneDesign, outputs: LandingZoneOutputs) -> None:
+        """Units vended per portfolio become the portfolio's account binding for their environment, so projects
+        provision into them. Units per product or per environment have no single portfolio, so they aren't bound."""
+        known = {environment["id"] for environment in self._registry.environments()}
+        for ou in design.environment_ous():
+            if ou.environment not in known:
+                continue
+            for account in ou.enabled_accounts():
+                if account.owner is not None:
+                    self._registry.bind_account(design.provider, account.owner, ou.environment,
+                                                outputs.accounts[account.name])
+
     def _register_networks(self, design: LandingZoneDesign, outputs: LandingZoneOutputs) -> None:
         organization = design.answers.organization_name
         for network in outputs.networks:
             for account_name in network.account_names:
                 account_id = outputs.accounts[account_name]
                 self._networks.register(f"lz-{account_id}-{network.region}", NetworkInput(
-                    name=f"{organization} {network.label} shared VPC", account_id=account_id, region=network.region,
+                    provider=design.provider, name=f"{organization} {network.label} shared VPC",
+                    account_id=account_id, region=network.region,
                     network_ref=network.network_ref, cidr=network.cidr, subnet_refs=network.subnet_refs,
                     firewall_refs=[network.firewall_ref], is_default=True))
 
