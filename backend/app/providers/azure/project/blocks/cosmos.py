@@ -1,5 +1,6 @@
-from app.providers.azure.project.blocks.storage_account import private_endpoint
+from app.providers.azure.project.blocks.storage_account import add_private_endpoint
 from app.providers.azure.project.capabilities import (
+    KEPT,
     LOCATION,
     SECONDARY,
     AzureBlock,
@@ -20,8 +21,8 @@ MAX_THROUGHPUT = 1000
 
 
 class CosmosContainerBlock(AzureBlock, GrantTarget):
-    """Cosmos DB for NoSQL: an account, a database and a container. Entra only, continuous backup; retained on
-    removal (data stack). DR adds a read region, HA writes in every region (§22.11.3)."""
+    """Cosmos DB for NoSQL: an account, a database and a container. Entra only, continuous backup; kept on removal
+    (data stack). DR adds a read region, HA writes in every region (§22.11.3)."""
 
     type_name = "database.table"
     display_name = "Cosmos DB container"
@@ -29,6 +30,7 @@ class CosmosContainerBlock(AzureBlock, GrantTarget):
     multi_region = "global"
     provider_types = (ACCOUNT,)
     retained_on_removal = True
+    removal = KEPT
     settings = (TextSetting("partition_key", "Partition key", "id", r"^[A-Za-z_][A-Za-z0-9_]{0,63}$",
                             "1 to 64 letters, digits and _, starting with a letter or _"),)
 
@@ -65,13 +67,13 @@ class CosmosContainerBlock(AzureBlock, GrantTarget):
                                "paths": [f"/{self.setting('partition_key')}"], "kind": "Hash"}},
                                "options": {"autoscaleSettings": {"maxThroughput": MAX_THROUGHPUT}}}})
         if self.attached:
-            data.add_resource(private_endpoint(item, f"[{self._id}]", "Sql"))
+            add_private_endpoint(documents.shared, item, f"[{self._id}]", "Sql")
 
     def grants(self, access, prefix, identity, comment):
         definition = f"[resourceId('{ACCOUNT}/sqlRoleDefinitions', {bare(self._name)}, '{ROLES[access]}')]"
         return [{"type": f"{ACCOUNT}/sqlRoleAssignments", "apiVersion": API, "comments": comment,
                  "name": f"[format('{{0}}/{{1}}', {bare(self._name)}, guid(resourceGroup().id, '{comment}', '{access}'))]",
-                 "dependsOn": [f"[{self._id}]", f"[{identity_id(identity)}]"],
+                 "dependsOn": [f"[{identity_id(identity)}]"],
                  "properties": {"roleDefinitionId": definition, "principalId": principal_of(identity),
                                 "scope": f"[format('{{0}}/dbs/{DATABASE}/colls/{CONTAINER}', {self._id})]"}}]
 

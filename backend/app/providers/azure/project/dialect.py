@@ -14,8 +14,8 @@ APP = {"regionRole": {**STRING, "defaultValue": "primary", "allowedValues": ["pr
 
 
 class ArmTemplateDialect(IacDialect):
-    """Azure documents are two ARM templates applied as deployment stacks (MC4-1, MC4-2): `data` keeps what is
-    removed from it, `app` is deployed per region and deletes it. Every resource that can carry tags gets the
+    """Azure documents are three ARM templates applied as deployment stacks (MC4-1, MC4-2): `data` keeps what is
+    removed from it; `shared` and `app` (deployed per region) delete it. Every resource that can carry tags gets the
     ownership tags; the contract goes to a Key Vault secret."""
 
     def __init__(self, types: AzureResourceTypes):
@@ -29,7 +29,7 @@ class ArmTemplateDialect(IacDialect):
                 "org:data-classification": ownership.data_classification,
                 "org:resilience": "[parameters('resilienceMode')]", "org:cost-center": "[parameters('costCenter')]",
                 "org:managed-by": "cloudinfra"}
-        for template in documents.both():
+        for template in documents.all():
             for name, body in COMMON.items():
                 template.add_parameter(name, body)
             template.set_variable("tags", tags)
@@ -43,11 +43,8 @@ class ArmTemplateDialect(IacDialect):
         block.emit(document)
 
     def finish(self, document, request, blocks: dict[str, Block]):
-        if any(block.uses_network for block in blocks.values()):
-            document.app.add_parameter("subnetId", STRING)
-            document.data.add_parameter("endpointSubnetId", STRING)
         self._contract(document, blocks)
-        for template in document.both():
+        for template in document.all():
             for resource in template.resources():
                 if self._taggable(resource):
                     resource["tags"] = variable("tags")

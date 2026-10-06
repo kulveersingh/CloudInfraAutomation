@@ -1,13 +1,16 @@
 from app.providers.azure.project.capabilities import (
+    KEPT,
     LOCATION,
     AzureBlock,
     EventSource,
     GrantTarget,
+    identity_id,
     principal_of,
     resource_id,
     role_assignment,
 )
 from app.providers.azure.project.naming import bare, variable
+from app.providers.azure.project.template import STRING, ArmTemplate
 
 API = "2023-05-01"
 STORAGE = "Microsoft.Storage/storageAccounts"
@@ -28,7 +31,8 @@ def blob_path_condition(access: str, prefix: str) -> str:
 
 
 class StorageAccountBlock(AzureBlock, GrantTarget, EventSource):
-    """A storage account with one private container. Retained on removal: it lives in the data stack (MC4-2)."""
+    """A storage account with one private container. Kept on removal: it lives in the data stack (MC4-2). Its
+    private endpoint and Event Grid topic are in the shared stack."""
 
     type_name = "storage.bucket"
     display_name = "Storage account"
@@ -36,6 +40,7 @@ class StorageAccountBlock(AzureBlock, GrantTarget, EventSource):
     multi_region = "replicated"
     provider_types = (STORAGE,)
     retained_on_removal = True
+    removal = KEPT
 
     @property
     def _name(self) -> str:
@@ -71,14 +76,14 @@ class StorageAccountBlock(AzureBlock, GrantTarget, EventSource):
                                "definition": {"filters": {"blobTypes": ["blockBlob"]}, "actions": {"version": {
                                    "delete": {"daysAfterCreationGreaterThan": NONCURRENT_VERSION_DAYS}}}}}]}}})
         if self.attached:
-            data.add_resource(private_endpoint(item, account, "blob"))
+            add_private_endpoint(documents.shared, item, account, "blob")
         data.add_output(f"{self.naming.variable}", {"type": "string", "value": self._name})
 
     def grants(self, access, prefix, identity, comment):
         role = READER if access == "read" else CONTRIBUTOR
         condition = blob_path_condition(access, prefix) if prefix else None
         return [role_assignment(self._container_scope(), role, principal_of(identity), comment,
-                                self._depends(identity), condition)]
+                                [f"[{identity_id(identity)}]"], condition)]
 
     def environment(self):
         return {self.naming.environment_variable("ACCOUNT"): self._name,
@@ -93,14 +98,14 @@ class StorageAccountBlock(AzureBlock, GrantTarget, EventSource):
         return {**found, **({"subjectEndsWith": suffix} if suffix else {})}
 
     def read_grant(self, identity, comment):
-        return role_assignment(self._container_scope(), READER, principal_of(identity), comment, self._depends(identity))
+        return role_assignment(self._container_scope(), READER, principal_of(identity), comment,
+                               [f"[{identity_id(identity)}]"])
 
     def add_topic(self, documents) -> None:
-        documents.data.add_resource({"type": "Microsoft.EventGrid/systemTopics", "apiVersion": "2022-06-15",
-                                     "comments": self.spec.id, "name": f"[{self.topic()}]", "location": LOCATION,
-                                     "dependsOn": [f"[{self._id}]"],
-                                     "properties": {"source": f"[{self._id}]",
-                                                    "topicType": "Microsoft.Storage.StorageAccounts"}})
+        documents.shared.add_resource({"type": "Microsoft.EventGrid/systemTopics", "apiVersion": "2022-06-15",
+                                       "comments": self.spec.id, "name": f"[{self.topic()}]", "location": LOCATION,
+                                       "properties": {"source": f"[{self._id}]",
+                                                      "topicType": "Microsoft.Storage.StorageAccounts"}})
 
     def contract_entry(self):
         return {"account": self._name, "container": CONTAINER}
@@ -109,14 +114,14 @@ class StorageAccountBlock(AzureBlock, GrantTarget, EventSource):
         return (f"[format('Microsoft.Storage/storageAccounts/{{0}}/blobServices/default/containers/{CONTAINER}', "
                 f"{bare(self._name)})]")
 
-    def _depends(self, identity: str) -> list[str]:
-        containers = f"resourceId('{STORAGE}/blobServices/containers', {bare(self._name)}, 'default', '{CONTAINER}')"
-        return [f"[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', '{identity}')]", f"[{containers}]"]
 
-
-def private_endpoint(item: str, target: str, group: str) -> dict:
-    """A private endpoint in the registered endpoints subnet; DNS comes from the landing zone (A5)."""
-    return {"type": "Microsoft.Network/privateEndpoints", "apiVersion": "2024-05-01", "comments": item,
-            "name": f"pe-{item}-{group.lower()}", "location": LOCATION, "dependsOn": [target],
-            "properties": {"subnet": {"id": "[parameters('endpointSubnetId')]"}, "privateLinkServiceConnections": [
-                {"name": f"{item}-{group.lower()}", "properties": {"privateLinkServiceId": target, "groupIds": [group]}}]}}
+def add_private_endpoint(template: ArmTemplate, item: str, target: str, group: str, same_stack: bool = False) -> None:
+    """A private endpoint in the registered endpoints subnet; DNS comes from the landing zone (A5). A target in an
+    earlier stack is already deployed, and ARM refuses a dependency outside the template."""
+    template.add_parameter("endpointSubnetId", STRING)
+    template.add_resource({"type": "Microsoft.Network/privateEndpoints", "apiVersion": "2024-05-01", "comments": item,
+                           "name": f"pe-{item}-{group.lower()}", "location": LOCATION,
+                           "dependsOn": [target] if same_stack else [], "properties": {
+                               "subnet": {"id": "[parameters('endpointSubnetId')]"},
+                               "privateLinkServiceConnections": [{"name": f"{item}-{group.lower()}", "properties": {
+                                   "privateLinkServiceId": target, "groupIds": [group]}}]}})

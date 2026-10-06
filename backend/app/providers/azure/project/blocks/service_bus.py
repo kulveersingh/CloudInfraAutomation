@@ -1,4 +1,4 @@
-from app.providers.azure.project.blocks.storage_account import private_endpoint
+from app.providers.azure.project.blocks.storage_account import add_private_endpoint
 from app.providers.azure.project.capabilities import (
     LOCATION,
     AzureBlock,
@@ -19,7 +19,8 @@ MAX_DELIVERY_COUNT = 5
 
 
 class ServiceBusQueueBlock(AzureBlock, GrantTarget):
-    """A Service Bus namespace and queue with its built-in dead-letter queue: Standard, Premium in DR/HA (A3)."""
+    """A Service Bus namespace and queue with its built-in dead-letter queue: Standard, Premium in DR/HA (A3). In the
+    shared stack, so removing it deletes it, as queues are on other clouds."""
 
     type_name = "messaging.queue"
     display_name = "Service Bus queue"
@@ -37,19 +38,19 @@ class ServiceBusQueueBlock(AzureBlock, GrantTarget):
 
     def emit(self, documents):
         self.declare(documents, self.naming.variable, self.naming.service_bus())
-        data, item = documents.data, self.spec.id
+        shared, item = documents.shared, self.spec.id
         tier = "Premium" if self.spans_regions else "Standard"
-        data.add_resource({"type": NAMESPACE, "apiVersion": API, "comments": item, "name": self._name,
+        shared.add_resource({"type": NAMESPACE, "apiVersion": API, "comments": item, "name": self._name,
                            "location": LOCATION, "sku": {"name": tier, "tier": tier},
                            "properties": {"disableLocalAuth": True, "minimumTlsVersion": "1.2",
                                           "publicNetworkAccess": "Disabled" if self.attached and self.spans_regions
                                           else "Enabled"}})
-        data.add_resource({"type": f"{NAMESPACE}/queues", "apiVersion": API, "comments": item,
+        shared.add_resource({"type": f"{NAMESPACE}/queues", "apiVersion": API, "comments": item,
                            "name": f"[format('{{0}}/{item}', {bare(self._name)})]", "dependsOn": [f"[{self._id}]"],
                            "properties": {"maxDeliveryCount": MAX_DELIVERY_COUNT, "deadLetteringOnMessageExpiration": True,
                                           "lockDuration": "PT1M"}})
         if self.attached and self.spans_regions:  # private endpoints need Premium
-            data.add_resource(private_endpoint(item, f"[{self._id}]", "namespace"))
+            add_private_endpoint(shared, item, f"[{self._id}]", "namespace", same_stack=True)
 
     def grants(self, access, prefix, identity, comment):
         scope = f"[format('Microsoft.ServiceBus/namespaces/{{0}}/queues/{self.spec.id}', {bare(self._name)})]"

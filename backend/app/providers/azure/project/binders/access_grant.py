@@ -21,5 +21,5 @@ class RoleAssignmentBinder(Binder):
     def bind(self, connection, source, target, documents) -> None:
         comment = f"{connection.source} → {connection.target}"
         for assignment in target.grants(connection.access, connection.prefix, source.identity(), comment):
-            documents.data.add_resource(assignment)
+            documents.shared.add_resource(assignment)
         source.add_environment(target.environment())

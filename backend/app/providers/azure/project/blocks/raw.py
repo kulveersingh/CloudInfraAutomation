@@ -1,6 +1,6 @@
 from typing import ClassVar
 
-from app.providers.azure.project.capabilities import LOCATION, AzureBlock
+from app.providers.azure.project.capabilities import KEPT, LOCATION, AzureBlock
 from app.providers.azure.project.schema import AzureResourceTypes, platform_managed
 from app.synth.blocks.base import Block
 from app.synth.request import ResourceSpec
@@ -15,6 +15,7 @@ class RawResourceBlock(AzureBlock):
     category = TIER_2_CATEGORY
     multi_region = "regional"
     retained_on_removal = True
+    removal = KEPT
     arm_type: ClassVar[str]
     api_version: ClassVar[str]
 

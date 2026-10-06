@@ -5,6 +5,7 @@ from app.synth.render import FileRenderer, InfraJsonRenderer, ReadmeRenderer, Re
 from app.synth.request import ProjectRequest
 
 DATA_FILE = "main.json"
+SHARED_FILE = "shared.json"
 APP_FILE = "app.json"
 SECONDARY_ACTIVATION = {"dr": "standby", "ha": "active"}
 
@@ -15,7 +16,8 @@ def as_json(document: dict) -> str:
 
 class TemplateFilesRenderer(FileRenderer):
     def render(self, request, template):
-        return {DATA_FILE: as_json(template["data"]), APP_FILE: as_json(template["app"])}
+        return {DATA_FILE: as_json(template["data"]), SHARED_FILE: as_json(template["shared"]),
+                APP_FILE: as_json(template["app"])}
 
 
 class ParametersRenderer(FileRenderer):
@@ -32,14 +34,16 @@ class AzureReadmeRenderer(FileRenderer):
 
     def render(self, request, template):
         readme = self._readme.render(request, template)["README.md"]
-        note = ("`main.json` is the data stack and `app.json` the app stack, one per region. Run "
+        note = ("`main.json` is the data stack: removing a service from it keeps the service, detached. "
+                "`shared.json` is the shared stack (identities, access, wiring and queues) and `app.json` the app "
+                "stack, one per region: removing a service from them deletes it. Run "
                 "`az bicep decompile --file main.json` to read them as Bicep.\n")
         return {"README.md": readme + "\n" + note}
 
 
 class StackWorkflowRenderer(FileRenderer):
-    """Signs in with the deploy identity's federated credential, plans with what-if, then deploys the data stack and
-    an app stack per region (§22.11.4). All values come from GitHub variables."""
+    """Signs in with the deploy identity's federated credential, plans with what-if, then deploys the data stack, the
+    shared stack and an app stack per region, in that order (§22.11.4). All values come from GitHub variables."""
 
     HEADER = """name: deploy
 on:
@@ -82,6 +86,14 @@ jobs:
             --action-on-unmanage detachAll --deny-settings-mode denyWriteAndDelete \\
             --deny-settings-excluded-principals "$PRINCIPAL" --yes
 """
+    SHARED_STEP = """      - name: Plan and deploy the shared stack
+        run: |
+          az deployment group what-if --resource-group "$RG" --template-file shared.json --parameters "$PARAMETERS" {inputs}
+          az stack group create --name "{project}-shared" --resource-group "$RG" --template-file shared.json \\
+            --parameters "$PARAMETERS" {inputs} \\
+            --action-on-unmanage deleteResources --deny-settings-mode denyWriteAndDelete \\
+            --deny-settings-excluded-principals "$PRINCIPAL" --yes
+"""
     APP_STEP = """      - name: Plan and deploy the {label} app stack
         run: |
           az deployment group what-if --resource-group "$RG" --template-file app.json --parameters "$PARAMETERS" {inputs}
@@ -96,8 +108,11 @@ jobs:
         common = "costCenter=${{ vars.ORG_COST_CENTER }}"
         data = f"location=${{{{ vars.AZURE_PRIMARY_REGION }}}} {common}"
         data += " secondaryLocation=${{ vars.AZURE_SECONDARY_REGION }}" if request.resilience.is_multi_region else ""
-        data += " endpointSubnetId=${{ vars.ENDPOINT_SUBNET_ID }}" if networked else ""
+        shared = f"location=${{{{ vars.AZURE_PRIMARY_REGION }}}} {common}"
+        if "endpointSubnetId" in template["shared"]["parameters"]:
+            shared += " endpointSubnetId=${{ vars.ENDPOINT_SUBNET_ID }}"
         steps = [self.DATA_STEP.format(project=request.project_name, inputs=data),
+                 self.SHARED_STEP.format(project=request.project_name, inputs=shared),
                  self._app(request, "primary", "AZURE_PRIMARY_REGION", "active", "", networked, common)]
         activation = SECONDARY_ACTIVATION.get(request.resilience.mode)
         if activation:

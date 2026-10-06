@@ -9,6 +9,8 @@ LOCATION = "[parameters('location')]"
 SECONDARY = "[parameters('secondaryLocation')]"
 IDENTITY_API = "2023-01-31"
 ROLE_API = "2022-04-01"
+# What removing a service in the data stack does: the stack detaches it (MC4-2).
+KEPT = "kept: detached from the data stack, delete it by hand"
 
 
 def resource_id(type_name: str, *names: str) -> str:
@@ -36,7 +38,7 @@ def role_assignment(scope: str, role: str, principal: str, comment: str, depends
 
 
 class AzureBlock(Block, ABC):
-    """An Azure service. Each declares its names as variables in both stacks, so either can refer to them."""
+    """An Azure service. Each declares its names as variables in every stack, so any can refer to them."""
 
     def __init__(self, spec: ResourceSpec, request: ProjectRequest):
         super().__init__(spec, request)
@@ -51,7 +53,7 @@ class AzureBlock(Block, ABC):
         return self.request.network.attach_compute
 
     def declare(self, documents: ArmDocuments, name: str, value: str) -> None:
-        for template in documents.both():
+        for template in documents.all():
             template.set_variable(name, value)
 
     @abstractmethod
@@ -64,7 +66,7 @@ class GrantTarget(ABC):
 
     @abstractmethod
     def grants(self, access: str, prefix: str, identity: str, comment: str) -> list[dict]:
-        """The role assignments, in the data stack."""
+        """The role assignments, in the shared stack: removing the connection deletes them."""
 
     @abstractmethod
     def environment(self) -> dict[str, str]:

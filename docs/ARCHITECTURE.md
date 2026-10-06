@@ -1,10 +1,11 @@
 # CloudInfraAutomation — Architecture
 
-**Status:** v2.36, approved; implementation in progress. No code is written until this design is approved.
+**Status:** v2.37, approved; implementation in progress. No code is written until this design is approved.
 **Date:** 2026-10-05
 **Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9). Every solution is **DR-capable**: it can run in one region, as DR (primary active, secondary standby) or as an HA pair (both active), with **any region pair chosen in the UI** (default us-east-1 / us-east-2) (§10).
 
 **Changes in v2:** added the org registry and tagging strategy (§4); permissions based on tags (§4.5–4.8); multi-account, five-environment model (§5); promotion pipeline (§8). Payload, provisioning, security and scaling sections are updated to match.
+**Changes in v2.37:** MC-4c: Azure provisioning, read-back and Change infrastructure end to end; a third, shared stack (`deleteResources`) for identities, access, wiring and queues, so removing a connection or service revokes its access (refines MC4-2); templates depend only on their own resources and declare every parameter they use (§22.11 notes).
 **Changes in v2.36:** MC-4b: Azure ARM templates (a data stack and an app stack), curated services, role assignments and Event Grid, lint, the resource-type snapshot, repository files, workflow and variables (§22.11 notes).
 **Changes in v2.35:** MC-4a: Azure registered with its vocabulary, region pairs, subscription bindings, VNet checks and local adapter (§22.11 notes).
 **Changes in v2.34:** MC-4 design (§22.11): Azure projects on ARM templates and deployment stacks (a data stack and an app stack per region), federated managed identities, Flex Consumption functions, storage, Cosmos DB and Service Bus with exact-resource role assignments, Event Grid with native prefix filters, what-if release rows, locked immutable vaults and Cosmos exports.
@@ -4229,7 +4230,7 @@ Everything runs locally against stand-ins, as before. The Azure landing zone (ma
 
 | # | Finding | Consequence |
 |---|---|---|
-| Z1 | **Deployment stacks** manage a set of resources as one unit, at resource-group or subscription scope. `actionOnUnmanage` decides what happens to resources dropped from the template: `detachAll`, `deleteResources`, or `deleteAll`. **Deny settings** (`denyDelete`, `denyWriteAndDelete`, with excluded principals and actions) stop changes outside the stack. Stacks take an ARM JSON template or a Bicep file. `actionOnUnmanage` applies to the whole stack, not per resource. | The document is an **ARM JSON template**, which Bicep compiles to (MC4-1). Data that is retained on removal lives in its own stack with `detachAll`; everything else lives in an app stack with `deleteResources` (MC4-2). |
+| Z1 | **Deployment stacks** manage a set of resources as one unit, at resource-group or subscription scope. `actionOnUnmanage` decides what happens to resources dropped from the template: `detachAll`, `deleteResources`, or `deleteAll`. **Deny settings** (`denyDelete`, `denyWriteAndDelete`, with excluded principals and actions) stop changes outside the stack. Stacks take an ARM JSON template or a Bicep file. `actionOnUnmanage` applies to the whole stack, not per resource. | The document is an **ARM JSON template**, which Bicep compiles to (MC4-1). Data that is retained on removal lives in its own stack with `detachAll`; everything else lives in stacks with `deleteResources`: a shared stack and an app stack per region (MC4-2). |
 | Z2 | **Isolation unit.** Azure's subscription is the account/project equivalent, and a **resource group** is the natural scope for one project in one environment. Azure ABAC conditions cover storage data actions only. | One subscription per environment and portfolio (bindings with provider `azure`). One resource group per project and environment, `rg-{project}-{environment}`, and every role assignment is scoped to it or to a single resource (§22.5). |
 | Z3 | **Identity.** A **user-assigned managed identity** with a federated credential whose subject is `repo:{owner}/{repo}:environment:{environment}` (exact match, at most 20 per identity) signs the workflow in. Deployments run as the caller, so there is no separate execution role. Managing deny settings needs `Microsoft.Resources/deploymentStacks/manageDenySetting/action` (the Azure Deployment Stack Owner role). | The bootstrap creates the resource group, the deploy identity with its federated credential, and role assignments on that resource group only. `execution_identity` equals `deployer_identity`. |
 | Z4 | **Functions.** The **Flex Consumption** plan (`FC1`) runs Python, Node.js, .NET isolated, Java and PowerShell. It deploys code from a blob container named in `functionAppConfig.deployment.storage`, authenticated by managed identity. It supports VNet integration into a subnet delegated to `Microsoft.App/environments`, and its blob triggers use **Event Grid**. | `compute.function` is a Flex Consumption app with its own user-assigned identity, internal-only access when attached, and code in a per-app deployment container. |
@@ -4246,7 +4247,7 @@ Everything runs locally against stand-ins, as before. The Azure landing zone (ma
 | Concept | Azure | Notes |
 |---|---|---|
 | IaC document | **ARM JSON template** `main.json`, applied as a **deployment stack** | JSON is deterministic to generate and reads back like Terraform JSON. A README notes that `az bicep decompile` gives Bicep for reading. |
-| Deploy units | Per environment: a **data stack** `{project}-data` in the primary region (storage, Cosmos DB, Service Bus, Key Vault; `actionOnUnmanage: detachAll`) and an **app stack** `{project}-{region}` per region (function apps, Event Grid subscriptions, role assignments; `deleteResources`). Both have deny settings `denyWriteAndDelete`, excluding the deploy identity. | DR/HA: the secondary region gets its own app stack, in standby when DR. Global resources live once, in the data stack. |
+| Deploy units | Per environment, deployed in this order: a **data stack** `{project}-data` (storage, Cosmos DB, Key Vault, the function code account, Tier-2 types; `actionOnUnmanage: detachAll`), a **shared stack** `{project}-shared` (managed identities, role assignments, Event Grid system topics, private endpoints, function code containers, Service Bus; `deleteResources`) and an **app stack** `{project}-{region}` per region (function apps, Event Grid subscriptions; `deleteResources`). All have deny settings `denyWriteAndDelete`, excluding the deploy identity. | DR/HA: the secondary region gets its own app stack, in standby when DR. Resources used by every region live once, in the data or shared stack. |
 | Isolation unit | Subscription per environment and portfolio; resource group per project and environment | Account ids are subscription GUIDs. |
 | Deployer identity | User-assigned identity with a federated credential for the repository's environment | `BootstrapOutputs.federation` = the identity's client id; the workflow also needs the tenant and subscription ids (variables). |
 | Ownership tags | Tags with the `org:` names | The identity tag policy. Every resource and the resource group carry them. |
@@ -4261,7 +4262,7 @@ Everything runs locally against stand-ins, as before. The Azure landing zone (ma
 | `storage.bucket` | `Microsoft.Storage/storageAccounts` (StorageV2) + one blob container `data` | Shared keys off; public blob access off; TLS 1.2; HTTPS only; versioning and blob soft delete (7 days); noncurrent versions deleted after 30 days. **Single:** ZRS. **DR:** GZRS. **HA:** RA-GZRS. Public network access off when compute attaches to the network (private endpoint in the registered subnet; DNS from the landing zone, MC-5). |
 | `compute.function` | `Microsoft.Web/serverfarms` (FC1) + `Microsoft.Web/sites` (functionapp, Flex) + a user-assigned identity + a deployment container | Settings: runtime (python 3.12, node 22, dotnet-isolated 8, java 21), memory (2048 or 4096 MB instances), timeout (1–240 min), maximum instances. VNet integration into the registered subnet when attached. Internal access only when attached. The app stack deploys it in every region; DR's secondary has its triggers disabled. |
 | `database.table` | `Microsoft.DocumentDB/databaseAccounts` (NoSQL) + SQL database + container | `partition_key` setting (default `/id`). Continuous backup (30 days). `disableLocalAuth`. Public network access off when attached. DR: secondary read region; HA: multi-region writes. Retained on removal (data stack, `detachAll`). |
-| `messaging.queue` | `Microsoft.ServiceBus/namespaces` + queue | `maxDeliveryCount` 5; dead-lettering on expiry; lock duration 1 min; local auth off. Standard tier; Premium in DR/HA. |
+| `messaging.queue` | `Microsoft.ServiceBus/namespaces` + queue | `maxDeliveryCount` 5; dead-lettering on expiry; lock duration 1 min; local auth off. Standard tier; Premium in DR/HA. Deleted on removal, as queues are on the other clouds (shared stack). |
 
 **Connections:**
 - **`access.grant`** creates a role assignment for the source function's identity on exactly the target:
@@ -4283,18 +4284,19 @@ Everything runs locally against stand-ins, as before. The Azure landing zone (ma
 #### 22.11.4 Repository and workflow
 
 The repository contains:
-- `main.json` (data stack) and `app.json` (app stack), with `parameters/{env}.json`;
+- `main.json` (data stack), `shared.json` (shared stack) and `app.json` (app stack), with `parameters/{env}.json`;
 - `infra.json`, the README, the deploy workflow and the signed manifest.
 
 The workflow:
 1. `azure/login@v2` with the deploy identity's client id, the tenant and the subscription (OIDC).
 2. `az deployment group what-if` for each stack, as the plan.
 3. `az stack group create --name {project}-data --resource-group rg-{project}-{env} --template-file main.json --parameters @parameters/{env}.json --action-on-unmanage detachAll --deny-settings-mode denyWriteAndDelete --deny-settings-excluded-principals <deploy identity>`.
-4. The same for each region's app stack with `--action-on-unmanage deleteResources`, the secondary in standby when DR.
+4. The same for the shared stack (`shared.json`) with `--action-on-unmanage deleteResources`.
+5. The same for each region's app stack with `--action-on-unmanage deleteResources`, the secondary in standby when DR.
 
 STAGE and PROD keep the release executor (§8).
 
-GitHub environment variables: `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `AZURE_RESOURCE_GROUP`, `AZURE_PRIMARY_REGION`/`AZURE_SECONDARY_REGION`, `CODE_CONTAINER`, and, when attached, `SUBNET_ID` per region.
+GitHub environment variables: `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `AZURE_RESOURCE_GROUP`, `AZURE_PRIMARY_REGION`/`AZURE_SECONDARY_REGION`, `ACTIVATION_STATE_SECONDARY`, and, when attached, `SUBNET_ID` and `ENDPOINT_SUBNET_ID` per region.
 
 #### 22.11.5 Networks
 
@@ -4316,9 +4318,10 @@ A registered Azure network is checked like this:
 
 **Delete order:**
 1. The app stacks (secondary region first).
-2. The data stack with `deleteAll`, after the backups are verified.
-3. The bootstrap: the federated credential, the identity and the resource group.
-4. The GitHub environment.
+2. The shared stack.
+3. The data stack with `deleteAll`, after the backups are verified.
+4. The bootstrap: the federated credential, the identity and the resource group.
+5. The GitHub environment.
 
 Deny settings exclude only the deploy identity and the platform's teardown identity.
 
@@ -4327,7 +4330,7 @@ Deny settings exclude only the deploy identity and the platform's teardown ident
 | Area | Change |
 |---|---|
 | `app/providers/azure/` | `AzureProvider`. Vocabulary: cloud "Azure", subscription, management group, ARM template, deployment stack, Azure Policy, VNet, network security group, Azure Landing Zones, Azure Policy initiatives. Default regions `eastus2`/`centralus` (a pair). Network checks. Project, teardown and release toolkits. The landing zone refuses clearly until MC-5. |
-| Project toolkit | `ArmTemplateDialect` with two documents per project (data and app), so the dialect returns `{"main.json": …, "app.json": …}`. Curated blocks and binders above, lint rules, the schema snapshot and its refresh script, the bundle, and the GitHub variables. The **paired-region rule** for multi-region storage, and a naming check per resource kind. |
+| Project toolkit | `ArmTemplateDialect` with three documents per project (data, shared and app), rendered as `main.json`, `shared.json` and `app.json`. Curated blocks and binders above, lint rules, the schema snapshot and its refresh script, the bundle, and the GitHub variables. The **paired-region rule** for multi-region storage, and a naming check per resource kind. |
 | Releases | `WhatIfReader` (Z10) and an Azure resource classifier: stateful storage accounts, Cosmos DB, SQL, PostgreSQL/MySQL flexible servers, Service Bus, Key Vault; permission types `Microsoft.Authorization/*` and managed identities. |
 | Teardown | Inventory from the data template; a `BackupStyle` for vaulted blob backups and Cosmos exports; the locked-vault check. |
 | Adapters | `LocalAzure` (bootstrap records, stack deletion, data-store deletion, adoption, backups with the 60-day lock), `azure_mode = "local"`, `azure_backup_subscription` (until MC-5). |
@@ -4382,12 +4385,21 @@ Deny settings exclude only the deploy identity and the platform's teardown ident
   - **Variables:** subscription, client (the federated identity), tenant (`BootstrapOutputs.directory`), resource group, regions, and the function and endpoint subnets when attached.
 - **Verified with Bicep.** Generated templates (default, DR with network attachment, HA with every service, connection and a Tier-2 type) decompile and build with Bicep CLI 0.48.1 with no errors, only style warnings. This showed the code container's URL hard-coded `core.windows.net`; it now uses `environment().suffixes.storage`, for sovereign clouds.
 
+**MC-4c implementation notes.**
+- **What already worked.** As on Google Cloud, provisioning, the sealed manifest, read-back and Change infrastructure needed no Azure-specific code. A probe of the whole journey ran clean: the repository with its variables, a verified read-back, change previews, and the change pull request.
+- **Removal revoked nothing (fixed).** Role assignments, managed identities, Event Grid system topics, private endpoints and function code containers were in the data stack. That stack only *detaches* what leaves it, so removing a connection or a function left its access in place. They now go in a **shared stack** (`shared.json`, `{project}-shared`, `deleteResources`), deployed after the data stack and before the app stacks. The data stack holds only what is kept: storage accounts, Cosmos DB, Tier-2 types, the contract vault and the shared function code account. A test checks this for every shape.
+- **Service Bus.** It said "deleted" on removal but lived in the data stack, so it would have been kept. It is now in the shared stack, so removal deletes it, as on AWS and Google Cloud.
+- **Removal wording.** Storage, Cosmos DB and Tier-2 types say "kept: detached from the data stack, delete it by hand". The resource still exists, and still costs money, after the change.
+- **Cross-stack references.** ARM refuses a `dependsOn` on a resource outside the template, so shared-stack resources do not depend on data-stack ones; the earlier stack is already deployed. Role assignments on a data-stack resource use the relative `scope` form (`Microsoft.Storage/storageAccounts/{name}/…`), which works for existing resources. Tests check that every template depends only on its own resources.
+- **Parameters.** A private endpoint declares `endpointSubnetId` on the template it is written to, and a VNet-integrated function app declares `subnetId`. Before, an attached project with storage or Cosmos DB but no function used `endpointSubnetId` without declaring it. The workflow passes each stack only the parameters its template declares. Tests check that every template declares every parameter it uses.
+- **Verified with Bicep.** Default, everything (DR, attached, every service and connection, a Tier-2 type), HA, and attached data stores without functions all decompile and build with Bicep CLI 0.48.1. In the shared stack, role assignments on data-stack resources decompile to string scopes, which Bicep rejects (BCP036). Declaring those targets `existing`, which is what ARM's string scope means, builds with no errors.
+
 #### 22.11.9 Decisions and open questions
 
 | # | Decision | Recommendation |
 |---|---|---|
 | MC4-1 | Document format | **ARM JSON templates**, applied as deployment stacks. Bicep would need a serializer and compiles to the same JSON. |
-| MC4-2 | Stack layout | **A data stack (`detachAll`) and an app stack per region (`deleteResources`)**, so data is retained on removal and everything else is deleted (§21.8 C3) |
+| MC4-2 | Stack layout | **A data stack (`detachAll`), a shared stack and an app stack per region (both `deleteResources`)**, so data is retained on removal and everything else is deleted, access included (§21.8 C3). The shared stack was added in MC-4c. |
 | MC4-3 | Isolation | **Resource group per project and environment** in the environment's subscription; every role assignment on that resource group or a single resource |
 | MC4-4 | Multi-region storage | **Only within the region pair** (GZRS/RA-GZRS). A request rule refuses other secondaries when the project has storage. Cosmos DB and functions can use any secondary. |
 | MC4-5 | Functions | **Flex Consumption**, each function with its own user-assigned identity |

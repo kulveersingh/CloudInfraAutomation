@@ -41,14 +41,16 @@ class ArmTemplate:
 
 
 class ArmDocuments:
-    """A project's two stacks (MC4-2): `data` keeps what is removed from it, `app` (one per region) deletes it."""
+    """A project's stacks (MC4-2), deployed in this order: `data` keeps what is removed from it; `shared` (access,
+    identities and wiring, used by every region) and `app` (one per region) delete it."""
 
     def __init__(self):
         self.data = ArmTemplate()
+        self.shared = ArmTemplate()
         self.app = ArmTemplate()
 
-    def both(self) -> tuple[ArmTemplate, ArmTemplate]:
-        return self.data, self.app
+    def all(self) -> tuple[ArmTemplate, ArmTemplate, ArmTemplate]:
+        return self.data, self.shared, self.app
 
     def to_dict(self) -> dict:
-        return {"data": self.data.to_dict(), "app": self.app.to_dict()}
+        return {"data": self.data.to_dict(), "shared": self.shared.to_dict(), "app": self.app.to_dict()}

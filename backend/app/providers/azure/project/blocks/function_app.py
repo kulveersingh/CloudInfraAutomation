@@ -9,6 +9,7 @@ from app.providers.azure.project.capabilities import (
     role_assignment,
 )
 from app.providers.azure.project.naming import CODE_NAME, bare, camel, variable
+from app.providers.azure.project.template import STRING
 from app.synth.blocks.settings import ChoiceSetting, IntegerSetting, TextSetting
 
 WEB_API = "2024-04-01"
@@ -20,7 +21,8 @@ ACTIVE = "[equals(parameters('activationState'), 'active')]"
 
 class FlexFunctionBlock(AzureBlock, Workload):
     """A Flex Consumption function app with its own user-assigned identity. The identity, its roles and the code
-    container are in the data stack; the plan and app are in the app stack of every region (§22.11.3)."""
+    container are in the shared stack, and the code account (one per project) in the data stack; the plan and app
+    are in the app stack of every region (§22.11.3)."""
 
     type_name = "compute.function"
     display_name = "Function app (Flex Consumption)"
@@ -62,27 +64,33 @@ class FlexFunctionBlock(AzureBlock, Workload):
 
     def emit(self, documents):
         self.declare(documents, self._app, self.naming.function_app())
-        for template in documents.both():
+        for template in documents.all():
             template.set_variable(CODE, CODE_NAME)
-        self._data(documents.data)
+        self._code_account(documents.data)
+        self._shared(documents.shared)
         self._app_stack(documents.app)
 
-    def _data(self, data) -> None:
-        item, container = self.spec.id, f"app-{self.spec.id}"
-        data.add_resource({"type": "Microsoft.ManagedIdentity/userAssignedIdentities", "apiVersion": IDENTITY_API,
-                           "comments": item, "name": self.identity(), "location": LOCATION})
-        code_account = "[resourceId('Microsoft.Storage/storageAccounts', variables('codeName'))]"
+    @staticmethod
+    def _code_account(data) -> None:
         if not data.has_resource("code"):  # one code account per project and environment
             data.add_resource({"type": "Microsoft.Storage/storageAccounts", "apiVersion": STORAGE_API,
                                "comments": "code", "name": variable(CODE), "location": LOCATION, "kind": "StorageV2",
                                "sku": {"name": "Standard_ZRS"}, "properties": {
                                    "allowSharedKeyAccess": False, "allowBlobPublicAccess": False,
                                    "minimumTlsVersion": "TLS1_2", "supportsHttpsTrafficOnly": True}})
-        data.add_resource({"type": "Microsoft.Storage/storageAccounts/blobServices/containers", "apiVersion": STORAGE_API,
-                           "comments": item, "name": f"[format('{{0}}/default/{container}', variables('codeName'))]",
-                           "dependsOn": [code_account], "properties": {"publicAccess": "None"}})
-        data.add_resource(role_assignment(code_account, BLOB_OWNER, principal_of(self.identity()), f"{item} host",
-                                          [f"[{identity_id(self.identity())}]", code_account]))
+
+    def _shared(self, shared) -> None:
+        item, container = self.spec.id, f"app-{self.spec.id}"
+        identity = f"[{identity_id(self.identity())}]"
+        shared.add_resource({"type": "Microsoft.ManagedIdentity/userAssignedIdentities", "apiVersion": IDENTITY_API,
+                             "comments": item, "name": self.identity(), "location": LOCATION})
+        shared.add_resource({"type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+                             "apiVersion": STORAGE_API, "comments": item,
+                             "name": f"[format('{{0}}/default/{container}', variables('codeName'))]",
+                             "properties": {"publicAccess": "None"}})
+        code_account = "[format('Microsoft.Storage/storageAccounts/{0}', variables('codeName'))]"
+        shared.add_resource(role_assignment(code_account, BLOB_OWNER, principal_of(self.identity()), f"{item} host",
+                                            [identity]))
 
     def _app_stack(self, app) -> None:
         item, plan = self.spec.id, f"[format('plan-{{0}}-{{1}}', '{self.spec.id}', parameters('location'))]"
@@ -102,7 +110,8 @@ class FlexFunctionBlock(AzureBlock, Workload):
                 "scaleAndConcurrency": {"maximumInstanceCount": self.setting("max_instances"),
                                         "instanceMemoryMB": self.setting("memory_mb")},
                 "runtime": {"name": self.setting("runtime"), "version": RUNTIME_VERSIONS[self.setting("runtime")]}}}
-        if self.attached:
+        if self.uses_network:
+            app.add_parameter("subnetId", STRING)
             properties.update({"virtualNetworkSubnetId": "[parameters('subnetId')]", "publicNetworkAccess": "Disabled"})
         app.add_resource({"type": "Microsoft.Web/sites", "apiVersion": WEB_API, "comments": item,
                           "name": variable(self._app), "location": LOCATION, "kind": "functionapp,linux",
