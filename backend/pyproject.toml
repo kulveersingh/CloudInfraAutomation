@@ -27,6 +27,7 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q --cov=app --cov-branch --cov-report=term-missing --cov-fail-under=100"
+markers = ["vault: integration tests against the locked vault in Docker (§23); skipped when no vault answers"]
 
 [tool.coverage.run]
 source = ["app"]

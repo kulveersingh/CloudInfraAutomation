@@ -36,8 +36,10 @@ class FakeS3:
     # ---- buckets ----
 
     def create_bucket(self, Bucket, ObjectLockEnabledForBucket=False):
-        self._store.buckets.setdefault(Bucket, {"lock": {"ObjectLockEnabled": "Enabled"} if ObjectLockEnabledForBucket
-                                                else None, "objects": {}})
+        if Bucket in self._store.buckets:
+            raise error("BucketAlreadyOwnedByYou", "Your previous request to create the named bucket succeeded.")
+        self._store.buckets[Bucket] = {"lock": {"ObjectLockEnabled": "Enabled"} if ObjectLockEnabledForBucket else None,
+                                       "objects": {}}
 
     def put_object_lock_configuration(self, Bucket, ObjectLockConfiguration):
         self._bucket(Bucket)["lock"] = ObjectLockConfiguration

@@ -252,3 +252,75 @@ def test_an_unknown_backup_mode_is_refused(tmp_path):
 
     with pytest.raises(ValidationError):
         settings(tmp_path, backup_mode="tape")
+
+
+# ---- setup: the control bucket and a locked bucket per region (V-2) ----
+
+def admin_of(store) -> FakeS3:
+    return FakeS3(store, ALL, bypass=True)
+
+
+def test_setup_creates_the_control_bucket_and_a_locked_bucket_per_region(clock):
+    from app.adapters.minio_backup import VaultSetup
+
+    store = FakeStore(clock)
+    created = VaultSetup(admin_of(store)).run({"aws": ["us-east-1"], "gcp": ["us-east1"]})
+    assert (created, store.buckets["teardown-gcp-us-east1"]["lock"], store.buckets[CONTROL_BUCKET]["lock"]) == (
+        [CONTROL_BUCKET, "teardown-aws-us-east-1", "teardown-gcp-us-east1"], SIXTY_DAYS, None)
+
+
+def test_running_the_setup_again_is_safe(clock):
+    from app.adapters.minio_backup import VaultSetup
+
+    store = FakeStore(clock)
+    VaultSetup(admin_of(store)).run({"aws": ["us-east-1"]})
+    assert VaultSetup(admin_of(store)).run({"aws": ["us-east-1"]}) == [CONTROL_BUCKET, "teardown-aws-us-east-1"]
+
+
+def test_the_setup_takes_the_mode_and_days(clock):
+    from app.adapters.minio_backup import VaultSetup
+
+    store = FakeStore(clock)
+    VaultSetup(admin_of(store), mode="COMPLIANCE", days=90).run({"azure": ["eastus2"]})
+    assert store.buckets["teardown-azure-eastus2"]["lock"]["Rule"] == {
+        "DefaultRetention": {"Mode": "COMPLIANCE", "Days": 90}}
+
+
+def test_other_setup_errors_are_raised(clock):
+    from app.adapters.minio_backup import VaultSetup
+    from tests.fake_s3 import error
+
+    class Refusing(FakeS3):
+        def create_bucket(self, Bucket, ObjectLockEnabledForBucket=False):
+            raise error("AccessDenied", "Access Denied.")
+
+    with pytest.raises(Exception, match="Access Denied"):
+        VaultSetup(Refusing(FakeStore(clock))).run({"aws": ["us-east-1"]})
+
+
+def test_the_setup_command_covers_every_enabled_region_in_the_registry(session, clock):
+    from app.adapters.minio_backup import VaultSetupCommand
+    from app.seed import ReferenceDataSeeder
+
+    ReferenceDataSeeder(session).seed()
+    session.commit()
+    store = FakeStore(clock)
+    VaultSetupCommand(settings_for_database(), admin_of(store)).run()
+    assert ("teardown-azure-eastus2" in store.buckets, "teardown-gcp-us-east1" in store.buckets,
+            "teardown-aws-us-east-1" in store.buckets, "teardown-azure-swedencentral" in store.buckets) == (
+        True, True, True, False)
+
+
+def settings_for_database() -> Settings:
+    return Settings(database_url=TEST_DATABASE_URL, vault_retention_days=60)
+
+
+def test_the_setup_command_signs_in_as_the_admin_from_the_environment(monkeypatch):
+    from app.adapters.minio_backup import VaultSetupCommand
+
+    monkeypatch.setenv("VAULT_ADMIN_ACCESS_KEY", "admin")
+    monkeypatch.setenv("VAULT_ADMIN_SECRET_KEY", "admin-secret")
+    command = VaultSetupCommand.from_environment(Settings(vault_endpoint="http://vault:9000"))
+    assert (command.client.meta.endpoint_url, command.client._request_signer._credentials.access_key) == (
+        "http://vault:9000", "admin")
+
