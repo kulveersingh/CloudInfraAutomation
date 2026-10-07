@@ -1,10 +1,11 @@
 # CloudInfraAutomation — Architecture
 
-**Status:** v2.45, approved; implementation in progress. No code is written until this design is approved. No code is written until this design is approved.
+**Status:** v2.46; §23 (a locked vault in Docker) proposed, awaiting approval; the rest approved, implementation in progress. No code is written until this design is approved.
 **Date:** 2026-10-05
 **Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9). Every solution is **DR-capable**: it can run in one region, as DR (primary active, secondary standby) or as an HA pair (both active), with **any region pair chosen in the UI** (default us-east-1 / us-east-2) (§10).
 
 **Changes in v2:** added the org registry and tagging strategy (§4); permissions based on tags (§4.5–4.8); multi-account, five-environment model (§5); promotion pipeline (§8). Payload, provisioning, security and scaling sections are updated to match.
+**Changes in v2.46:** §23 proposed: a locked teardown vault in Docker for local testing (MinIO with S3 Object Lock in governance mode, a `MinioBackup` adapter behind `BackupPort`, opt-in with `backup_mode=minio`), with unit and integration tests.
 **Changes in v2.45:** Fix: a Google Cloud landing zone without a vault project no longer deploys a vault into a project it never creates; teardowns then use `gcp_backup_project` (§22.10 notes).
 **Changes in v2.44:** MC-5d: Azure in the landing-zone UI with its questions, checks, words, controls and read-back; MC-5 and the multi-cloud plan (§22) complete (§22.12 notes).
 **Changes in v2.43:** MC-5c: applying an Azure landing zone locally fills subscription bindings, spoke networks and the backup subscription; an Azure project provisions into the vended subscriptions and tears down into the landing zone's vault (§22.12 notes).
@@ -4712,3 +4713,78 @@ Two packs that assign the same definition to one management group are merged int
 | L3 | Network Security Perimeter | Check which of Storage, Cosmos DB, Key Vault and Service Bus it covers at general availability; add it per environment when it covers MC-4's services. |
 | L4 | Creating `{org}` under the tenant root | Tenants whose hierarchy settings require write permission at the root need a Global Administrator to elevate access once, for the seed only. The seed script checks and says so. |
 | L5 | Policy definition ids | MC-5a took the ids, display names and allowed effects from `Azure/azure-policy`. The refresh script adds the framework mappings; until it runs, they show as "intended alignment (unverified)", as with T2. |
+
+## 23. A locked vault in Docker for local testing
+
+**Status: proposed; awaiting approval. No code is written until it is approved.**
+
+**Goal.** Teardowns back up into a locked central vault before anything is deleted (§21.9). In local mode that vault is `LocalBackup`, a JSON file whose 60-day lock is checked in Python. This section adds an opt-in **real locked store in Docker**, so local runs and integration tests exercise an actual write-once lock: a delete before the retention ends is refused by the storage, not by our own code.
+
+**Scope.** A stand-in for every cloud's teardown vault in local mode. It does not replace the cloud adapters, and it does not prove the cloud-specific settings (AWS Vault Lock, GCS Bucket Lock, Azure locked immutability); only a real account can.
+
+### 23.1 Research findings
+
+| # | Finding | Consequence |
+|---|---|---|
+| V-F1 | **MinIO** implements the S3 API with **Object Lock**: write-once versions with a retain-until date per object, and a default retention per bucket. Object Lock is enabled when the bucket is created and cannot be turned off. | One container gives a real lock. The platform talks to it with the S3 API (boto3). |
+| V-F2 | Two retention modes. **Governance:** nobody deletes a locked version unless they hold `s3:BypassGovernanceRetention` and ask for the bypass. **Compliance:** nobody deletes it before the date, not even the root user, and the date cannot be shortened. | Governance mirrors our rule (only the backup super-user group, §21.9.1), and is the default here. Compliance is a setting, for the strictest local runs. |
+| V-F3 | A retain-until date is a timestamp, not a number of days, so a test can lock an object for a few seconds. A bucket's default retention is in whole days. | The bucket default is 60 days, which the vault check reads. Integration tests set a short retain-until on their own objects to test what happens after the lock. |
+| V-F4 | The per-cloud emulators don't enforce locks: LocalStack's AWS Backup and Vault Lock are paid-only, fake-gcs-server has no Bucket Lock, Azurite has no locked immutability policies. | One neutral store serves all three clouds, rather than one emulator each. |
+| V-F5 | MinIO's server is AGPL-3.0, and its community distribution has changed (for example, features moved out of the community console). | Used only as a local development and test service, never shipped. The image is pinned to a tested release tag (open question V-Q1). |
+
+### 23.2 Design
+
+**Store.** A `vault` service in `docker-compose.yml` (profile `vault`, port 9000), with a named volume.
+- One bucket per cloud and region: `teardown-{provider}-{region}`, created with Object Lock and a default retention of 60 days in governance mode.
+- An unlocked bucket `cloudinfra-restores` records restores.
+
+**Identities.** A one-off setup creates two MinIO users with their own policies:
+- `cloudinfra-platform` (the platform): may put, get and list in the teardown buckets and write to `cloudinfra-restores`. It may not delete versions and may not bypass governance, mirroring the port, which has no delete (§21.9.1).
+- `cloudinfra-backup-super-users`: may also delete versions and bypass governance retention, the stand-in for the super-user group of every cloud.
+
+**Adapter.** `MinioBackup(BackupPort)` in `app/adapters/minio_backup.py`, with each cloud's existing `BackupStyle`, so the `ref` and `vault` strings stored in the database keep each cloud's real shape:
+- `back_up`: writes one object per recovery point. The key is a SHA-256 of the `ref`; the body is a JSON manifest (source, type, account, region, times); `ref` and `vault` go in its metadata. The retain-until date is completion plus the retention (60 days by default). Injected backup failures (`fail_backups_of`) stay available, as in `LocalBackup`.
+- `vault_lock(region)`: reads the bucket's Object Lock configuration. It reports locked only when Object Lock is enabled and the default retention is at least 60 days; a missing bucket is not locked. So the existing teardown check (§21.9) blocks on an unprepared store, as it would on an unlocked cloud vault.
+- `recovery_point(ref)`: reads the object's manifest and its actual retain-until date. `locked_until` comes from the store, not from our clock.
+- `restore`: reads the object back (proving it is readable) and records the restore in `cloudinfra-restores`.
+- A test-only `delete_recovery_point(ref, super_user)`, as `LocalBackup` has: it deletes with the super-user credentials and the governance bypass. Without them, the store refuses.
+
+**Selection.** A new `backup_mode` setting: `local` (the default, today's `LocalBackup`) or `minio`. With `minio`, every local cloud adapter's `backup()` returns a `MinioBackup` with that cloud's style. Settings: `vault_endpoint`, `vault_access_key`, `vault_secret_key`, `vault_retention_mode` (`GOVERNANCE` or `COMPLIANCE`) and `vault_retention_days` (default 60). Real cloud adapters later ignore it.
+
+**Setup.** `python -m app.adapters.minio_backup setup`, run with the MinIO admin credentials, creates the users, policies and buckets for every enabled region of every cloud in the registry. It is idempotent, and the README and compose file show how to run it. Regions enabled later need the setup run again, the way a landing zone adds a vault per governed region.
+
+**Tests.**
+- **Unit tests** (in the main suite, 100% coverage, no Docker) run `MinioBackup` against an in-memory fake S3 client that enforces Object Lock the way MinIO does: retain-until, governance bypass, refused deletes.
+- **Integration tests** (`tests/integration/`, marked `vault`) run against the container, skipped unless `VAULT_ENDPOINT` answers. They cover:
+  - a backup is locked for 60 days;
+  - the platform user cannot delete it, nor bypass;
+  - the super user cannot delete it before its retain-until;
+  - the super user can delete it after a short retain-until;
+  - compliance mode refuses even the super user;
+  - an AWS, a Google Cloud and an Azure teardown back up into the store and restore from it, through the API.
+- An optional CI job starts the service and runs the integration tests.
+
+**Dependency.** `boto3` (Apache-2.0, the AWS SDK; allowed by §1) in the backend.
+
+### 23.3 Delivery (TDD)
+
+| Step | Scope | Exit |
+|---|---|---|
+| **V-1 Adapter** | `MinioBackup`, the fake S3 client, `backup_mode` and the vault settings, selection in the local cloud adapters | Unit tests at 100% coverage; `backup_mode=local` behaves exactly as before |
+| **V-2 Docker and setup** | The compose service, the setup command (users, policies, buckets per enabled region), integration tests, README | Integration tests pass against the container; a local teardown and restore run end to end on each cloud with `backup_mode=minio` |
+
+### 23.4 Decisions and open questions
+
+| # | Decision | Recommendation |
+|---|---|---|
+| V-1 | Store | **MinIO with S3 Object Lock**, one service for all three clouds' local vaults |
+| V-2 | Retention mode | **Governance by default**, with the bypass only for the super-user identity; compliance as a setting |
+| V-3 | Layout | **A bucket per cloud and region** (`teardown-{provider}-{region}`), an object per recovery point keyed by a hash of its ref |
+| V-4 | Names in the database | **Each cloud's existing ref and vault strings**, so records look the same as with the real clouds |
+| V-5 | Opt-in | **`backup_mode=minio`**; the default stays `local`, so tests and the default stack need no Docker |
+| V-6 | Platform identity | **Cannot delete or bypass**, as the port has no delete; only the super-user identity can, after the lock |
+
+| # | Open question | Plan |
+|---|---|---|
+| V-Q1 | MinIO image and licence | Pin a tested release tag in compose. If its community distribution stops being suitable, the same adapter works with another S3 store with Object Lock (for example Ceph RGW); only the compose service changes. |
+| V-Q2 | Restores | The stand-in records that a restore read the backup; it does not recreate the data store. Restores into a real resource stay with the cloud adapters. |
