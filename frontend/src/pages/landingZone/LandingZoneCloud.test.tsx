@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Identity, PlatformApiPort } from "../../api/types";
 import { cloudText } from "../../landingZone/cloudText";
 import { LandingZoneDraft } from "../../landingZone/LandingZoneDraft";
-import { fakeApi, GCP_PACK_CATALOG, GCP_PROVIDER, READ_BACK } from "../../test/fakes";
+import { AZURE_PROVIDER, fakeApi, GCP_PACK_CATALOG, GCP_PROVIDER, PROVIDERS, READ_BACK } from "../../test/fakes";
 import { renderWithApi } from "../../test/render";
 import { LandingZonePage } from "./LandingZonePage";
 
@@ -35,11 +35,18 @@ async function fillGoogleCloud() {
 const lastRequest = (api: PlatformApiPort) => vi.mocked(api.proposeLandingZone).mock.calls.at(-1)![0];
 
 describe("the landing zone's cloud", () => {
-  it("starts on AWS and offers only the clouds that have a landing zone", async () => {
+  it("starts on AWS and offers every cloud that has a landing zone", async () => {
     renderPage();
     const cloud = await screen.findByLabelText("Cloud");
     expect([cloud, within(cloud).getAllByRole("option").map((option) => option.textContent)]).toEqual(
-      [expect.objectContaining({ value: "aws" }), ["Amazon Web Services", "Google Cloud"]]);
+      [expect.objectContaining({ value: "aws" }), ["Amazon Web Services", "Google Cloud", "Azure"]]);
+  });
+
+  it("leaves out a cloud whose landing zone is still to come", async () => {
+    const later = { ...AZURE_PROVIDER, id: "oracle", name: "Oracle Cloud", landing_zone: false };
+    renderPage(fakeApi({ providers: vi.fn().mockResolvedValue([...PROVIDERS, later]) }));
+    const cloud = await screen.findByLabelText("Cloud");
+    expect(within(cloud).queryByRole("option", { name: "Oracle Cloud" })).toBeNull();
   });
 
   it("loads the chosen cloud's templates", async () => {
@@ -177,6 +184,127 @@ describe("the landing zone's cloud", () => {
   });
 
   it("a cloud without its own wording uses AWS's", () => {
-    expect(cloudText("azure").repository).toBe("landing-zone-infra");
+    expect(cloudText("oracle").repository).toBe("landing-zone-infra");
+  });
+});
+
+describe("the Azure landing zone", () => {
+  const TENANT = "8f2dd843-51d9-41e0-a23f-09119ffed634";
+  const SCOPE = "/providers/Microsoft.Billing/billingAccounts/1234567/enrollmentAccounts/7654321";
+  const GROUPS = { platform_admins: "11111111-1111-4111-8111-111111111111",
+    network_admins: "22222222-2222-4222-8222-222222222222", security_admins: "33333333-3333-4333-8333-333333333333",
+    backup_super_users: "44444444-4444-4444-8444-444444444444" };
+  const LABELS: Record<string, string> = { platform_admins: "Platform admins group", network_admins: "Network admins group",
+    security_admins: "Security admins group", backup_super_users: "Backup super users group" };
+
+  async function chooseAzure() {
+    await user().selectOptions(await screen.findByLabelText("Cloud"), "azure");
+  }
+
+  async function fillAzure() {
+    await chooseAzure();
+    await goTo("Organization");
+    await user().type(screen.getByLabelText("Organization name"), "acme");
+    await user().type(screen.getByLabelText("Tenant id"), TENANT);
+    await user().type(screen.getByLabelText("Billing scope"), SCOPE);
+    for (const [role, id] of Object.entries(GROUPS)) await user().type(screen.getByLabelText(LABELS[role]), id);
+  }
+
+  it("asks Azure's questions and offers its regions", async () => {
+    renderPage();
+    await chooseAzure();
+    await goTo("Organization");
+    expect([screen.queryByLabelText("Management account email"), screen.getByLabelText("Defender for Cloud"),
+      screen.getByLabelText("Azure Firewall tier"), screen.getByLabelText("Home region"),
+      screen.getByLabelText("Govern westeurope"), screen.getByText(/subscription names and management group ids/),
+      screen.getByText(/existing Microsoft Entra tenant/)]).toEqual([null, expect.anything(),
+      expect.anything(), expect.objectContaining({ value: "eastus2" }), expect.anything(), expect.anything(), expect.anything()]);
+  });
+
+  it("checks Azure's answers before proposing", async () => {
+    renderPage();
+    await chooseAzure();
+    await goTo("Review");
+    expect([screen.getByText("Enter the tenant id: a GUID."),
+      screen.getByText("Enter the billing scope: an EA enrollment account or an MCA invoice section."),
+      screen.getByText("Enter the Platform admins group's object id: a GUID."),
+      screen.getByText("Enter the Backup super users group's object id: a GUID.")]).toHaveLength(4);
+  });
+
+  it("proposes with Azure's provider answers, groups included", async () => {
+    const api = fakeApi();
+    renderPage(api);
+    await fillAzure();
+    await user().selectOptions(screen.getByLabelText("Defender for Cloud"), "standard");
+    await user().selectOptions(screen.getByLabelText("Azure Firewall tier"), "premium");
+    await goTo("Review");
+    await user().click(screen.getByRole("button", { name: "Propose structure" }));
+    expect([lastRequest(api).provider, lastRequest(api).answers.provider_answers, lastRequest(api).answers.governed_regions])
+      .toEqual(["azure", { tenant_id: TENANT, billing_scope: SCOPE, groups: GROUPS, defender: "standard",
+        firewall_tier: "premium" }, ["eastus2", "centralus"]]);
+  });
+
+  it("speaks of management groups and subscriptions", async () => {
+    renderPage();
+    await chooseAzure();
+    const steps = within(screen.getByRole("navigation", { name: "Questionnaire steps" }));
+    await goTo("Subscriptions");
+    const accounts = screen.getByText(/created against your billing scope/);
+    await goTo("Review");
+    expect([steps.getByRole("button", { name: "Sandbox & other management groups" }), accounts,
+      screen.getByText(/proposes the management group structure from your answers and generates the ARM template/)])
+      .toHaveLength(3);
+  });
+
+  it("describes Azure's shared subscriptions", async () => {
+    renderPage();
+    await chooseAzure();
+    await goTo("Shared infrastructure");
+    expect([screen.getByText(/Hubs with Azure Firewall, gateways and private DNS zones/),
+      screen.getByText(/Only for AD DS domain controllers/), screen.getByText(/locked Backup vaults/)]).toHaveLength(3);
+  });
+
+  it("offers Azure's network options", async () => {
+    renderPage();
+    await chooseAzure();
+    await goTo("Network");
+    const egress = within(screen.getByLabelText("Internet egress")).getAllByRole("option").map((option) => option.textContent);
+    expect([egress, screen.getByRole("option", { name: "ExpressRoute" }), screen.getByText("Hub and spoke (Azure Firewall)")])
+      .toEqual([["Through the hub's Azure Firewall (recommended)", "NAT gateway in each spoke"], expect.anything(),
+        expect.anything()]);
+  });
+
+  it("describes Azure's Security management group and controls", async () => {
+    const api = fakeApi();
+    renderPage(api);
+    await chooseAzure();
+    await goTo("Security & compliance");
+    const security = screen.getByText(/exactly one Security management group/);
+    await goTo("Organization");
+    await user().selectOptions(screen.getByLabelText("Defender for Cloud"), "standard");
+    await goTo("Controls");
+    expect([security, await screen.findByText(/Azure has no proactive controls/),
+      screen.getByText(/Defender plans are billed per subscription/), vi.mocked(api.controlPacks).mock.calls.at(-1)])
+      .toEqual([expect.anything(), expect.anything(), expect.anything(), ["azure"]]);
+  });
+
+  it("reads back the Azure landing zone", async () => {
+    const api = fakeApi({ landingZoneReadBack: vi.fn().mockResolvedValue({ ...READ_BACK,
+      request: { ...READ_BACK.request!, provider: "azure" } }) });
+    renderPage(api);
+    await chooseAzure();
+    await user().click(screen.getByRole("button", { name: /Edit the current landing zone/ }));
+    expect(await screen.findByText(/from landing-zone-azure-infra/)).toBeInTheDocument();
+  });
+
+  it("starts Azure with empty answers and its default regions", () => {
+    const draft = LandingZoneDraft.initial().withProvider(AZURE_PROVIDER);
+    expect([draft.toAnswers().provider_answers, draft.toAnswers().home_region, draft.group("platform_admins")]).toEqual([
+      { tenant_id: "", billing_scope: "", groups: { platform_admins: "", network_admins: "", security_admins: "",
+        backup_super_users: "" }, defender: "foundational", firewall_tier: "standard" }, "eastus2", ""]);
+  });
+
+  it("a group the cloud hasn't been given is empty", () => {
+    expect(LandingZoneDraft.initial().group("platform_admins")).toBe("");
   });
 });

@@ -170,10 +170,10 @@ def test_settings_name_the_azure_backup_subscription(settings):
 
 # ---- what is not there yet ----
 
-def test_the_description_gives_the_region_pairs_and_no_landing_zone_yet():
+def test_the_description_gives_the_region_pairs_and_the_landing_zone():
     described = provider().describe()
     assert (described["region_pairs"]["eastus2"], described["region_pairs"]["brazilsouth"], described["landing_zone"]) == (
-        "centralus", "southcentralus", False)
+        "centralus", "southcentralus", True)
 
 
 @pytest.mark.parametrize("cloud", ["aws", "gcp"])
@@ -184,9 +184,9 @@ def test_other_clouds_have_no_pairs_and_a_landing_zone(cloud):
     assert (described["region_pairs"], described["landing_zone"]) == ({}, True)
 
 
-def test_the_landing_zone_is_not_offered_until_it_can_be_applied():
+def test_the_landing_zone_is_offered_now_that_it_can_be_applied():
     assert (provider().landing_zone().repository_name, provider().describe()["landing_zone"]) == (
-        "landing-zone-azure-infra", False)
+        "landing-zone-azure-infra", True)
 
 
 def test_an_azure_project_previews_its_templates(client):

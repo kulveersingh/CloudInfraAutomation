@@ -127,7 +127,7 @@ export const PROVIDERS: CloudProviderInfo[] = [{
     landing_zone_service: "Google Cloud Setup", control_catalog: "Security Command Center postures" },
 }, {
   id: "azure", name: "Azure", default_regions: { primary: "eastus2", secondary: "centralus" },
-  document_file: "main.json", landing_zone: false,
+  document_file: "main.json", landing_zone: true,
   region_pairs: { eastus2: "centralus", centralus: "eastus2", westus2: "westcentralus" },
   vocabulary: { cloud: "Azure", isolation_unit: "subscription", hierarchy_node: "management group",
     iac_document: "ARM template", deploy_unit: "deployment stack", preventive_policy: "Azure Policy",
@@ -136,6 +136,7 @@ export const PROVIDERS: CloudProviderInfo[] = [{
 }];
 
 export const GCP_PROVIDER = PROVIDERS[1];
+export const AZURE_PROVIDER = PROVIDERS[2];
 
 /** Another cloud's words, to show the UI takes them from the provider. */
 export const OTHER_CLOUD: CloudProviderInfo[] = [{
