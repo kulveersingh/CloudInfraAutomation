@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import ClassVar
 
 from app.adapters.local_backup import BackupStyle, LocalBackup
+from app.adapters.minio_backup import MinioBackup, MinioVault
 from app.adapters.ports import BootstrapOutputs, BootstrapRequest, ProviderPort
 from app.config import Settings
 
@@ -13,18 +14,21 @@ OPERATIONS_FILE = "stack-operations.json"
 
 
 class LocalCloud(ProviderPort, ABC):
-    """A cloud stand-in for local development: records bootstrap, deletions and imports under `<root>/<provider>`."""
+    """A cloud stand-in for local development: records bootstrap, deletions and imports under `<root>/<provider>`.
+    Its teardown vault is a JSON file, or the locked store in Docker with `backup_mode=minio` (§23)."""
 
     provider: ClassVar[str]
 
-    def __init__(self, root):
+    def __init__(self, root, vault: MinioVault | None = None):
         self._root = root
+        self._vault = vault
         self._state_file = Path(root) / self.provider / STATE_FILE
         self._operations_file = Path(root) / self.provider / OPERATIONS_FILE
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "LocalCloud":
-        return cls(settings.local_state_dir)
+        return cls(settings.local_state_dir,
+                   MinioVault.from_settings(settings) if settings.backup_mode == "minio" else None)
 
     def stacks(self) -> list[dict]:
         if not self._state_file.exists():
@@ -51,7 +55,10 @@ class LocalCloud(ProviderPort, ABC):
     def import_stack(self, account_id: str, region: str, stack_name: str, logical_ids: list[str]) -> None:
         self._operate("import_stack", account_id, region, f"{stack_name} {','.join(logical_ids)}")
 
-    def backup(self, backup_account_id: str, clock=None) -> LocalBackup:
+    def backup(self, backup_account_id: str, clock=None) -> LocalBackup | MinioBackup:
+        if self._vault is not None:
+            return MinioBackup(self._vault.client, backup_account_id, self.provider, self._backup_style(), clock,
+                               self._vault.retention, self._vault.mode)
         return LocalBackup(self._root, backup_account_id, clock, provider=self.provider, style=self._backup_style())
 
     @abstractmethod

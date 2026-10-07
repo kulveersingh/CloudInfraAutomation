@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic_settings import BaseSettings
 from sqlalchemy.engine import URL
 
@@ -32,6 +34,13 @@ class Settings(BaseSettings):
     backup_account_id: str | None = None
     gcp_backup_project: str | None = None  # the Google Cloud vault project (§22.9.5), until the landing zone has one
     azure_backup_subscription: str | None = None  # the Azure backup subscription (§22.11.6), until the landing zone
+    # The teardown vault in local mode (§23): `local` keeps it in a JSON file; `minio` uses the locked store in Docker.
+    backup_mode: Literal["local", "minio"] = "local"
+    vault_endpoint: str = "http://localhost:9000"
+    vault_access_key: str = "cloudinfra-platform"
+    vault_secret_key: str | None = None
+    vault_retention_mode: Literal["GOVERNANCE", "COMPLIANCE"] = "GOVERNANCE"
+    vault_retention_days: int = 60
     worker_poll_seconds: float = 2.0
     cors_origins: list[str] = ["http://localhost:5173", "http://localhost:8080"]
 

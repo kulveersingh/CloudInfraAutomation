@@ -171,6 +171,30 @@ def test_other_store_errors_are_raised(store, clock):
         MinioBackup(Broken(store), ACCOUNT, "aws", AwsBackupStyle(), clock).vault_lock("us-east-1")
 
 
+def test_other_errors_writing_a_backup_are_raised(store, clock):
+    from tests.fake_s3 import error
+
+    class Full(FakeS3):
+        def put_object(self, Bucket, Key, Body, **options):
+            if Bucket.startswith("teardown-"):
+                raise error("XMinioStorageFull", "Storage backend has reached its minimum free drive threshold.")
+            return super().put_object(Bucket, Key, Body, **options)
+
+    with pytest.raises(Exception, match="minimum free drive"):
+        MinioBackup(Full(store), ACCOUNT, "aws", AwsBackupStyle(), clock).back_up(SOURCE)
+
+
+def test_other_errors_reading_are_raised(store, clock):
+    from tests.fake_s3 import error
+
+    class Denied(FakeS3):
+        def get_object(self, Bucket, Key):
+            raise error("AccessDenied", "Access Denied.")
+
+    with pytest.raises(Exception, match="Access Denied"):
+        MinioBackup(Denied(store), ACCOUNT, "aws", AwsBackupStyle(), clock).recovery_point("arn:x")
+
+
 # ---- restores and injected failures ----
 
 def test_a_restore_reads_the_backup_and_is_recorded(store, clock):

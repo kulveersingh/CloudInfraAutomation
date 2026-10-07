@@ -1,10 +1,11 @@
 # CloudInfraAutomation — Architecture
 
-**Status:** v2.46; §23 (a locked vault in Docker) proposed, awaiting approval; the rest approved, implementation in progress. No code is written until this design is approved.
+**Status:** v2.47, approved; implementation in progress. No code is written until this design is approved. No code is written until this design is approved.
 **Date:** 2026-10-05
 **Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9). Every solution is **DR-capable**: it can run in one region, as DR (primary active, secondary standby) or as an HA pair (both active), with **any region pair chosen in the UI** (default us-east-1 / us-east-2) (§10).
 
 **Changes in v2:** added the org registry and tagging strategy (§4); permissions based on tags (§4.5–4.8); multi-account, five-environment model (§5); promotion pipeline (§8). Payload, provisioning, security and scaling sections are updated to match.
+**Changes in v2.47:** §23 approved; V-1: `MinioBackup` behind the backup port, selected with `backup_mode=minio`, tested against an in-memory S3 that enforces Object Lock (§23 notes).
 **Changes in v2.46:** §23 proposed: a locked teardown vault in Docker for local testing (MinIO with S3 Object Lock in governance mode, a `MinioBackup` adapter behind `BackupPort`, opt-in with `backup_mode=minio`), with unit and integration tests.
 **Changes in v2.45:** Fix: a Google Cloud landing zone without a vault project no longer deploys a vault into a project it never creates; teardowns then use `gcp_backup_project` (§22.10 notes).
 **Changes in v2.44:** MC-5d: Azure in the landing-zone UI with its questions, checks, words, controls and read-back; MC-5 and the multi-cloud plan (§22) complete (§22.12 notes).
@@ -4716,7 +4717,7 @@ Two packs that assign the same definition to one management group are merged int
 
 ## 23. A locked vault in Docker for local testing
 
-**Status: proposed; awaiting approval. No code is written until it is approved.**
+**Status: approved (V-1…V-6 as recommended); implementation in progress.**
 
 **Goal.** Teardowns back up into a locked central vault before anything is deleted (§21.9). In local mode that vault is `LocalBackup`, a JSON file whose 60-day lock is checked in Python. This section adds an opt-in **real locked store in Docker**, so local runs and integration tests exercise an actual write-once lock: a delete before the retention ends is refused by the storage, not by our own code.
 
@@ -4772,6 +4773,16 @@ Two packs that assign the same definition to one management group are merged int
 |---|---|---|
 | **V-1 Adapter** | `MinioBackup`, the fake S3 client, `backup_mode` and the vault settings, selection in the local cloud adapters | Unit tests at 100% coverage; `backup_mode=local` behaves exactly as before |
 | **V-2 Docker and setup** | The compose service, the setup command (users, policies, buckets per enabled region), integration tests, README | Integration tests pass against the container; a local teardown and restore run end to end on each cloud with `backup_mode=minio` |
+
+**V-1 implementation notes.**
+- **Adapter.** `app/adapters/minio_backup.py`: `MinioBackup` and `MinioVault` (the boto3 client with path-style addressing, the mode and the retention, from the settings). `boto3` is now a declared backend dependency.
+- **Control bucket.** One unlocked bucket, `cloudinfra-vault`, holds what is not a backup: an index from each ref's hash to its region's bucket (`index/`), the restores (`restores/`) and injected failures (`failures/`). So `recovery_point(ref)` finds a backup from the ref alone. The design's separate `cloudinfra-restores` bucket became these prefixes.
+- **Errors.**
+  - A missing region bucket fails the backup with "run the vault setup".
+  - The vault check reports a missing bucket, or one without Object Lock, as not locked; any other store error is raised.
+  - A refused super-user delete is `RecoveryPointLockedError` when the store says the object is WORM-protected, and `PermissionError` otherwise.
+- **Selection.** `backup_mode` (`local` or `minio`), `vault_endpoint`, `vault_access_key`, `vault_secret_key`, `vault_retention_mode` and `vault_retention_days` are settings. With `minio`, `LocalCloud.from_settings` gives every local cloud a `MinioVault`, and `backup()` returns a `MinioBackup` with that cloud's style.
+- **Tests.** `tests/fake_s3.py` is an in-memory S3 with Object Lock as MinIO enforces it: per-version retain-until, a bucket default, governance bypass only for an identity allowed it, compliance refusing everyone, and MinIO's error codes and messages. The adapter is tested against it at 100% coverage, with a clock to step past short locks.
 
 ### 23.4 Decisions and open questions
 
