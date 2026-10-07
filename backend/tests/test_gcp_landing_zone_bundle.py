@@ -303,3 +303,28 @@ def test_vault_bucket_names_fit_sixty_three_characters():
     built = design(organization_name="acme-holdings-group", governed_regions=["us-east1", "northamerica-northeast1"])
     problems = [problem for check in GcpProvider().landing_zone().checks for problem in check.problems(built, CATALOG)]
     assert any(problem.startswith("Vault bucket 'cloudinfra-teardown-northamerica-northeast1-") for problem in problems)
+
+
+# ---- a design without a vault project ----
+
+WITHOUT_VAULT = ["network", "shared_services"]
+
+
+def test_without_a_vault_project_the_vault_deployment_creates_nothing():
+    document = deployment("lz-vault", infrastructure=WITHOUT_VAULT)
+    assert (document.get("resource", {}), document.get("output", {})) == ({}, {})
+
+
+def test_without_a_vault_project_bucket_names_are_not_checked():
+    from app.providers.gcp.provider import GcpProvider
+
+    built = design(organization_name="acme-holdings-group", governed_regions=["us-east1", "northamerica-northeast1"],
+                   infrastructure=WITHOUT_VAULT)
+    assert [problem for check in GcpProvider().landing_zone().checks for problem in check.problems(built, CATALOG)
+            if problem.startswith("Vault bucket")] == []
+
+
+def test_without_a_vault_project_the_readme_says_where_teardown_backups_go():
+    readme = files(infrastructure=WITHOUT_VAULT)["README.md"]
+    assert ("set gcp_backup_project" in readme, "set gcp_backup_project" in files()["README.md"]) == (True, False)
+

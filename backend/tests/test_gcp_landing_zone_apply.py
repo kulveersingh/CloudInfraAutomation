@@ -44,6 +44,11 @@ def test_the_vault_project_is_reported(tmp_path):
     assert local_executor(tmp_path).apply(design()).vault_account == pid("acme-vault")
 
 
+def test_no_vault_project_reports_no_vault(tmp_path):
+    built = design(infrastructure=["network", "shared_services"])
+    assert local_executor(tmp_path).apply(built).vault_account is None
+
+
 def test_runs_are_recorded(tmp_path):
     executor = local_executor(tmp_path)
     executor.apply(design())
@@ -195,3 +200,17 @@ def test_the_applied_google_cloud_landing_zone_reads_back_from_its_repository(cl
     assert (result["verified"], result["findings"], result["commit_sha"], result["request"]["provider"],
             result["request"]["answers"]["provider_answers"]["organization_id"]) == (
         True, [], applied["commit_sha"], "gcp", "123456789012")
+
+
+def test_without_a_vault_project_teardowns_need_the_setting(client, settings, session_factory):
+    design_id = client.post(f"{BASE}/designs", json=gcp_request_body(infrastructure=["network", "shared_services"]),
+                            headers=ALEX).json()["id"]
+    client.post(f"{BASE}/designs/{design_id}:submit", headers=ALEX)
+    client.post(f"{BASE}/designs/{design_id}:approve", json={"comment": "ok"}, headers=RILEY)
+    client.post("/v1/projects", json=gcp_request(), headers={"Idempotency-Key": "k1"})
+    drain(settings, session_factory)
+    body = client.post("/v1/projects/invoice-ingest/teardowns:preview",
+                       json={"scope": "environment", "environments": ["dev"]}).json()
+    assert (body["backup_account"], body["blockers"]) == (None, [
+        "No vault project is configured: set gcp_backup_project until the Google Cloud landing zone creates one."])
+
