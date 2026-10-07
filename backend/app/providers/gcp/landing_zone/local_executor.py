@@ -28,7 +28,7 @@ class LocalGcpLandingZone(LandingZoneExecutor):
                     for environment in context.environments for region in context.regions]
         self._record({"organization": design.answers.organization_name,
                       "deployments": [deployment.name for deployment in DEPLOYMENTS], "projects": len(accounts)})
-        return LandingZoneOutputs(accounts=accounts, networks=networks, vault_account=context.unit("backup"))
+        return LandingZoneOutputs(accounts=accounts, networks=networks, vault_account=context.unit("backup") if context.vends("backup") else None)
 
     def history(self) -> list[dict]:
         if not self._history_file.exists():

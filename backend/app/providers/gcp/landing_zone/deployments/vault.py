@@ -22,6 +22,8 @@ class VaultDeployment(Deployment):
     description = "Teardown vault: locked buckets and Backup and DR vaults per region, deny policy"
 
     def build(self, context, document):
+        if not context.vends("backup"):  # teardowns then use the gcp_backup_project setting
+            return
         project = context.unit("backup")
         for region in context.regions:
             document.add_resource("google_storage_bucket", region, {

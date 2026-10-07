@@ -1,10 +1,11 @@
 # CloudInfraAutomation — Architecture
 
-**Status:** v2.44, approved; implementation in progress. No code is written until this design is approved. No code is written until this design is approved.
+**Status:** v2.45, approved; implementation in progress. No code is written until this design is approved. No code is written until this design is approved.
 **Date:** 2026-10-05
 **Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9). Every solution is **DR-capable**: it can run in one region, as DR (primary active, secondary standby) or as an HA pair (both active), with **any region pair chosen in the UI** (default us-east-1 / us-east-2) (§10).
 
 **Changes in v2:** added the org registry and tagging strategy (§4); permissions based on tags (§4.5–4.8); multi-account, five-environment model (§5); promotion pipeline (§8). Payload, provisioning, security and scaling sections are updated to match.
+**Changes in v2.45:** Fix: a Google Cloud landing zone without a vault project no longer deploys a vault into a project it never creates; teardowns then use `gcp_backup_project` (§22.10 notes).
 **Changes in v2.44:** MC-5d: Azure in the landing-zone UI with its questions, checks, words, controls and read-back; MC-5 and the multi-cloud plan (§22) complete (§22.12 notes).
 **Changes in v2.43:** MC-5c: applying an Azure landing zone locally fills subscription bindings, spoke networks and the backup subscription; an Azure project provisions into the vended subscriptions and tears down into the landing zone's vault (§22.12 notes).
 **Changes in v2.42:** MC-5b: the Azure landing-zone stacks (management groups and custom policies, subscription aliases, policy and role assignments, central logs and Defender, hubs and spokes with Azure Firewall and private DNS, the locked vault), seed script, workflow and README; subscriptions are vended before policies are assigned, so later stacks can target them (refines §22.12.5) (§22.12 notes).
@@ -4169,6 +4170,13 @@ The backup-account resolver for Google Cloud reads the applied landing zone's va
 - **New check:** a vault bucket name must fit 63 characters.
 - **Verified with real Terraform.** Every deployment of the default design (with a VPN link and a flow) and of the financial-services template passes `terraform validate` with Terraform 1.5.7 and google provider 8.5.0. So does MC-2b's project configuration (DR with network attachment, and every curated service and connection). The tests check every template against the bundled schema.
 - **Deferred:** the IAM deny against impersonation from other environments (MC3-4) waits for Q1. With the wrong principal set it would also block the Workload Identity tokens the deploy workflows use. Until then, environments are kept apart by separate VPCs with no route between them, the dry-run perimeters, and IAM bindings that stay inside each environment.
+
+**Vault project optional (fix, after MC-5b).** A design whose Infrastructure answers leave out Backup has no vault project. Before this fix, `lz-vault` still created locked buckets, Backup and DR vaults and a deny policy in that never-created project, so the apply would fail, and the local executor reported it as the vault.
+- `lz-vault` is now empty in that case and the executor reports no vault.
+- The vault bucket-name check is skipped.
+- The README says to set `gcp_backup_project`.
+- Teardowns are blocked until it is set, with the existing "No vault project is configured" message.
+- Azure's `lz-vault` behaves the same way (MC-5b).
 
 **MC-3d implementation notes.**
 - **Local executor.** `LocalGcpLandingZone` (`app/providers/gcp/landing_zone/local_executor.py`) stands in for applying the deployments:

@@ -119,6 +119,8 @@ jobs:
         lines += ["", "## Left to a person", "",
                   "- VPC Service Controls perimeters start in dry-run: enforce each one once its dry-run shows no violations.",
                   "- Declared flows: set each `flow_N_service_attachment` input once the destination publishes its service."]
+        if "backup" not in answers.infrastructure:
+            lines.append("- Teardown backups: this design has no vault project, so set gcp_backup_project to one.")
         if answers.network.on_premises == "vpn":
             lines.append("- HA VPN: add the tunnels and BGP peers to `hub-vpn` with the on-premises side's details.")
         if answers.network.on_premises == "dedicated":

@@ -59,6 +59,10 @@ class DeploymentContext:
     def project_id(self, suffix: str) -> str:
         return self.design.namer.unit(suffix).name
 
+    def vends(self, key: str) -> bool:
+        """Whether the design has the shared project of an Infrastructure answer."""
+        return key in self.design.answers.infrastructure
+
     def unit(self, key: str) -> str:
         """A shared project by its Infrastructure answer (network, backup, ...)."""
         return self.project_id(self.design.units.infrastructure[key])

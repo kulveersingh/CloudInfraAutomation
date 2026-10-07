@@ -42,6 +42,8 @@ class VaultBucketNames(LandingZoneCheck):
     def problems(self, design, catalog):
         from app.providers.gcp.landing_zone.deployments.vault import vault_bucket
 
+        if "backup" not in design.answers.infrastructure:
+            return []
         project = design.namer.unit(design.units.infrastructure["backup"]).name
         names = [vault_bucket(region, project) for region in design.answers.governed_regions]
         return [f"Vault bucket '{name}' is {len(name)} characters; Google Cloud allows {MAX_BUCKET_NAME}. Use a "
