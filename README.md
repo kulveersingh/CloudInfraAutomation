@@ -40,11 +40,30 @@ cd ../frontend && npm install && npm run dev                            # consol
 
 Port 8010 is used for the API because 8000 is often taken on developer machines.
 
+**Optional — a locked teardown vault in Docker (§23 of the architecture):** by default, teardown backups go to a
+JSON file. To back them up into a real write-once store (MinIO with S3 Object Lock, built from source at a pinned
+release because MinIO no longer publishes community images):
+
+```bash
+docker compose --profile vault up -d --build vault vault-setup     # the store (port 9000, console 9001) and its users
+cd backend
+VAULT_ADMIN_ACCESS_KEY=cloudinfra-admin VAULT_ADMIN_SECRET_KEY=cloudinfra-admin-secret \
+  uv run python -m app.adapters.minio_backup                        # a locked bucket per enabled region (rerun after enabling regions)
+BACKUP_MODE=minio VAULT_SECRET_KEY=cloudinfra-platform-secret LOCAL_STATE_DIR=../var \
+  uv run uvicorn app.main:app --port 8010                           # and the same for the worker
+```
+
+The platform's identity can write and read backups but never delete them or bypass the 60-day lock; only the
+`cloudinfra-backup-super-users` identity can, once the lock has ended (governance mode; set
+`VAULT_RETENTION_MODE=COMPLIANCE` so not even it can). The default credentials are for local use only; override
+them with the `VAULT_*` environment variables.
+
 ## Tests (TDD, 100% coverage enforced)
 
 ```bash
 cd backend && uv run pytest            # needs the db container; fails below 100% line+branch coverage
 cd frontend && npm test                # Vitest; fails below 100% coverage
+cd backend && uv run pytest tests/integration -m vault --no-cov   # against the vault container; skipped without it
 ```
 
 ## Deploy the platform to AWS

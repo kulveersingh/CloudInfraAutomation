@@ -1,10 +1,11 @@
 # CloudInfraAutomation — Architecture
 
-**Status:** v2.47, approved; implementation in progress. No code is written until this design is approved. No code is written until this design is approved.
+**Status:** v2.48, approved; implementation in progress. No code is written until this design is approved. No code is written until this design is approved.
 **Date:** 2026-10-05
 **Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9). Every solution is **DR-capable**: it can run in one region, as DR (primary active, secondary standby) or as an HA pair (both active), with **any region pair chosen in the UI** (default us-east-1 / us-east-2) (§10).
 
 **Changes in v2:** added the org registry and tagging strategy (§4); permissions based on tags (§4.5–4.8); multi-account, five-environment model (§5); promotion pipeline (§8). Payload, provisioning, security and scaling sections are updated to match.
+**Changes in v2.48:** V-2: the locked vault in Docker, MinIO built from source at a pinned release (no community images exist any more), its users and policies, the bucket setup command, and integration tests passing against it on all three clouds; a precision fix found by them (§23 notes).
 **Changes in v2.47:** §23 approved; V-1: `MinioBackup` behind the backup port, selected with `backup_mode=minio`, tested against an in-memory S3 that enforces Object Lock (§23 notes).
 **Changes in v2.46:** §23 proposed: a locked teardown vault in Docker for local testing (MinIO with S3 Object Lock in governance mode, a `MinioBackup` adapter behind `BackupPort`, opt-in with `backup_mode=minio`), with unit and integration tests.
 **Changes in v2.45:** Fix: a Google Cloud landing zone without a vault project no longer deploys a vault into a project it never creates; teardowns then use `gcp_backup_project` (§22.10 notes).
@@ -4784,6 +4785,26 @@ Two packs that assign the same definition to one management group are merged int
 - **Selection.** `backup_mode` (`local` or `minio`), `vault_endpoint`, `vault_access_key`, `vault_secret_key`, `vault_retention_mode` and `vault_retention_days` are settings. With `minio`, `LocalCloud.from_settings` gives every local cloud a `MinioVault`, and `backup()` returns a `MinioBackup` with that cloud's style.
 - **Tests.** `tests/fake_s3.py` is an in-memory S3 with Object Lock as MinIO enforces it: per-version retain-until, a bucket default, governance bypass only for an identity allowed it, compliance refusing everyone, and MinIO's error codes and messages. The adapter is tested against it at 100% coverage, with a clock to step past short locks.
 
+**V-2 implementation notes.**
+- **No MinIO images (V-Q1 happened).** Neither Docker Hub nor quay.io serves MinIO's images any more. `infra/local-vault/Dockerfile` builds `minio` (`RELEASE.2025-04-22T22-12-26Z`, Go 1.24) and `mc` (`RELEASE.2025-04-16T18-13-26Z`) from source at those release tags into one small Alpine image, `cloudinfra-vault:local`. The build takes about a minute and a half and is cached afterwards. The design stays MinIO; only how the image is obtained changed.
+- **Compose.** Two services under the `vault` profile:
+  - `vault`: the store on port 9000, console 9001, a named volume, a health check;
+  - `vault-setup`: a one-off run of `infra/local-vault/setup-users.sh` with `mc`.
+  - The default credentials are for local use only; the `VAULT_*` environment variables override them.
+- **Users and policies.** Both are IAM-style JSON in `infra/local-vault/`.
+  - `cloudinfra-platform` may put (with retention), get, list and list versions in `teardown-*`, and use the control bucket. It cannot delete in `teardown-*` or bypass governance.
+  - `cloudinfra-backup-super-users` may also delete versions and bypass governance retention.
+- **Buckets.** `VaultSetup` creates the unlocked control bucket and, per cloud and region, a bucket with Object Lock and a default retention (60 days, governance unless set otherwise). Running it again keeps existing buckets. `python -m app.adapters.minio_backup` runs it for every enabled region in the registry, with the admin credentials from `VAULT_ADMIN_ACCESS_KEY` and `VAULT_ADMIN_SECRET_KEY`.
+- **Found by the container: precision.** MinIO, like S3, keeps a retain-until date to the second. A backup completed at a fractional second therefore read back locked for a fraction of a second less than 60 days, and the teardown's check (`locked_until − completed_at ≥ 60 days`) refused every backup ("No locked backup in the central vault"). `MinioBackup` now takes the completion time to whole seconds, and the fake S3 truncates as MinIO does, with a unit test for it.
+- **Integration tests.** `tests/integration/test_vault_docker.py` (marker `vault`) is skipped unless the vault answers. Against the container, all pass:
+  - a backup is locked for 60 days, and the vault check reads the bucket;
+  - the platform can neither delete nor bypass;
+  - compliance refuses even the super user until a short lock ends, then lets it delete;
+  - governance lets only the super user bypass;
+  - a missing bucket is not locked;
+  - a teardown backs up into the store and restores from it, on AWS, Google Cloud and Azure, through the API with `backup_mode=minio`.
+- **CI.** The repository has no CI workflows yet, so the optional CI job waits until there is one. The README shows how to run the integration tests locally.
+
 ### 23.4 Decisions and open questions
 
 | # | Decision | Recommendation |
@@ -4797,5 +4818,5 @@ Two packs that assign the same definition to one management group are merged int
 
 | # | Open question | Plan |
 |---|---|---|
-| V-Q1 | MinIO image and licence | Pin a tested release tag in compose. If its community distribution stops being suitable, the same adapter works with another S3 store with Object Lock (for example Ceph RGW); only the compose service changes. |
+| V-Q1 | MinIO image and licence | No community images any more: V-2 builds MinIO and `mc` from source at pinned release tags. If building from source stops working, the same adapter works with another S3 store with Object Lock (for example Ceph RGW); only the compose service and the user setup change. |
 | V-Q2 | Restores | The stand-in records that a restore read the backup; it does not recreate the data store. Restores into a real resource stay with the cloud adapters. |

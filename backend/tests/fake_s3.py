@@ -1,5 +1,6 @@
-"""An in-memory S3 with Object Lock, as MinIO enforces it (§23): versions keep a retain-until date, governance lets
-only an identity allowed to bypass delete before it, compliance lets nobody. Identities share one store."""
+"""An in-memory S3 with Object Lock, as MinIO enforces it (§23): versions keep a retain-until date (to the second,
+as the store keeps it), governance lets only an identity allowed to bypass delete before it, compliance lets nobody.
+Identities share one store."""
 
 import io
 import itertools
@@ -62,7 +63,8 @@ class FakeS3:
         bucket["objects"].setdefault(Key, []).append({
             "VersionId": self._store.version_id(), "Body": Body if isinstance(Body, bytes) else Body.encode(),
             "Metadata": dict(Metadata or {}), "ObjectLockMode": ObjectLockMode,
-            "ObjectLockRetainUntilDate": ObjectLockRetainUntilDate})
+            "ObjectLockRetainUntilDate": ObjectLockRetainUntilDate.replace(microsecond=0)
+            if ObjectLockRetainUntilDate else None})
         return {}
 
     def get_object(self, Bucket, Key):

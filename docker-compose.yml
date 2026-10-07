@@ -1,6 +1,9 @@
 # Local development stack.
 #   docker compose up -d db                 -> PostgreSQL only (run API/worker/UI from source)
 #   docker compose --profile full up --build -> everything in containers, mirroring the ECS services
+#   docker compose --profile vault up -d --build vault vault-setup
+#                                           -> the locked teardown vault (MinIO with Object Lock, §23); then create
+#                                              its buckets with `uv run python -m app.adapters.minio_backup`
 services:
   db:
     image: postgres:16
@@ -58,5 +61,40 @@ services:
     depends_on:
       - api
 
+  vault:
+    profiles: ["vault"]
+    build: ./infra/local-vault
+    image: cloudinfra-vault:local
+    environment:
+      MINIO_ROOT_USER: ${VAULT_ADMIN_ACCESS_KEY:-cloudinfra-admin}
+      MINIO_ROOT_PASSWORD: ${VAULT_ADMIN_SECRET_KEY:-cloudinfra-admin-secret}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - vaultdata:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:9000/minio/health/live"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  vault-setup:
+    profiles: ["vault"]
+    build: ./infra/local-vault
+    image: cloudinfra-vault:local
+    entrypoint: ["bash", "/setup/setup-users.sh"]
+    environment:
+      VAULT_ADMIN_ACCESS_KEY: ${VAULT_ADMIN_ACCESS_KEY:-cloudinfra-admin}
+      VAULT_ADMIN_SECRET_KEY: ${VAULT_ADMIN_SECRET_KEY:-cloudinfra-admin-secret}
+      VAULT_PLATFORM_SECRET_KEY: ${VAULT_PLATFORM_SECRET_KEY:-cloudinfra-platform-secret}
+      VAULT_SUPER_USER_SECRET_KEY: ${VAULT_SUPER_USER_SECRET_KEY:-cloudinfra-super-user-secret}
+    volumes:
+      - ./infra/local-vault:/setup:ro
+    depends_on:
+      vault:
+        condition: service_healthy
+
 volumes:
   pgdata:
+  vaultdata:

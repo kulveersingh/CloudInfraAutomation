@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -36,6 +37,12 @@ def _code(error: ClientError) -> str:
     return error.response["Error"]["Code"]
 
 
+def _client(settings: Settings, access_key: str, secret_key: str | None):
+    return boto3.client("s3", endpoint_url=settings.vault_endpoint, region_name="us-east-1",
+                        aws_access_key_id=access_key, aws_secret_access_key=secret_key,
+                        config=Config(s3={"addressing_style": "path"}))
+
+
 @dataclass(frozen=True)
 class MinioVault:
     """The platform's connection to the store, and how long and in which mode it locks backups."""
@@ -46,11 +53,8 @@ class MinioVault:
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "MinioVault":
-        client = boto3.client("s3", endpoint_url=settings.vault_endpoint, region_name="us-east-1",
-                              aws_access_key_id=settings.vault_access_key,
-                              aws_secret_access_key=settings.vault_secret_key,
-                              config=Config(s3={"addressing_style": "path"}))
-        return cls(client, settings.vault_retention_mode, timedelta(days=settings.vault_retention_days))
+        return cls(_client(settings, settings.vault_access_key, settings.vault_secret_key), settings.vault_retention_mode,
+                   timedelta(days=settings.vault_retention_days))
 
 
 class MinioBackup(BackupPort):
@@ -72,7 +76,8 @@ class MinioBackup(BackupPort):
     def back_up(self, source: BackupSource) -> RecoveryPoint:
         if self._exists(CONTROL_BUCKET, f"failures/{_key(source.source_ref)}"):
             raise RuntimeError(f"Backup of {source.source_ref} failed.")
-        completed = self._clock()
+        # The store keeps retain-until dates to the second; whole seconds keep the lock the full retention.
+        completed = self._clock().replace(microsecond=0)
         ref = self._style.ref(self._account, source.region, source.resource_type)
         point = RecoveryPoint(ref=ref, vault=self._style.vault(self._account, source.region, source.resource_type),
                               account_id=self._account, region=source.region, source_ref=source.source_ref,
@@ -170,3 +175,66 @@ class MinioBackup(BackupPort):
             if _code(error) == "NoSuchKey":
                 return None
             raise
+
+
+class VaultSetup:
+    """Creates the unlocked control bucket and, per cloud and region, a bucket with Object Lock and a default
+    retention, as the landing zone creates a vault per governed region. Safe to run again: existing buckets are
+    kept, and the store refuses to turn Object Lock off."""
+
+    ALREADY_THERE = frozenset({"BucketAlreadyOwnedByYou", "BucketAlreadyExists"})
+
+    def __init__(self, client, mode: str = "GOVERNANCE", days: int = RETENTION_DAYS):
+        self._client = client
+        self._mode = mode
+        self._days = days
+
+    def run(self, regions: dict[str, list[str]]) -> list[str]:
+        self._create(CONTROL_BUCKET, locked=False)
+        created = [CONTROL_BUCKET]
+        for provider, names in regions.items():
+            for region in names:
+                bucket = bucket_name(provider, region)
+                self._create(bucket, locked=True)
+                self._client.put_object_lock_configuration(Bucket=bucket, ObjectLockConfiguration={
+                    "ObjectLockEnabled": "Enabled",
+                    "Rule": {"DefaultRetention": {"Mode": self._mode, "Days": self._days}}})
+                created.append(bucket)
+        return created
+
+    def _create(self, bucket: str, locked: bool) -> None:
+        try:
+            self._client.create_bucket(Bucket=bucket, ObjectLockEnabledForBucket=locked)
+        except ClientError as error:
+            if _code(error) not in self.ALREADY_THERE:
+                raise
+
+
+class VaultSetupCommand:
+    """`python -m app.adapters.minio_backup`: the buckets for every enabled region of every cloud in the registry,
+    with the store's admin credentials (VAULT_ADMIN_ACCESS_KEY and VAULT_ADMIN_SECRET_KEY)."""
+
+    def __init__(self, settings: Settings, client):
+        self._settings = settings
+        self.client = client
+
+    @classmethod
+    def from_environment(cls, settings: Settings) -> "VaultSetupCommand":
+        return cls(settings, _client(settings, os.environ["VAULT_ADMIN_ACCESS_KEY"], os.environ["VAULT_ADMIN_SECRET_KEY"]))
+
+    def run(self) -> list[str]:
+        from app.db.database import Database
+        from app.registry.repository import RegistryRepository
+
+        regions: dict[str, list[str]] = {}
+        with Database(self._settings.sqlalchemy_url()).session_factory() as session:
+            for region in RegistryRepository(session).regions():
+                if region.enabled:
+                    regions.setdefault(region.provider, []).append(region.id)
+        return VaultSetup(self.client, self._settings.vault_retention_mode, self._settings.vault_retention_days).run(regions)
+
+
+if __name__ == "__main__":
+    for created in VaultSetupCommand.from_environment(Settings()).run():
+        print(created)
+

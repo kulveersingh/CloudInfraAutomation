@@ -74,6 +74,14 @@ def test_a_recovery_point_reads_its_lock_from_the_store(store, clock):
     assert vault.recovery_point(point.ref) == point
 
 
+def test_the_lock_read_back_is_the_whole_retention_although_the_store_keeps_seconds(store, clock):
+    """Otherwise the teardown's check (locked_until - completed_at >= 60 days) fails by a fraction of a second."""
+    clock.now = NOW + timedelta(microseconds=345678)
+    vault = backup(store, clock)
+    stored = vault.recovery_point(vault.back_up(SOURCE).ref)
+    assert stored.locked_until - stored.completed_at == timedelta(days=60)
+
+
 def test_an_unknown_recovery_point_is_none(store, clock):
     assert backup(store, clock).recovery_point("arn:aws:backup:us-east-1:1:recovery-point:none") is None
 
