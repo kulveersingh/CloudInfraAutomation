@@ -12,6 +12,8 @@ export interface LandingZoneCloudText {
   repository: string;
   regions: string[];
   organizationIntro: string;
+  /** What the organization name prefixes. */
+  namePrefixHint: string;
   /** How the landing zone creates each environment's isolation units. */
   accountsIntro: string;
   homeRegionHint: string;
@@ -52,6 +54,7 @@ const AWS: LandingZoneCloudText = {
     "ap-southeast-2", "ap-southeast-3", "ap-southeast-4", "ap-northeast-1", "ap-northeast-2", "ap-northeast-3",
     "ap-east-1", "me-south-1", "me-central-1", "af-south-1", "il-central-1",
   ],
+  namePrefixHint: "Prefix for account names and OU paths",
   accountsIntro: "Accounts are created through Control Tower Account Factory, already enrolled in their environment OU.",
   organizationIntro: "Creates a new AWS Organization with all features and an AWS Control Tower landing zone in the "
     + "management (payer) account.",
@@ -97,6 +100,7 @@ const GCP: LandingZoneCloudText = {
     "asia-south1", "asia-southeast1", "asia-southeast2", "australia-southeast1", "australia-southeast2", "me-west1",
     "me-central1", "africa-south1",
   ],
+  namePrefixHint: "Prefix for project ids and folder paths",
   accountsIntro: "Projects are created by the platform's Terraform, already in their environment folder.",
   organizationIntro: "Creates new folders, projects and policies under an existing Google Cloud organization. An "
     + "organization admin runs the generated seed script once; after that every change goes through the platform.",
@@ -141,7 +145,78 @@ const GCP: LandingZoneCloudText = {
   emptyAnswers: { organization_id: "", billing_account: "", domain: "", scc_tier: "premium" },
 };
 
-const TEXTS: Record<string, LandingZoneCloudText> = { aws: AWS, gcp: GCP };
+const GUID_PATTERN = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+const BILLING_SCOPE_PATTERN = new RegExp("^/providers/Microsoft\\.Billing/billingAccounts/[^/]+/"
+  + "(enrollmentAccounts/[^/]+|billingProfiles/[^/]+/invoiceSections/[^/]+)$");
+
+/** Azure's admin groups (existing Entra groups, by object id) and how the questionnaire names them. */
+export const AZURE_GROUPS: Array<[string, string]> = [["platform_admins", "Platform admins"],
+  ["network_admins", "Network admins"], ["security_admins", "Security admins"], ["backup_super_users", "Backup super users"]];
+
+const groupOf = (answers: Record<string, unknown>, role: string) =>
+  text((answers.groups as Record<string, unknown> | undefined)?.[role]);
+
+const AZURE: LandingZoneCloudText = {
+  repository: "landing-zone-azure-infra",
+  regions: [
+    "eastus", "eastus2", "centralus", "northcentralus", "southcentralus", "westcentralus", "westus", "westus2", "westus3",
+    "canadacentral", "canadaeast", "brazilsouth", "northeurope", "westeurope", "uksouth", "ukwest", "francecentral",
+    "germanywestcentral", "swedencentral", "switzerlandnorth", "norwayeast", "australiaeast", "australiasoutheast",
+    "japaneast", "japanwest", "koreacentral", "southeastasia", "eastasia", "centralindia",
+  ],
+  namePrefixHint: "Prefix for subscription names and management group ids",
+  accountsIntro: "Subscriptions are created against your billing scope by the platform's deployment stacks, already in "
+    + "their environment management group.",
+  organizationIntro: "Creates management groups, subscriptions and policies under your organization's own management "
+    + "group, in an existing Microsoft Entra tenant. A tenant admin runs the generated seed script once; after that every "
+    + "change goes through the platform.",
+  homeRegionHint: "Where the deployment stacks run from",
+  governedRegionsHint: "Data residency packs allow only these regions. Govern regions in pairs: geo-redundant storage "
+    + "replicates only to a region's pair.",
+  sharedUnitsIntro: "These subscriptions go in the Infrastructure management group. Environment subscriptions reach them "
+    + "only through the hubs on the Network step.",
+  sharedUnits: [
+    { id: "network", label: "Connectivity", hint: "Hubs with Azure Firewall, gateways and private DNS zones" },
+    { id: "shared_services", label: "Shared Services", hint: "DNS, artifact registries, the CloudInfra platform" },
+    { id: "identity", label: "Identity", hint: "Only for AD DS domain controllers; Entra ID needs none" },
+    { id: "backup", label: "Backup", hint: "Teardown backups: locked Backup vaults and export container, 60 days" },
+    { id: "monitoring", label: "Monitoring", hint: "Azure Monitor workbooks and alerts across the subscriptions" },
+    { id: "cicd", label: "CI/CD Automations", hint: "Only if you run build agents in Azure; GitHub Actions with a "
+      + "federated credential doesn't need it" },
+  ],
+  hubTitle: "Hub and spoke (Azure Firewall)",
+  hubDescription: "A hub per region in the Connectivity subscription; each workload subscription's spoke VNet peers only "
+    + "with its region's hub.",
+  isolatedDescription: "No hub. Environments can't reach Shared Services privately.",
+  egressOptions: [{ value: "central", label: "Through the hub's Azure Firewall (recommended)" },
+    { value: "local", label: "NAT gateway in each spoke" }],
+  dedicatedLink: "ExpressRoute",
+  inspection: "Inspect traffic with Azure Firewall (Premium adds IDPS)",
+  flowsHint: "None by default: environments are fully isolated. Each exception is a firewall rule for one port between "
+    + "two environments, and is approved with the design.",
+  securityNotice: "There is always exactly one Security management group. It holds the management subscription, with the "
+    + "central Log Analytics workspace and locked log storage, and the security subscription for Defender for Cloud.",
+  securityTooling: "Separate subscription for Microsoft Sentinel, incident response tools and forensics",
+  complianceHint: "Each scope gets its own management group with STAGE and PROD children, stricter policies and their "
+    + "own spokes.",
+  controlsIntro: "Azure Policy definitions come in packs; each pack targets the management groups it fits and governs "
+    + "everything below them. Policy Staging evaluates every control without enforcing it.",
+  controlNotes: (answers) => [
+    "Azure has no proactive controls: packs list their preventive (Deny) and detective (Audit) policies only.",
+    ...(answers.defender === "standard" ? ["Defender plans are billed per subscription and protected resource."] : []),
+  ],
+  answerProblems: (answers) => [
+    ...(GUID_PATTERN.test(text(answers.tenant_id)) ? [] : ["Enter the tenant id: a GUID."]),
+    ...(BILLING_SCOPE_PATTERN.test(text(answers.billing_scope))
+      ? [] : ["Enter the billing scope: an EA enrollment account or an MCA invoice section."]),
+    ...AZURE_GROUPS.filter(([role]) => !GUID_PATTERN.test(groupOf(answers, role)))
+      .map(([, label]) => `Enter the ${label} group's object id: a GUID.`),
+  ],
+  emptyAnswers: { tenant_id: "", billing_scope: "", groups: Object.fromEntries(AZURE_GROUPS.map(([role]) => [role, ""])),
+    defender: "foundational", firewall_tier: "standard" },
+};
+
+const TEXTS: Record<string, LandingZoneCloudText> = { aws: AWS, gcp: GCP, azure: AZURE };
 
 export function cloudText(provider: string): LandingZoneCloudText {
   return TEXTS[provider] ?? AWS;

@@ -95,6 +95,16 @@ export class LandingZoneDraft {
     return String(this.answers.provider_answers[name] ?? "");
   }
 
+  /** An admin group's answer, on clouds that ask for groups by role (Azure's object ids). */
+  group(role: string): string {
+    return String((this.answers.provider_answers.groups as Record<string, unknown> | undefined)?.[role] ?? "");
+  }
+
+  withGroup(role: string, value: string): LandingZoneDraft {
+    const groups = (this.answers.provider_answers.groups ?? {}) as Record<string, unknown>;
+    return this.with({ provider_answers: { ...this.answers.provider_answers, groups: { ...groups, [role]: value } } });
+  }
+
   fromScratch(): LandingZoneDraft {
     return LandingZoneDraft.initial().keepingOrganization(this);
   }

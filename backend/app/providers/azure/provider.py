@@ -18,7 +18,6 @@ class AzureProvider(CloudProvider):
     id = "azure"
     name = "Azure"
     document_file = "main.json"
-    has_landing_zone = False  # offered once it can be applied (MC-5c, MC-5d)
 
     def vocabulary(self):
         return Vocabulary(cloud="Azure", isolation_unit="subscription", hierarchy_node="management group",

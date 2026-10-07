@@ -307,4 +307,18 @@ describe("the Azure landing zone", () => {
   it("a group the cloud hasn't been given is empty", () => {
     expect(LandingZoneDraft.initial().group("platform_admins")).toBe("");
   });
+
+  it("a group can be set before any other", () => {
+    expect(LandingZoneDraft.initial().withGroup("platform_admins", GROUPS.platform_admins).group("platform_admins"))
+      .toBe(GROUPS.platform_admins);
+  });
+
+  it("foundational Defender adds no cost note", () => {
+    expect(cloudText("azure").controlNotes({ defender: "foundational" })).toEqual([
+      "Azure has no proactive controls: packs list their preventive (Deny) and detective (Audit) policies only."]);
+  });
+
+  it("answers without groups ask for every group", () => {
+    expect(cloudText("azure").answerProblems({ tenant_id: TENANT, billing_scope: SCOPE })).toHaveLength(4);
+  });
 });
