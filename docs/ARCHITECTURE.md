@@ -1,10 +1,11 @@
 # CloudInfraAutomation — Architecture
 
-**Status:** v2.48, approved; implementation in progress. No code is written until this design is approved. No code is written until this design is approved.
+**Status:** v2.49, approved; implementation in progress. No code is written until this design is approved.
 **Date:** 2026-10-05
 **Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9). Every solution is **DR-capable**: it can run in one region, as DR (primary active, secondary standby) or as an HA pair (both active), with **any region pair chosen in the UI** (default us-east-1 / us-east-2) (§10).
 
 **Changes in v2:** added the org registry and tagging strategy (§4); permissions based on tags (§4.5–4.8); multi-account, five-environment model (§5); promotion pipeline (§8). Payload, provisioning, security and scaling sections are updated to match.
+**Changes in v2.49:** §23 complete: V-1 and V-2 delivered; the optional CI job waits for the repository's first CI workflow.
 **Changes in v2.48:** V-2: the locked vault in Docker, MinIO built from source at a pinned release (no community images exist any more), its users and policies, the bucket setup command, and integration tests passing against it on all three clouds; a precision fix found by them (§23 notes).
 **Changes in v2.47:** §23 approved; V-1: `MinioBackup` behind the backup port, selected with `backup_mode=minio`, tested against an in-memory S3 that enforces Object Lock (§23 notes).
 **Changes in v2.46:** §23 proposed: a locked teardown vault in Docker for local testing (MinIO with S3 Object Lock in governance mode, a `MinioBackup` adapter behind `BackupPort`, opt-in with `backup_mode=minio`), with unit and integration tests.
@@ -4718,7 +4719,7 @@ Two packs that assign the same definition to one management group are merged int
 
 ## 23. A locked vault in Docker for local testing
 
-**Status: approved (V-1…V-6 as recommended); implementation in progress.**
+**Status: approved (V-1…V-6 as recommended) and implemented.** The optional CI job waits for the repository's first CI workflow.
 
 **Goal.** Teardowns back up into a locked central vault before anything is deleted (§21.9). In local mode that vault is `LocalBackup`, a JSON file whose 60-day lock is checked in Python. This section adds an opt-in **real locked store in Docker**, so local runs and integration tests exercise an actual write-once lock: a delete before the retention ends is refused by the storage, not by our own code.
 
