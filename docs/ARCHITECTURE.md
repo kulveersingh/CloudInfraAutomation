@@ -1,10 +1,11 @@
 # CloudInfraAutomation — Architecture
 
-**Status:** v2.49, approved; implementation in progress. No code is written until this design is approved.
+**Status:** v2.50, approved; implementation in progress. No code is written until this design is approved.
 **Date:** 2026-10-05
 **Scope:** A web feature where a user selects their **Portfolio → Product/Platform** (the project is the repo they are creating) and the AWS services they need. The platform then generates a CloudFormation template and a GitHub Actions pipeline, creates a new **infrastructure repository**, and deploys the stack through a series of **environments, each in its own AWS account**. The environments and their account numbers are **configurable in the application** (default set: Sandbox, DEV, TEST, QA/STAGE, PROD). What each project can touch in AWS is controlled by **tags**: a project can never change another project's resources. Developers deploy their own code (Python, Java, Go, Rust, …) to ECS, Lambda, EKS and Step Functions from separate **application repositories** that read a published infrastructure contract (§9). Every solution is **DR-capable**: it can run in one region, as DR (primary active, secondary standby) or as an HA pair (both active), with **any region pair chosen in the UI** (default us-east-1 / us-east-2) (§10).
 
 **Changes in v2:** added the org registry and tagging strategy (§4); permissions based on tags (§4.5–4.8); multi-account, five-environment model (§5); promotion pipeline (§8). Payload, provisioning, security and scaling sections are updated to match.
+**Changes in v2.50:** Status lines brought up to date: §20.11, §20.12 and MC-3…MC-5 are implemented; their remaining open questions need real cloud accounts or credentials.
 **Changes in v2.49:** §23 complete: V-1 and V-2 delivered; the optional CI job waits for the repository's first CI workflow.
 **Changes in v2.48:** V-2: the locked vault in Docker, MinIO built from source at a pinned release (no community images exist any more), its users and policies, the bucket setup command, and integration tests passing against it on all three clouds; a precision fix found by them (§23 notes).
 **Changes in v2.47:** §23 approved; V-1: `MinioBackup` behind the backup port, selected with `backup_mode=minio`, tested against an in-memory S3 that enforces Object Lock (§23 notes).
@@ -2667,7 +2668,7 @@ sequenceDiagram
 
 ## 20. Landing zone workflow: AWS Organizations OU structure with Control Tower controls
 
-**Status: rev 3 approved and implemented; §20.11 (OU tree editor) approved with changes (E1, E4); §20.12 (industry templates) is a design for review.** Mock: the *Landing zone* page in `mock-ui/index.html`.
+**Status: rev 3 approved and implemented; §20.11 (OU tree editor) approved with changes (E1, E4) and implemented; §20.12 (industry templates) approved and implemented.** Mock: the *Landing zone* page in `mock-ui/index.html`.
 
 **Inputs:**
 - AWS Prescriptive Guidance *OU structure in regulated AWS landing zones* (the attached document).
@@ -2869,7 +2870,7 @@ API (admin role required): `GET/PUT /v1/admin/landing-zone/questionnaire`, `POST
 
 ### 20.11 OU tree editor
 
-**Status: approved with changes (E1 allows root-level custom OUs; E4 disables accounts instead of removing them).**
+**Status: approved with changes (E1 allows root-level custom OUs; E4 disables accounts instead of removing them) and implemented.**
 
 After the questionnaire proposes a structure, a platform admin can adjust it on the Review step before requesting approval:
 - add custom OUs, under the root or inside an environment, Infrastructure or another custom OU
@@ -3948,7 +3949,7 @@ Delete steps: delete the Infrastructure Manager deployment (secondary region fir
 
 ### 22.10 MC-3 in detail: the Google Cloud landing zone
 
-**Status: approved (MC3-1…MC3-10 as recommended); implementation in progress.**
+**Status: approved (MC3-1…MC3-10 as recommended) and implemented.** Q1 waits for a real organization (MC3-4 deferred).
 
 **Goal.** An admin designs a Google Cloud landing zone with the same questionnaire, tree editor, industry templates and control packs as on AWS (§20). The platform then generates Terraform for Infrastructure Manager, gets it approved by a second admin, applies it, and fills the registries:
 - environment projects become account bindings;
@@ -4235,7 +4236,7 @@ The backup-account resolver for Google Cloud reads the applied landing zone's va
 
 ### 22.11 MC-4 in detail: Azure projects
 
-**Status: approved (MC4-1…MC4-10 as recommended); implementation in progress.**
+**Status: approved (MC4-1…MC4-10 as recommended) and implemented.** A1–A5 wait for a live subscription.
 
 **Goal.** A project on Azure goes through the same flows as on AWS and Google Cloud:
 - wizard, preview, provisioning;
@@ -4473,7 +4474,7 @@ Deny settings exclude only the deploy identity and the platform's teardown ident
 
 ### 22.12 MC-5 in detail: the Azure landing zone
 
-**Status: approved (MC5-1…MC5-12 as recommended); implementation in progress.**
+**Status: approved (MC5-1…MC5-12 as recommended) and implemented.** L1–L5 wait for a live tenant or the refresh script.
 
 **Goal.** An admin designs an Azure landing zone with the same questionnaire, tree editor, industry templates and control packs as on AWS and Google Cloud (§20, §22.10). The platform then generates ARM templates applied as deployment stacks, gets them approved by a second admin, applies them, and fills the registries:
 - environment subscriptions become account bindings;
